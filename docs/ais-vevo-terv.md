@@ -286,7 +286,117 @@ A vevő nem csak adatot ad – **adatarchívumot** épít, amit a termék késő
 
 ---
 
-## 10. Forráshivatkozások
+## 10. A Budapesti vevő – konkrét konfiguráció és értékelés
+
+**Terv (2026-11-14):** egyetlen vevő, Budapest, a parttól ~2 km-re, egy lakóház 3. emeletén. Hardver: Raspberry Pi 3B+ + RTL2832U USB dongle.
+
+### 10.1 A lefedettség – a konkrét számok
+
+| Elem | Érték |
+|---|---|
+| Antenna magassága (3. emelet) | ~10–12 m a vízszint felett |
+| Rádióhorizont a vevőtől | 4,12 × √12 ≈ **14,3 km** |
+| Rádióhorizont a hajótól (5 m antennával) | 4,12 × √5 ≈ **9,2 km** |
+| Teljes rádióhorizont | **~23,5 km** |
+| A parttól mért távolság | **−2 km** (a legközelebbi folyószakasz is 2 km-re van!) |
+| **Hasznos folyólefedettség** | **~15–20 km a folyó mentén, mindkét irányban** |
+
+**Két dolog, amit ez jelent:**
+
+1. **A 2 km távolság a látómező elejét „elvágja".** A vevő a hozzá legközelebbi 2 km folyószakaszt **nem látja** – pont azokat a hajókat, amelyek a kikötő közelében vannak. Ez a „luk" a katalógusban és a térképen is látszik majd.
+2. **A 3. emelet nem elég.** Ha az antenna a tető fölé kerül (3–5 m-rel magasabbra), a horizont 14,3 km-ről ~17 km-re nő, ami **+2–3 km mindkét irányban**. Ez olcsó és gyors nyereség.
+
+**Ellenőrizendő helyszínen:** ha a lakás a **budai oldalon** van, a **Gellért-hegy (210 m)** és a nyugati budai dombok takarhatják a kilátást bizonyos irányokban. A pesti oldal sík, ott nincs takarás. **Ez az első dolog, amit a telepítéskor nézni kell.**
+
+### 10.2 A rádió: az RTL2832U megfelel-e?
+
+**Igen, működik** – ez a szokásos DIY AIS-vevő, és az AIS mindkét csatornáját (161,975 / 162,025 MHz) fogja. **De négy konkrét korlát van, és mindegyik kezelhető:**
+
+| Korlát | Részlet | Megoldás |
+|---|---|---|
+| **Frekvenciapontatlanság** | A generikus DVB-T dongle frekvenciája több tíz ppm-rel elcsúszhat; **±3 ppm már rontja a dekódolást**, és hőmérséklet-változással tovább driftel | `rtl_test -p` kalibráció + **TCXO-s dongle** (RTL-SDR Blog V3, 0,5 ppm) – a kalibrációt nem kell hetente ismételni |
+| **Egycsatornás kényszer** | A szimpla, egy frekvenciára hangolt mód **csak egy AIS-csatornát** fogad | Használjunk **széles sávsávos (wideband) módot**: a két csatorna 50 kHz-re van egymástól, tehát egy 2,048 MS/s mintában **mindkettő benne van**, és digitálisan szétválasztható |
+| **Érzékenység** | Az R820T/R820T2 tuner 162 MHz-en nem optimális; a hatótáv a számított horizontnál **rövidebb** lesz | Aktív antenna (beépített LNA) vagy külső LNA + 162 MHz-es SAW szűrő (~20 EUR) |
+| **Túlterhelés és LO-leakage** | Erős közeli jel (pl. a parton álló hajó, egy közeli bázisállomás) leterítheti a dongle-t; a helyi oszcillátor szivárgása fantomcélokat okozhat | A dongle **távol az antennától**, kábel-szűrő a bemeneten, és **a gain ne legyen automatikus maximumon** |
+
+> **A fontos ajánlás:** a **kiértékeléshez ez a konfiguráció tökéletes** (a pipeline-t, a parsert, az adatbázist ezzel validáljuk). **Az éles vevőbe viszont valódi AIS-vevőt tennék**, nem az RTL donglet – lásd 10.4.
+
+### 10.3 A Raspberry Pi 3B+
+
+**Bőséges.** Az AIS-dekódolás loadja nevesebb (néhány ezer üzenet/perc), mint egyetlen lapos weboldal betöltése. Három dologra figyelj:
+
+| Téma | Megjegyzés |
+|---|---|
+| **SD-kártya kopás** | A folyamatos írás megyasztja. A Pi **ne írjon a kártyára**, hanem: nyers NMEA → hálózat (MQTT/VPN) a szerverre, helyben csak 1–2 óra buffer. Ha mégis helyi írás kell, USB-SSD |
+| **Tápellátás** | Pi 3B+ + USB-dongle + Wi-Fi: **5,1 V / 3 A** tápegység kell, különben brownout |
+| **Hő** | A dongle és a Pi is melegszik egy zárt szekrényben – szellőzés kell (a dongle túlmelegedhet) |
+
+### 10.4 Az éles vevő ajánlott összeállítása
+
+| Elem | Ajánlott | Ár (EUR) |
+|---|---|---|
+| **Vevő** | **Valódi AIS-vevő NMEA-kimenettel** – u-blox AIS modul (Class B transzponderből) vagy ethernetes/USB-s AIS-vevő | 70–150 |
+| Antenna | AIS-re hangolt 3/4 hullámos, ~1,2 m, tetőn 3–5 m-es oszlopon | 40–90 |
+| Szűrő | 162 MHz SAW sávszűrő (a LO-leakage és a túlterhelés ellen) | 15–25 |
+| Koax | RG-58/U (rövid), RG-213 (hosszabb) – minden dB kábelveszteség a hatótávból jön | 20–50 |
+| Számítógép | Pi 3B+ (megfelel) vagy Pi 4/5, ha helyben is fut valami | – |
+| Hálózat | Ethernet ha lehet, különben 4G; WireGuard/MQTT a központba | 15–40/hó |
+
+**Miért érdemes cserélni a donglet?**
+- **két csatorna** egyidejűleg, gondolkodás nélkül
+- **jóval nagyobb érzékenység** 162 MHz-en → a valós hatótáv közel a számított horizont
+- **nincs kalibráció**, nincs ppm-drift, nincs fájdalmas hangolás
+- **tiszta NMEA 0183 kimenet** → a szerveroldali parser nem függ az SDR-szoftvertől
+- a **megbízhatóság** üzleti kritérium: egy kieső éjszaka adatlyuk
+
+> **Kompromisszum:** a u-blox AIS modulok NMEA-t adnak ki, de **nem minden doboz adja ki a nyers belső (FI 10) üzeneteket** – ezt **vásárlás előtt ellenőrizni kell**: a vevőnek a teljes NMEA/AIVDM folyamot ki kell adnia, mert az ENI a belvízi FI 10 üzenetben van. A kérdés, amit a beszállítónak fel kell tenni: *„a kimenet tartalmazza-e az Inland AIS FI 10 (üzenet 8, FI=10) bináris üzeneteket?"*
+
+### 10.5 Szoftver
+
+| Szoftver | Értékelés |
+|---|---|
+| **AIS-catcher** | **Ajánlott.** Statisztikai felület (üzenet/óra, PPM-grafikon), JSON kimenet, **belvízi (FI 10) dekódolás**, webes felület a készüléken |
+| rtl_ais | működik, de nincs belvízi FI 10 dekódolás és nincs ilyen diagnosztika |
+| gpsd | a szerveroldali NMEA-fogadáshoz jó választás |
+
+**Kalibrálási folyamat (ez kötelező lépés a dongles telepítésnél):**
+1. `rtl_test -p` – 10 perc, a ppm-eltérés meghatározása
+2. `rtl_test` – a jel erősségének ellenőrzése a 162 MHz-en
+3. AIS-catcherben a `-p` érték beállítása, majd **a PPM-grafikon ellenőrzése 24 órán át** (a hőmérséklet-változás miatt)
+4. A gain manuális beállítása, túlterhelés ellenőrzése
+
+### 10.6 Amit egyetlen vevő jelent az R1-re
+
+**Őszinte értékelés:** egy budapesti vevő a **budapesti szakaszt** fedi le (jegyük Csepel–Szob–Bajai, ~25–35 km folyó). Ez **a legforgalmasabb szakasz**, de a teljes magyar Duna-flottának csak egy részét.
+
+| Lehetőség | Értékelés |
+|---|---|
+| **A. Egy saját vevő + S-AIS feed a többi szakaszra** | **Ajánlott.** A saját vevő adja a jó minőségű budapesti adatot + a **referenciát** (ground truth), amivel a feed ellenőrizhető. A feed a hiányzó szakaszokat hozza, ahol a S-AIS elég |
+| B. Egy saját vevő + később 2–3 további site | A végállapot, de a ~2 500–5 000 EUR beruházás egy későbbi döntés |
+| C. Csak egy saját vevő, nincs feed | A katalógus a **budapesti szakaszra** korlátozódik – ez egy **regionális szolgáltatás**, nem „a Dunáról szóló katalógus". Őszintén ezt kell kommunikálni, nem úgy mutatni, mintha az egész folyó lefedett |
+
+**A lényeg, amit a vevőépítés hoz:** a saját vevő nem csak adat, hanem **mérőműszer**. Ha a Budapesti vevő működik, onnantól **minden további site egy másolás**, és a S-AIS feed minőségét is tudjuk validálni.
+
+### 10.7 Működési rend a gyakorlatban
+
+```
+[antenna tetőn] → [162 MHz szűrő] → [koax] → [AIS vevő] → [Pi: AIS-catcher] → [MQTT/WireGuard] → [szerver]
+                                                     ↓
+                                              helyi buffer (1-2 óra, memóra)
+```
+
+| Elem | Felelősség |
+|---|---|
+| Antenna + szűrő | a ház tulajdonosa (tető) |
+| Vevő + Pi | a projekt |
+| Hálózat (4G/Ethernet) | a projekt |
+| Szerver (ingest + Postgres) | a projekt |
+
+**A vevő kiesése észlelhető:** a heartbeat 5 percenként megy, és a `last_seen_at` a `ais_receiver_site` táblában figyelt → a kiesés riasztás, nem néma adatveszteség.
+
+---
+
+## 11. Forráshivatkozások
 
 - MarineTraffic – AIS vevőállomás telepítése (antenna magasság, hatótáv, „csak állandó áram és stabil internet kell") – [MT támogatás](https://support.marinetraffic.com/en/articles/9552957-how-to-install-an-ais-station)
 - MarineTraffic – AIS vevőállomások: a vevő nem sugároz, bárki üzemeltetheti – [MT támogatás](https://support.marinetraffic.com/en/articles/9552994-ais-receiving-stations)
@@ -295,3 +405,6 @@ A vevő nem csak adatot ad – **adatarchívumot** épít, amit a termék késő
 - Directive 2002/59/EK + 2014/100/EU – hajófelügyeleti rendszer (VTMIS) és az adatok hozzáférhetősége – [EUR-Lex](http://www.eur-lex.europa.eu/legal-content/EN/TXT/?uri=celex:32014L0100)
 - Bizottsági javaslat a River Information Services-irányelvhez (2004) – a RIS-alkalmazások áttekintése, **DoRIS** (osztrák Duna-risz), a forgalmi adatok központi tárolása és az XML-interfész külső logisztikai szerverekhez – [EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=celex:52004PC0392)
 - Commission Regulation (EC) No 415/2007 – belvízi AIS, a belső FI 10 üzenet tartalma – [EUR-Lex](https://www.legislation.gov.uk/eur/2007/415/adopted/data.xht)
+- MarineTraffic – DVB-T stick használata AIS-vevőként: **egyszerre csak egy AIS-csatorna** a hangolt módban, frekvenciakorrekció szükséges, az antenna csatlakozója számít – [MT támogatás](https://support.marinetraffic.com/en/articles/9552960-how-to-build-an-ais-station-with-sdr-dvb-t)
+- AIS-catcher – a PPM-eltérés mérésének és finomhangolásának gyakorlata, a ppm-drift hőmérsékletfüggése – [AIS-catcher](https://github.com/jvde-github/AIS-catcher/discussions/75)
+- RTL-SDR Blog V3 – TCXO-s, 0,5 ppm stabilitású vevő (a frekvenciakorrekció elhagyható) – [rtl-sdr.com](https://www.rtl-sdr.com/rtl-sdr-v3/)

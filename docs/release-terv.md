@@ -132,7 +132,7 @@ Az R1-0 nem nyilvános release, de **a projekt legfontosabb időablaka**: ha itt
 
 | Kockázat | Valószínűség | Hatás | Mitigáció |
 |---|---|---|---|
-| **A saját vevő lefedettsége nem elég** a teljes magyar Duna-szakaszra | közepes | a katalógusban hiányzó hajók | A **30 napos próbavevős mérés** (Budapest) a go/no-go: ha nem éri el a magyar flotta 50%-át, F1 helyett S-AIS feed + vevő hibrid; a telephelyek számát a mérésből méretezjük |
+| **Egyetlen vevő csak a budapesti szakaszt fedi le** | biztos | a katalógus a teljes Duna helyett csak egy szakaszon lenne teljes | **A vevő referenciaként szolgál**: a hozzá tartozó S-AIS feed a hiányzó szakaszokat hozza, és a mérés ellenőrzi a feed minőségét. A célállapot 3–4 további site (a vevőépítés másolható) |
 | **A telephelyek engedélyezése elakad** | közepes | egy site csúszik, a hálózat építése lassul | Minden site-hoz 2–3 tartalék telephely; a kikötők és vízügyi objektumok a legegyszerűbbek |
 | **A statikus adatok csak hetek-hónapok alatt gyűlnek össze** | biztos | az R1 indulása csúszik | Az **R1-0 előkészítő fázis** (3–6 hónap) a terv része, nem egy plusz |
 | A „fantom" hajók (szárazföldi pozíciók) bekerülnek a katalógusba | magas | hitelességi probléma | Pozícióalapú szűrő kötelező a pipeline-ban, a folyó geometriáján belül |
@@ -146,7 +146,7 @@ Az R1-0 nem nyilvános release, de **a projekt legfontosabb időablaka**: ha itt
 
 | Sprint | Tartalom | Kimenetel |
 |---|---|---|
-| 0. (R1-0) | **Saját AIS vevő: próbavevő + 30 napos mérés + F1 site-ek**, parser (Msg 5 + Inland FI 10), „fantom"-szűrő, statikus gyűjtés – részletek: [`ais-vevo-terv.md`](ais-vevo-terv.md) | Folyamatosan bővülő AIS-adatbázis |
+| 0. (R1-0) | **Saját AIS vevő a Budapesten** (antenna a tetőn, valódi AIS-vevő, Pi), 30 napos mérés, parser (Msg 5 + Inland FI 10), „fantom"-szűrő – részletek: [`ais-vevo-terv.md`](ais-vevo-terv.md) 10. fejezet | Folyamatosan bővülő AIS-adatbázis (a budapesti szakaszra) |
 | 1. | Séma, fordítási infrastruktúra, projekt-alapozás (CI, környezetek, migrációk) | Adatbázis váz, nyelvi kulcsok |
 | 2. | **Adatfeldolgozás és -bevitel** (AIS-ból), „fantom"-szűrés, üzemeltetői claim, szerkesztői felület v1 | Valós adat a DB-ben |
 | 3. | Katalóguslista, szűrés, rendezés, kereső, hajóadatlap | Működő katalógus (belső) |
