@@ -1,8 +1,13 @@
 # Dunai hajókövető – adatbázis terv
 
-**Verzió:** 1.0 (2026-11-14)
+**Verzió:** 1.1 (2026-11-14)
 **Hatály:** a készülő weboldal és mobilapplikáció közös, háttérben futó adatbázise
 **Nyelvek:** magyar (hu) · német (de) · angol (en)
+**Területek:** Duna-rendszer és Balaton-tó – elkülönítve (2.10 fejezet)
+
+**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+
+**v1.1 változás:** Balaton elkülönítése (terület-diszcriminátor, `vessel_identifier` mellék-tábla, szezon- és menetrend-táblák), valamint az első release (R1) katalógus-központú igényéhez igazított azonosítási modell.
 
 ---
 
@@ -13,6 +18,7 @@
 | Adatbázis-motor | **PostgreSQL 16 + PostGIS 3.4** | Erős relációs modell, kiforrott geospatial (Pont/LineString), partícionálás, JSONB, szabványos SQL, olcsó üzemeltetés |
 | Földrajzi modell | PostGIS `geometry(Point,4326)` + **folyó-km** (`river_km`) első osztályú attribútumként | A Dunán a „hová tartasz" kérdés a km-hez képest értelmezhető; a GPS-koordináta önmagában nem elég |
 | Hajóazonosítás | **ENI** (8 jegyű, EU-s belvízi hajószám) elsődleges kulcs, **MMSI** másodlagos | Az ENI az élete végéig állandó (2016/1629/EU irányelv 18. cikk), az MMSI újrakiosztható |
+| Területi elkülönítés | A `vessel.operating_area` mező választja el a **Dunát** és a **Balatont**, külön azonosító-táblával | A Balaton-hajóknak nincs ENI-jük, a hajószámuk a kulcs; egyetlen „összes hajó" lista félrevezető lenne (lásd 13. fejezet) |
 | Fő nyelvi modell | Fordítás **mellék-táblákban** (`*_i18n`), nem `name_hu/name_de/name_en` oszlopokban | A fordítandó mezők száma és halmaza entitásonként változik; 3 nyelv esetén 40+ táblánál a „nulla vagy három" oszlopminta karbantartási réteget |
 | Élő adat | AIS-pozíció **előzménnyel**, havi partícionálással, 30 s → 5 perc → 1 óra felbontás-lépcsővel | 1 perc feletti pontosság a térképen nem látszik, viszont a tárolás 10×-es |
 | Konvoj | Külön `convoy` / `convoy_member` modell | A Duna flotta ~82%-a **bárka**, aminek nincs saját AIS-e; a pozíciót a toló/vontató adja |
@@ -156,6 +162,43 @@ Nyelvkatalógus, ország, mértékegység-konverzió, valuta + devizaárfolyam, 
 | Felhasználó, figyelőlista | Dinamikus | Iskola méretű | – | ✅ |
 | Vízállás | Idősor | ~30 mérőállomás × 10 perces | – | ✅ |
 
+### 2.10 A Balaton elkülönítése (v1.1 módosítás)
+
+A katalógus két területet kezel, amelyek **nem ugyanazokkal az azonosítókkal és más szezonlogikával** működnek. A séma ezt az alábbiak szerint kezeli.
+
+**a) Terület-diszcriminátor:** a `vessel.operating_area` (`duna` | `balaton`) minden hajót, kikötőt, útvonalat és szűrőt egyértelműen hozzárendel a területhez. A katalógus soha nem mutat vegyes listát.
+
+**b) Azonosítók – a `vessel_identifier` mellék-tábla:** az `eni` oszlop a `vessel` táblából nem törlődő, hanem **részleges egyediségű** lesz (`WHERE eni IS NOT NULL`), és megjelennek a további azonosítók is:
+
+| `identifier_type` | Duna | Balaton | Forrás |
+|---|---|---|---|
+| `eni` | ✅ kötelező | ❌ nincs | ENI-nyilvántartás |
+| `imo` | ✅ ha van | ✅ ha van | hajószám-adatbázis |
+| `mmsi` | ✅ | ⚠️ nagyhajóknál | AIS |
+| `callsign` (nemzetközi hajószám) | ✅ | ✅ kötelező nagyhajónál | hajószám-adatbázis |
+| `national_reg_no` (nemzeti hajónyilvántartási szám) | – | ✅ | Közlekedési Hatóság |
+| `internal_code` (belső kód) | ✅ | ✅ | szerkesztői |
+
+**c) A Balaton-tó a vízút-hierarchiában:** `waterway` (`type = 'lake'`) → három `basin` (nyugati / keszthelyi-öböl, középső / balatonszemesi, keleti / siófoki). A `river_section` a Dunára használatos fogalom (folyó-km alapú); a Balatonon a **`partkm`** (a Siófoki-kőtől mért partkilométer) és a **medence** a megfelelő választó. A `position` táblához ezért külön `basin_id` és `shoreline_km` mező kerül a `river_km` mellé (mindkettő nullable).
+
+**d) Kikötők:** a Duna `port` rekordjaihoz `port_type = 'marina'` típusú Balaton-kikötők társulnak, a `marina` kiegészítő táblával (rendkívüli horgonyzási lehetőség, védett hely, kikötőrend hivatkozás, üzemeltető).
+
+**e) Szezon:** a `vessel_service_period` tábla a Balatoni hajók éves közlekedési időszakát írja le (`season_start`, `season_end`, `service_status`), a Duna-hajóknál pedig a tábla üres (egész éves üzem). A Balaton-katalógus „szezonban közlekedik" állapota innen jön.
+
+**f) Menetrend:** a `vessel_schedule` tábla a Balatoni hajók heti menetrendjét tartalmazza (`weekday`, `departure_time`, `route_id`, `valid_from`, `valid_to`), R3-től használva.
+
+**g) Adatkör-mátrix kiegészítése:**
+
+| Adatkör | Terület | Várható méret | Kötelező |
+|---|---|---|---|
+| `basin` (Balaton-medencék) | Balaton | 3 | igen |
+| `marina` (balatoni kikötők) | Balaton | 70–80 | igen |
+| `vessel_service_period` (szezon) | Balaton | ~200 | igen |
+| `vessel_schedule` (menetrend) | Balaton | ~2000 | R3 |
+| `vessel_identifier` | mindkettő | ~4 000 | igen |
+
+**Adatvédelmi megjegyzés:** a Balatoni kisgéphajók és vitorlások adatai közérdeklődésű nyilvántartásból származnak, a személyhajók adatai pedig a hatósági nyilvántartásból – mindkettő nyilvános jellegű. Személyes adatot (kapitány, tulajdonos magánszemély) egyik forrás sem tartalmaz, ezért a `vessel` entitás ezeket nem is őrizheti.
+
 ---
 
 ## 3. Logikai modell
@@ -266,6 +309,8 @@ erDiagram
 | `terminal` | `id` PK, `port_id` FK, `operator_id` FK, `annual_capacity_t`, `storage_capacity_t`, `rail_access` bool, `gear_types` text[] | |
 | `gauge` | `id` PK, `code` UQ, `waterway_id` FK, `river_km`, `country_code`, `datum` | |
 | `gauge_i18n` | PK(`gauge_id`,`lang`), `name` | |
+| `basin` | `id` PK, `waterway_id` FK, `code` UQ, `name_key`, `geo_extent` | Balatoni vízmedence (nyugati/középső/keleti); `basin_i18n` |
+| `marina` | `id` PK, `port_id` FK, `operator_id` FK, `anchoring_allowed` bool, `protected_shore` bool, `berth_count`, `notice_ref` | Balatoni kikötő kiegészítő adatai; a kikötőrend hivatkozása a `notice` táblához mutat |
 | `water_level` | `gauge_id`, `ts`, `level_cm` | Partícionált havonta, `BRIN(ts)` |
 | `route` | `id` PK, `code` UQ, `origin_port_id` FK, `dest_port_id` FK, `distance_km`, `typical_duration_h`, `cargo_types` text[] | Pl. `RTM-BUD` |
 | `route_stop` | `route_id` FK, `seq`, `port_id` FK, `typical_offset_h` | PK(`route_id`,`seq`) |
@@ -277,13 +322,16 @@ erDiagram
 
 | Tábla | Oszlopok (típus) | Megjegyzés |
 |---|---|---|
-| `vessel` | `id` PK, `eni` UQ char(8), `imo` UQ-null char(7), `mmsi` UQ-null, `callsign`, `vessel_type_id` FK, `flag_country_code` FK, `operator_id` FK, `home_port_id` FK, `build_year`, `length_m`, `beam_m`, `draught_max_m`, `gross_tonnage`, `deadweight_t`, `teu`, `power_kw`, `ais_class` (A/B/C), `status` (active/inactive/scrapped), `is_passenger_certified`, `passenger_capacity`, `source_id` FK, `valid_from`, `valid_to`, `updated_at` | `valid_from/valid_to`: temporális táblázat a hajónév- és státuszváltozásokhoz |
+| `vessel` | `id` PK, `eni` UQ-null char(8), `imo` UQ-null char(7), `mmsi` UQ-null, `callsign`, `vessel_type_id` FK, `operating_area` (duna/balaton), `flag_country_code` FK, `operator_id` FK, `home_port_id` FK, `build_year`, `length_m`, `beam_m`, `draught_max_m`, `gross_tonnage`, `deadweight_t`, `teu`, `power_kw`, `ais_class` (A/B/C), `status` (active/inactive/scrapped), `is_passenger_certified`, `passenger_capacity`, `source_id` FK, `valid_from`, `valid_to`, `updated_at` | A Duna-hajóknál az `eni` kötelező, a Balaton-hajóknál üres – ezért az `eni` egyediség csak részleges indexként (`WHERE eni IS NOT NULL`) érvényes; a többi azonosító a `vessel_identifier` mellék-táblában (13. fejezet). `valid_from/valid_to`: temporális táblázat a hajónév- és státuszváltozásokhoz |
 | `vessel_i18n` | PK(`vessel_id`,`lang`), `name`, `description` | |
 | `vessel_alias` | `id` PK, `vessel_id` FK, `name`, `name_type` (former/official/shipyard), `valid_from`, `valid_to` | |
 | `vessel_cert` | `id` PK, `vessel_id` FK, `cert_type`, `authority`, `issued_at`, `expires_at`, `document_ref` | |
 | `operator` | `id` PK, `legal_name`, `country_code`, `website`, `founded` | `operator_i18n` |
 | `convoy` | `id` PK, `lead_vessel_id` FK, `convoy_type`, `formed_at`, `dissolved_at`, `status` | |
 | `convoy_member` | PK(`convoy_id`,`vessel_id`), `role` (lead/push/barge/towed), `position_in_unit` | A bárka-sorrend a fizikai becsléshez kell |
+| `vessel_identifier` | `id` PK, `vessel_id` FK, `identifier_type` (eni/imo/mmsi/callsign/national_reg_no/internal_code), `value`, `is_primary`, `valid_from`, `valid_to`, `source_id` FK | Területenként eltérő azonosítók (13. fejezet); egyértelműség: egy típusra egy aktív érték |
+| `vessel_service_period` | `id` PK, `vessel_id` FK, `season_start`, `season_end`, `service_status` (seasonal/year_round/suspended), `source_id` FK | Balatoni szezonlogika; a Duna-hajóknál `year_round` |
+| `vessel_schedule` | `id` PK, `vessel_id` FK, `route_id` FK, `weekday`, `departure_time`, `valid_from`, `valid_to` | Balatoni heti menetrend (R3) |
 
 #### C) Pozíció és időbeli adatok
 
@@ -677,6 +725,9 @@ Minden a felhasználó által módosítható referenciaadat-változás az `audit
 | 6 | **Vízállás-adatforrás?** (DWD, MAHST, ICPDR, nemzeti szolgáltatók) | A vízállás-tábla és a szárazállási riasztások |
 | 7 | **ETA-szolgáltatás vállal-e felelősséget?** | Jogi disclaimer, konfidencia-kijelzés |
 | 8 | **Adatvédelmi és terjesztési feltételek a felhasználók felé?** | Terms of Service, adatforrás-nyilatkozat |
+| 9 | **A Balatoni hajólista forrása és terjedése?** (Közlekedési Hatóság nyilvántartás + üzemeltetői listák, vagy csak üzemeltetők) | Az R1 katalógus teljessége; a `vessel_identifier.national_reg_no` kitöltöttsége |
+| 10 | **A katalógusba kerüljenek-e a vitorlások és a kishajók is?** (Balatonon több száz vitorlás van) | A `vessel_type` kódkészlet, a katalógus mérete, az adatminőség |
+| 11 | **A nem közlekedő hajók (állandóan álló, eladásra váró) látszanak-e a katalógusban?** | A `vessel.status` megjelenítési szabálya |
 
 ---
 
@@ -697,18 +748,19 @@ Minden a felhasználó által módosítható referenciaadat-változás az `audit
 | # | Tábla | szerepe |
 |---|---|---|
 | 1 | `vessel` | A hajó statikus adatai, ENI-vel azonosítva |
-| 2 | `vessel_i18n` | A hajónév három nyelven |
-| 3 | `position` | Élő pozíciók, havi partíciókban |
-| 4 | `convoy` + `convoy_member` | Vontatási egységek – a bárkák pozíciójának magyarázata |
-| 5 | `port` (+`port_i18n`) | Kikötők, terminálok, állások |
-| 6 | `lock` (+`lock_i18n`) | Zsilipok, a Duna szűk keresztmetszetei |
-| 7 | `river_section` | Folyószakaszok km és kockázat szerint |
-| 8 | `voyage` + `voyage_stop` | Egy hajó útja kikötőtől kikötőig |
-| 9 | `lock_passage` | Várakozás és áthaladás – a Duna legfontosabb szűk keresztmetszete |
-| 10 | `eta_prediction` | Érkezés-becslés, verziózva |
-| 11 | `content_key` + `content_text` | Minden felhasználó szöveg, három nyelven, státusszal |
-| 12 | `watchlist` + `alert_rule` + `alert_event` | A felhasználó figyelme és az értesítések |
+| 2 | `vessel_identifier` | Területenként eltérő azonosítók (ENI / hajószám / IMO / MMSI) |
+| 3 | `vessel_i18n` | A hajónév három nyelven |
+| 4 | `position` | Élő pozíciók, havi partíciókban |
+| 5 | `convoy` + `convoy_member` | Vontatási egységek – a bárkák pozíciójának magyarázata |
+| 6 | `port` (+`port_i18n`) | Kikötők, terminálok, állások |
+| 7 | `lock` (+`lock_i18n`) | Zsilipok, a Duna szűk keresztmetszetei |
+| 8 | `river_section` | Folyószakaszok km és kockázat szerint |
+| 9 | `voyage` + `voyage_stop` | Egy hajó útja kikötőtől kikötőig |
+| 10 | `lock_passage` | Várakozás és áthaladás – a Duna legfontosabb szűk keresztmetszete |
+| 11 | `eta_prediction` | Érkezés-becslés, verziózva |
+| 12 | `content_key` + `content_text` | Minden felhasználó szöveg, három nyelven, státusszal |
+| 13 | `watchlist` + `alert_rule` + `alert_event` | A felhasználó figyelme és az értesítések |
 
 ---
 
-*Ez a dokumentum a séma tervét rögzíti. Bármelyik pont pontosítható a 10. fejezet nyitott kérdéseinek megválaszolása után; a séma v1.0 verziója a fázisok szerinti megvalósításkor készül el.*
+*Ez a dokumentum a séma tervét rögzíti. Bármelyik pont pontosítható a 10. fejezet nyitott kérdéseinek megválaszolása után; a séma v1.1 verziója a release terv szerinti megvalósításkor készül el.*
