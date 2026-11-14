@@ -3,7 +3,7 @@
 **Verzió:** 1.0 (2026-11-14)
 **Hardver:** Raspberry Pi 3B+ · Budapest, 3. emelet
 **Láncok:** AIS (162 MHz, hajós) + ADS-B (1090 MHz, légi)
-**Kapcsolódó:** [`ais-vevo-terv.md`](ais-vevo-terv.md) (10. fejezet: a budapesti vevő) · [`r1-adat-terv.md`](r1-adat-terv.md)
+**Kapcsolódó:** [`ais-vevo-terv.md`](ais-vevo-terv.md) (10. fejezet: a budapesti vevő) · [`ingest-terv.md`](ingest-terv.md) (hogyan jut el az adat a Pi-ről az adatbázisba) · [`r1-adat-terv.md`](r1-adat-terv.md)
 
 ---
 

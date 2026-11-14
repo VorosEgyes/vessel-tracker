@@ -130,6 +130,8 @@ Ha a telephely nem ad magas antenna helyet, a vevő a házban van, és csak az a
 
 ## 4. Szoftver és adatút
 
+> **A konkrét átvitel, a broker-konfiguráció, az ACL-ek és a központi ingest lépései:** [`ingest-terv.md`](ingest-terv.md). Az alábbiak a nagyvonalú vázlat.
+
 ```
 [vevő telephely]
   AIS vevő → NMEA 0183 (UDP/5000 vagy USB) → helyi buffer (60 perc)
