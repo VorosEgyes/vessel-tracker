@@ -224,15 +224,18 @@ A `station_id` mező egyébként is a `data_source`-hoz köti a site-ot (az `ais
 
 | Mutató | Becslés (budapesti vevő) |
 |---|---|
-| Üzenet | ~30–60 üzenet/mperc (a Duna budapesti szakaszának forgalma) |
+| Üzenet | **~150–350 üzenet/mperc** átlagban (a teljes flotta ~2 millió üzenet/nap, a budapesti szakasz ennek 10–25%-a); csúcsidőben a duplája |
 | Payload (JSON_FULL) | ~500–800 B |
-| **Sávszélesség** | **~0,2–0,5 Mbit/s** – a házi internet bármilyen formájában elviseli |
-| Napi adat | ~100–200 MB MQTT-forgalom |
+| **Sávszélesség (átlag)** | **~15–35 kbit/s** – a házi internet bármilyen formájában elviseli |
+| Sávszélesség (csúcs) | ~100 kbit/s |
+| Napi adat | ~175–420 MB MQTT-forgalom |
 | Broker terhelés | egy vCPU-s VPS-en is kisebb 1% |
-| Központi ingest írás | ~2 millió sor/nap a `position`-be (havi partíció, BRIN index) |
+| Központi ingest írás | ~0,3 millió pozíció/nap a `position`-be (havi partíció, BRIN index) |
 | Pi írás a kártyára | **nulla** – minden a helyi SQLite-ba megy, az is USB-SSD-re |
 
-> **A sávszélesség nem a szűk keresztmetszet.** A szűk keresztmetszet a **központi Postgres írási sebessége** és a **partíciózás** – ezt az R1 adat-terv és az adatbázis-terv 5. fejezete kezeli.
+> **A számítás forrása:** az adatbázis-terv 5.1 fejezete ~700 napi aktív hajót és ~30 s-os üzenetközt intervalumot feltételez, ami a teljes Dunán ~2,0 millió üzenet/nap. Egyetlen budapesti vevő ennek 10–25%-át látja.
+>
+> **A sávszélesség nem a szűk keresztmetszet.** A szűk keresztmetszet a **központi Postgres írási sebessége** és a **partíciózás** – ezt az R1 adat-terv és az adatbázis-terv 5. fejezete kezeli. A **valós** üzenetszámot a 30 napos mérés adja meg; addig ez becslés.
 
 ---
 
