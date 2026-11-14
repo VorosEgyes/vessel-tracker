@@ -1,0 +1,132 @@
+%%{init: {"theme": "neutral", "flowchart": {"htmlLabels": true}}}%%
+%% Duna hajokoveto - core logikai modell
+%% Rendereles: mermaid.live vagy VS Code Mermaid Preview
+erDiagram
+    WATERWAY        ||--o{ RIVER_SECTION     : "szakaszai"
+    WATERWAY        ||--o{ PORT              : "part"
+    WATERWAY        ||--o{ GAUGE             : "meroes"
+    COUNTRY         ||--o{ PORT              : "orszaga"
+    COUNTRY         ||--o{ VESSEL            : "zaszlo"
+
+    VESSEL_TYPE     ||--o{ VESSEL            : "tipusu"
+    OPERATOR        ||--o{ VESSEL            : "uzemelteti"
+    OPERATOR        ||--o{ TERMINAL          : "uzemelteti"
+    OPERATOR        ||--o{ LOCK              : "uzemelteti"
+
+    PORT            ||--o{ BERTH             : "kotok"
+    PORT            ||--o{ TERMINAL          : "terminalai"
+    PORT            ||--o{ LOCK              : "zsilipei"
+    PORT            ||--o{ VOYAGE_STOP       : "megallok"
+
+    VESSEL          ||--o{ VESSEL_I18N       : "nevei"
+    VESSEL          ||--o{ VESSEL_ALIAS      : "korabbi nevei"
+    VESSEL          ||--o{ VESSEL_CERT       : "engedelyei"
+    VESSEL          ||--o{ POSITION          : "poziciok"
+    VESSEL          ||--o{ VOYAGE            : "utazasok"
+    VESSEL          ||--o{ CONVOY_MEMBER     : "konvojtag"
+    VESSEL          ||--o{ AIS_GAP           : "jelvesztes"
+    VESSEL          ||--o{ WATCHLIST         : "figyelt"
+
+    CONVOY          ||--o{ CONVOY_MEMBER     : "tagjai"
+
+    DATA_SOURCE     ||--o{ POSITION          : "forras"
+    DATA_SOURCE     ||--o{ AIS_MESSAGE_RAW   : "forras"
+
+    VOYAGE          ||--o{ VOYAGE_STOP       : "megallok"
+    VOYAGE          ||--o{ VOYAGE_CARGO      : "rakomany"
+    VOYAGE          ||--o{ LOCK_PASSAGE      : "zsilipeatjaras"
+    VOYAGE          ||--o{ ETA_PREDICTION    : "becsles"
+
+    LOCK            ||--o{ LOCK_PASSAGE      : "atjaras"
+    LOCK            ||--o{ LOCK_STATUS       : "allapot"
+
+    GAUGE           ||--o{ WATER_LEVEL       : "vizallas"
+    ROUTE           ||--o{ ROUTE_STOP        : "megalloi"
+    PORT            ||--o{ ROUTE_STOP        : "megalloi"
+
+    VESSEL {
+        bigint id PK
+        char eni UK "8 jegy EU hajószám"
+        char imo UK "nulla hajnal"
+        int mmsi UK "AIS azonosito"
+        string callsign
+        bigint vessel_type_id FK
+        bigint operator_id FK
+        bigint home_port_id FK
+        numeric length_m
+        numeric beam_m
+        numeric draught_max_m
+        numeric deadweight_t
+        int teu
+        string status
+        date valid_from
+        date valid_to
+    }
+
+    POSITION {
+        bigint vessel_id PK
+        timestamptz ts PK
+        geometry geom "Point 4326"
+        numeric sog_mps
+        numeric cog_deg
+        numeric heading_deg
+        string nav_status
+        string source_kind "ais derived manual"
+        bigint source_id FK
+        numeric river_km "denormalizalt"
+        int lat_e7
+        int lon_e7
+    }
+
+    VOYAGE {
+        bigint id PK
+        bigint vessel_id FK
+        bigint convoy_id FK
+        bigint origin_port_id FK
+        bigint dest_port_id FK
+        string status
+        timestamptz planned_departure
+        timestamptz actual_departure
+        timestamptz planned_arrival
+        timestamptz actual_arrival
+        string source
+    }
+
+    PORT {
+        bigint id PK
+        string code UK
+        string unlocode UK
+        string port_type
+        bigint waterway_id FK
+        string country_code FK
+        numeric river_km
+        geometry geom
+    }
+
+    LOCK {
+        bigint id PK
+        bigint port_id FK
+        string code UK
+        int chamber_count
+        numeric chamber_length_m
+        numeric chamber_width_m
+        numeric max_draft_m
+        bigint operator_id FK
+        numeric avg_transit_min
+    }
+
+    CONVOY {
+        bigint id PK
+        bigint lead_vessel_id FK
+        string convoy_type
+        timestamptz formed_at
+        timestamptz dissolved_at
+        string status
+    }
+
+    CONVOY_MEMBER {
+        bigint convoy_id PK
+        bigint vessel_id PK
+        string role "lead push barge towed"
+        int position_in_unit
+    }

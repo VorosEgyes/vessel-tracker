@@ -1,0 +1,152 @@
+%%{init: {"theme": "neutral", "flowchart": {"htmlLabels": true}}}%%
+%% Duna hajokoveto - tartalom, forditas (i18n) es felhasznalo modell
+erDiagram
+    LANGUAGE        ||--o{ CONTENT_TEXT      : "forditas"
+    CONTENT_KEY     ||--o{ CONTENT_TEXT      : "verzioi"
+    CONTENT_KEY     ||--o{ TRANSLATION_TASK  : "forditasa"
+    APP_USER        ||--o{ TRANSLATION_TASK  : "fordito"
+
+    VESSEL          ||--o{ VESSEL_I18N       : "nev"
+    PORT            ||--o{ PORT_I18N         : "nev"
+    LOCK            ||--o{ LOCK_I18N         : "nev"
+    VESSEL_TYPE     ||--o{ VESSEL_TYPE_I18N  : "nev"
+    CARGO_TYPE      ||--o{ CARGO_TYPE_I18N   : "nev"
+    WATERWAY        ||--o{ WATERWAY_I18N     : "nev"
+    RIVER_SECTION   ||--o{ RIVER_SECTION_I18N : "nev"
+
+    NOTICE          ||--o{ NOTICE_I18N       : "cim"
+    NOTICE_TYPE     ||--o{ NOTICE_I18N       : "kategoriak"
+    EVENT           ||--o{ EVENT_I18N        : "leiras"
+    EVENT_TYPE      ||--o{ EVENT_I18N        : "kategoriak"
+    ARTICLE         ||--o{ ARTICLE_I18N      : "szoveg"
+    ARTICLE_CATEGORY||--o{ ARTICLE          : "kategoriak"
+    ROUTE           ||--o{ ROUTE_I18N        : "nev"
+
+    APP_USER        ||--o{ WATCHLIST         : "figyelolista"
+    APP_USER        ||--o{ ALERT_RULE        : "szabalyok"
+    APP_USER        ||--o{ DEVICE_TOKEN      : "eszkozok"
+    APP_USER        ||--o{ TRIP_PLAN         : "utazastervek"
+    APP_USER        ||--o{ POSITION_REPORT   : "helyzetjelentesek"
+    APP_USER        ||--o{ FEEDBACK          : "visszajelzes"
+    APP_USER        ||--o{ AUDIT_LOG         : "muveletei"
+
+    ALERT_RULE      ||--o{ ALERT_EVENT       : "kivaltja"
+    VESSEL          ||--o{ ALERT_EVENT       : "erintett hajo"
+    VOYAGE          ||--o{ ALERT_EVENT       : "erintett utazas"
+
+    API_CLIENT      ||--o{ API_KEY           : "kulcsai"
+    DATA_SOURCE     ||--o{ DATA_QUALITY_EVENT: "minoseg"
+    DATA_SOURCE     ||--o{ NOTICE            : "forras"
+    DATA_SOURCE     ||--o{ EVENT             : "forras"
+
+    CONTENT_KEY {
+        string key PK "domain.entity.field"
+        string domain
+        string description
+        string source_lang
+        bool is_placeholder
+    }
+
+    CONTENT_TEXT {
+        string content_key PK
+        string lang PK "hu de en"
+        text text
+        string status "draft review published"
+        bigint author_id FK
+        bigint reviewed_by FK
+        timestamptz updated_at
+    }
+
+    VESSEL_I18N {
+        bigint vessel_id PK
+        string lang PK
+        string name
+        text description
+    }
+
+    NOTICE {
+        bigint id PK
+        string notice_type FK
+        string source_authority
+        string source_url
+        string reference_no
+        timestamptz valid_from
+        timestamptz valid_to
+        numeric river_km_from
+        numeric river_km_to
+        geometry geom
+        string severity
+    }
+
+    EVENT {
+        bigint id PK
+        string event_type FK
+        string severity
+        geometry geom
+        numeric river_km
+        timestamptz starts_at
+        timestamptz ends_at
+        bigint port_id FK
+        bigint vessel_id FK
+        bigint source_id FK
+    }
+
+    ARTICLE {
+        bigint id PK
+        string slug UK
+        bigint category_id FK
+        bigint author_id FK
+        timestamptz published_at
+        string status
+    }
+
+    APP_USER {
+        bigint id PK
+        string email UK
+        string display_name
+        string locale "hu de en"
+        string unit_system
+        string auth_provider
+        string auth_subject UK
+        string status
+        timestamptz created_at
+    }
+
+    WATCHLIST {
+        bigint user_id PK
+        bigint vessel_id PK
+        string notify_channel
+        jsonb filters
+        timestamptz created_at
+    }
+
+    ALERT_RULE {
+        bigint id PK
+        bigint user_id FK
+        string rule_type
+        jsonb params
+        text_array channels
+        bool enabled
+    }
+
+    ALERT_EVENT {
+        bigint id PK
+        bigint rule_id FK
+        bigint vessel_id FK
+        bigint voyage_id FK
+        timestamptz triggered_at
+        jsonb payload
+        string channel
+        string delivery_status
+    }
+
+    TRIP_PLAN {
+        bigint id PK
+        bigint user_id FK
+        string name
+        bigint origin_port_id FK
+        bigint dest_port_id FK
+        timestamptz depart_after
+        text_array vessel_type_filter
+        string share_slug UK
+    }
