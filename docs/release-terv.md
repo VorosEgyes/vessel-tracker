@@ -60,7 +60,7 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 | Nincs | Miért | Mikor |
 |---|---|---|
 | **Térkép** | A felhasználó kérése; a katalógus önmagában is értékes | R2 |
-| Élő pozíció, AIS-adatvétel | Adatlicenc + infrastruktúra; nem kell a katalógushoz | R2 |
+| Élő pozíció **megjelenítése** | Az AIS-adatvétel már R1-ben fut (statikus gyűjtés), csak a felület hiányzik | R2 |
 | ETA, útvonal-tervező | Élő adatot igényel | R4 |
 | Push-értesítések | Élő adatot igényel | R2 (figyelőlista), R4 (érkezés) |
 | Fiókbejelentkezés, regisztráció | R1-ben a katalógus fiók nélkül is teljes értékű | R2 |
@@ -73,23 +73,39 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 
 | Adat | Honnan | Mennyi | Kockázat |
 |---|---|---|---|
-| Duna-hajók (ENI, IMO, MMSI, méretek, típus, üzemeltető) | ENI- és hajószám-nyilvántartás, KH | ~3 500 hajó | **közepes** – a nyilvántartás részletessége változó |
-| Duna hajótípus-kódok | UN E-rek. 28 alapján, hajószám-adatbázis | ~40 kód | alacsony |
-| Balatoni hajók (hajószám, típus, befogadóképesség, üzemeltető) | Közlekedési Hatóság nyilvántartás, üzemeltetők | ~150–250 bejegyzés | **magas** – a Balaton-hajók nem ENI-vel, hanem hajószámmal és névvel azonosítottak, a lista több forrásból áll |
-| Balatoni kikötők + kikötőrendek | KH-hirdetmények, üzemeltetők | 70–80 kikötő | közepes |
-| Üzemeltetők | Nyilvántartás, cégnyilvántartás | ~300 cég | alacsony |
-| Kikötők (Duna), zsilipek, folyószakaszok | Nyilvántartás, Közlekedési Hatóság, Duna-közlöny | ~400 kikötő, ~30 zsilip | közepes |
+| Duna-hajók: ENI, MMSI, hívójel, név, típus, méretek, merülés, zászló | **AIS** – Inland FI 10 + Message 5 | a Duna teljes AIS-flotta | **közepes** – a feed lefedettsége és a „fantom" hajók szűrése a kulcs |
+| Duna-hajók: folyó-km, szakasz, célkikötő, ETA zsilipnél, rakomány-jelölés | **AIS** – Inland FI 10 útvonaladat | folyamatos | alacsony |
+| Duna-hajók: üzemeltető, kapacitás, építési év | **üzemeltetői önbevallás (claim)** | a hajók egy része | **közepes** – a kitöltési hajlandóság függ a vállalattól |
+| Balatoni hajók (név, típus, befogadóképesség, üzemeltető, szezon) | Üzemeltetők flottaoldalai + AIS (nagyhajók) | ~150–250 bejegyzés | **magas** – nincs központi lista, minden üzemeltető másképp közöl |
+| Balatoni kikötők + kikötőrendek | Publikált KH- és Balatoni Hajózási Zrt. tájékoztatók | 70–80 kikötő | alacsony – publikált, nem igényel adatkérést |
+| Duna-kikötők km-értékei | Duna Bizottság port-távolság-táblázata | ~400 kikötő | alacsony |
+| Zsilipek, folyószakaszok | Publikált tájékoztatók + AIS fairway section kódok | ~30 zsilip | alacsony |
 | UI- és típusfordítások | Saját szerkesztés | ~300 kulcs × 3 nyelv | **közepes** – a német terminológia szakértői ellenőrzést igényel |
 
+> **Az R1 adata nem hatósági adatkéréstől függ.** A katalógus AIS-ból épül fel; amit az AIS nem ad (üzemeltető, kapacitás, építési év), azt az üzemeltető önbevallása pótolja; a kikötő- és szakaszadatokhoz publikált hatósági anyag kell, nem adatbázis-hozzáférés. **Az egyetlen külső függőség az AIS feed** – és az a statikus adatot is ad.
+
 **A legfontosabb felismerés a háromnyelvűséghez:** a hajók hivatalos neve latin betűs, egységes (a Dunán és a Balatonon egyaránt), tehát **a hajónevek nem igényelnek fordítást**. A háromnyelvűség terhe a UI-szövegeken, a hajótípus-neveken, a helységneveken és a jogi szövegeken van — ez lényegesen kisebb feladat, mint elsőre látszik. A magyar szerkesztői alapnyelv, az angol technikai másodlagos nyelv, a német piaci nyelv.
+
+### 3.4.1 Az R1 előkészítő fázisa (R1-0)
+
+> **A feed csak a szerződés kezdete után ad statikus adatot**, és a hajók a statikus üzenetet ritkán küldik el. Ezért az R1 **nem indulhat azonnal** a feed megkötése után.
+
+| Fázis | Időtartam | Tartalom |
+|---|---|---|
+| **R1-0** | **2–3 hónap a formális R1 előtt** | Feed megkötése, parser, statikus adatok gyűjtése, „fantom"-szűrő kidolgozása |
+| **R1** | – | A katalógus a gyűjtött statikus adatból épül fel |
+
+Az R1-0 nem nyilvános release, de **a projekt legfontosabb időablaka**: ha itt csúszik, az R1 is csúszik. A feed kiválasztása ezért az **első döntés**, nem a fejlesztés második hete.
 
 ### 3.5 Kilépési feltételek (Definition of Done)
 
 **Tartalom**
-- [ ] Minden bejegyzett hajónak van neve, típusa, azonosítója (területenként a megfelelő), üzemeltetője és állapota
-- [ ] A Duna-katalógusban ≥ 95% a hajók ENI-vel azonosítható
+- [ ] Minden bejegyzett hajónak van neve, típusa, azonosítója (területenként a megfelelő) és bizonyossági szintje
+- [ ] A Duna-katalógusban ≥ 60% a hajók ENI-vel azonosítható (AIS Inland FI 10-ből)
 - [ ] A Balaton-katalógusban ≥ 90% a hajók hajószámmal vagy IMO-val azonosítható
-- [ ] Minden hajóoldalon látható a forrás és a frissítés dátuma
+- [ ] A katalógusban nincs „fantom" hajó (vízfeletti pozíció nélkül nincs bejegyzés)
+- [ ] Minden hajóoldalon látható a forrás és a frissítés dátuma, mezőnkénti eredettel
+- [ ] Az üzemeltetői önbevallás (claim) működik, és a konfliktusok láthatók
 - [ ] Minden hajótípus lefordítva három nyelvre
 - [ ] Minden kikötő és zsilip lefordítva három nyelvre
 
@@ -114,25 +130,28 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 
 ### 3.6 Az R1 kockázatai
 
-| Kockázat | Valószínűség | Hatás | Mitáció |
+| Kockázat | Valószínűség | Hatás | Mitigáció |
 |---|---|---|---|
-| A Balatoni hajólista nem áll össze egyetlen forrásból | magas | az R1 legnagyobb ismeretlene | Már az R1 elején (2. sprint) a lista forrásait egyeztetni; a hajókat kézzel is be lehet tölteni a szerkesztői felületen |
-| A hajószám-adatbázisok licencelése korlátozza a közzétételt | közepes | a katalógus nem indítható | Az adatforrás szerződését az R1 **előtt** rendezni; a `data_source.license_type` mező a sémában erre van |
+| **A feed lefedettsége a Dunán gyenge** (főként S-AIS, a köztes vízi szakaszok kimaradnak) | közepes | a katalógusban hiányzó hajók | A feed kiválasztásakor **kifejezetten a magyar szakasz lefedettségét** kell mérni (próbaüzem, 1 hónap, „hány magyar hajót látunk naponta"); ennek a mérésnek az eredménye a go/no-go |
+| **A statikus adatok csak hetek-hónapok alatt gyűlnek össze** | biztos | az R1 indulása csúszik | Az **R1-0 előkészítő fázis** (2–3 hónap) a terv része, nem egy plusz |
+| A „fantom" hajók (szárazföldi pozíciók) bekerülnek a katalógusba | magas | hitelességi probléma | Pozícióalapú szűrő kötelező a pipeline-ban, a folyó geometriáján belül |
+| A Balatoni hajólista nem áll össze egyetlen forrásból | magas | gyenge Balaton-katalógus | Két megközelítés együtt: üzemeltetői oldalak kézi begyűjtése (~15 üzemeltető) + AIS a nagyhajókra |
+| Az üzemeltetők nem élnek a claimmel (a kapacitás/év hiányzik) | közepes | a katalógus „félkész" | A hiányzó mező a felületen **„adat nélkül"** jelenik meg, nem elrejtve; a claim előnye a keresésben és a szűrésben |
 | A német fordítások szakértelmetlenek | közepes | márkanév-érintettség, visszavonás | Német nyelvi reviewer bevonása; a nem átnézett fordítás státusza látszik a belső felületen |
 | A katalógus „üresnek" tűnik térkép nélkül | közepes | a felhasználó nem érti, miért érdemes visszatérni | A katalógust **tartalmi termékként** pozicionálni (kereshető hajólista, szűrés, adatlap), és a terepviszonyokat szövegesen közölni (pl. „Szigetvár–Szekszárd szakasz") |
 | A felhasználó élő pozíciót vár | magas | türelmetlenség | A felületen egyértelműen jelezni: „ez a katalógus; az élő követés a következő kiadásban" + értesítéslista a megjegyzésre |
-| Túl sok hajó (3 500) gyenge adattal rossz minőséget ad | közepes | hitelességi probléma | Prioritás: a **gyakran közlekedő és AIS-azonosítható** ~1 300 hajó legyen teljes; a többi „korlátozott adattal" jelölést kapjon |
 
 ### 3.7 Az R1 becslése
 
 | Sprint | Tartalom | Kimenetel |
 |---|---|---|
+| 0. (R1-0) | **Feed megkötése, AIS parser (Msg 5 + Inland FI 10), „fantom"-szűrő, statikus gyűjtés indítása** – részletek: [`r1-adat-terv.md`](r1-adat-terv.md) 8. és 11. fejezet | Folyamatosan bővülő AIS-adatbázis |
 | 1. | Séma, fordítási infrastruktúra, projekt-alapozás (CI, környezetek, migrációk) | Adatbázis váz, nyelvi kulcsok |
-| 2. | **Adatbeszerzés** (Duna + Balaton), szerkesztői felület v1, CSV-import — részletek: [`r1-adat-terv.md`](r1-adat-terv.md) 12. fejezet | Valós adat a DB-ben |
+| 2. | **Adatfeldolgozás és -bevitel** (AIS-ból), „fantom"-szűrés, üzemeltetői claim, szerkesztői felület v1 | Valós adat a DB-ben |
 | 3. | Katalóguslista, szűrés, rendezés, kereső, hajóadatlap | Működő katalógus (belső) |
 | 4. | i18n véglegesítés, SEO, statikus tartalomoldalak, API v1, dokumentáció, hibajegyzet | **R1 kiadás** |
 
-> **A sprint- sorrend nem véletlen:** a 2. sprint azért megy a 3. elé, mert a 3. sprint felülete a 2. sprintben behozott adat nélkül nem lenne megmutatható. Ha a hatósági adat késik, a 3. sprint elcsúszik – ez az R1 legnagyobb ütemezési kockázata, ezért a 2. sprint első hetében el kell indítani az írásos adatkérést.
+> **A sprint-sorrend nem véletlen:** a 2. sprint azért megy a 3. elé, mert a 3. sprint felülete a 2. sprintben behozott adat nélkül nem lenne megmutatható. **Az R1 legnagyobb ütemezési kockázata az AIS feed:** a statikus hajóadat hetek-hónapok alatt gyűl össze, ezért a 0. sprint (előkészítő) a formális R1 **eleje**, nem utólagos teendő.
 
 ---
 

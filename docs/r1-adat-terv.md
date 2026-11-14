@@ -1,296 +1,379 @@
-# R1 adat-terv – a hajókatalógus adatháttére
+# R1 adat-terv – AIS-first hajókatalógus
 
-**Verzió:** 1.0 (2026-11-14)
+**Verzió:** 2.0 (2026-11-14) — *az 1.0 teljesen újraírásra került, lásd 0. fejezet*
 **Kapcsolódó dokumentumok:** [`funkcio-leiras.md`](funkcio-leiras.md) · [`release-terv.md`](release-terv.md) · [`../README.md`](../README.md) (adatbázis terv)
 
 ---
 
-## 1. Mi az R1 adata, és mi nem
+## 0. Miért kellett újraírni a tervet
 
-Az R1 a **katalógus** release. Az adatháttere ezért **leíró (referencia) adat**, nem eseményadat.
+Az 1.0 verzió a katalógust a **Közlekedési Hatóság hajólajstromjára** építette, adatszolgáltatási kérés formájában. Ez két okból nem volt jó alap:
 
-| Az R1 adatháttérébe **bekerül** | Az R1 adatháttérébe **nem kerül** (és mikor) |
-|---|---|
-| `vessel` + `vessel_identifier` + `vessel_i18n` | `position` – élő pozíció (R2) |
-| `vessel_type` (+ i18n) | `voyage`, `voyage_stop` (R4) |
-| `vessel_alias`, `vessel_cert` | `eta_prediction` (R4) |
-| `vessel_service_period` – szezon (Balaton) | `lock_passage` (R4) |
-| `operator` (+ i18n) | `water_level` (R4) |
-| `port` + `port_i18n` (Duna + Balaton kikötők) | `convoy` – élő konvoj (R2) |
-| `marina` (balatoni kikötő-kiegészítők) | `notice`, `event` (R3) |
-| `lock` + `lock_i18n` | `vessel_schedule` – menetrend (R3) |
-| `river_section` + i18n, `basin` + i18n | |
-| `waterway` + i18n | |
-| `cargo_type` (+ i18n) | |
-| `content_key` + `content_text` – UI- és típusfordítások | |
-| `data_source` – minden forrás nyilvántartása | |
+1. **A lajstrom nem nyílt adatkészlet** – a hozzáférés nem garantált, és a formátum (XLSX/PDF) kézi bevitelre kényszerít.
+2. **Végül is kellett a feed-részlet** – a katalógus statikus adatai is AIS-ból jönnek, tehát a választható kockázat nem volt valódi.
 
-**A lényeg:** az R1 adata az, amit **nem lehet élő adatból előállítani** — a hajók hivatalos azonossága, mérete, tulajdonosi köre, engedélye. Ezt kell egyszer, jól, és forrással bevinni. Ami élő adat (pozíció, ETA, zsilipvárakozás), az R2–R4 terméke, és nem lehet előre „letölteni".
+**Az új alapelv:**
 
----
+> **A katalógus AIS-ból épül fel. Amit az AIS nem ad, azt az üzemeltető önbevallása pótolja. Amit sem az AIS, sem az üzemeltető nem ad, az nem jelenik meg – és nincs is rá igény.**
 
-## 2. Alapelv: minden mezőnek van forrása
+Ez a terv **nem függ hatósági adatkéréstől**. Csak egy **AIS feedtől** – és azt R1-ben *statikus adatgyűjtésre* használjuk, nem pozíciókra.
 
-> **Nincs olyan mező a katalógusban, aminek nincs megnevezett forrása.** Ha nem tudjuk, honnan származik egy adat, akkor az nem kerül be — üresen marad, és a hiánylista mutatja.
+### Mi változott a v1 → v2 összevetésben
 
-**Forráshierarchia (magasabb = erősebb):**
-
-| Prioritás | Forrás típusa | Használata | Kötelező jelölés |
-|:--:|---|---|---|
-| 1 | **Hatósági nyilvántartás** (lajstrom, hajóokmány-nyilvántartás) | ENI, hajószám, méretek, tulajdonos, engedély | forrás + dátum |
-| 2 | **Üzemeltető saját közlése** (honlap, menetrend, közlemény) | szolgáltatások, kapacitás, szezon, menetrend | forrás + dátum |
-| 3 | **AIS statikus adat** (5. típusú üzenet) | hívójel, MMSI, méretek kereszt-ellenőrzése | forrás = feed |
-| 4 | **Aggregátor / másodlagos adatbázis** | kiegészítő adatként, ellenőrzéshez | forrás + licenc |
-| 5 | **Szerkesztői kiegészítés** | ha nincs más forrás, de a szerkesztő tudja | forrás = „szerkesztői" + indoklás |
-
-**A `data_source` tábla ezt kötelezően rögzíti:** minden hajórekordhoz van `source_id`, minden mezőváltozás az `audit_log`-ban. A hajóoldalon a felhasználó látja: *"Forrás: Közlekedési Hatóság hajólajstrom, 2026. 03. 12."*
-
----
-
-## 3. Adatforrás-mátrix – Duna
-
-| Adatkör | Elsődleges forrás | Hozzáférés | Formátum | Frissítés | Kockázat |
-|---|---|---|---|---|---|
-| **ENI + magyar hajóadatok** (szám-jel, jelleg, rendeltetés, működési terület, méretek, vízkiszorítás, hajtóberendezés, tulajdonos) | Közlekedési Hatóság **hajólajstrom** + **hajóokmány-nyilvántartás** (a lajstromba bejegyzett adatkör jogszabályban rögzített) | **Adatszolgáltatási kérelem** a Hajózási Hatósági Főosztálynak (`hhf@tim.gov.hu` – a hatóság közzétett adatszolgáltatási csatornája) | XLSX / PDF, kézi bevitel | negyedévente + eseményvezérelt | **közepes** – a hatóság nem publikál nyílt adatkészletet, ezért az írásos megkeresés a kulcs |
-| **ENI – nemzetközi hajók** | Az illetékes állami ENI-kiosztó hatóságok; az EU-s belvízi elektronikus hajójelentés referenciaadatbázisa (ERDMS) | nehéz, országenként eltérő | – | ritka | **magas** – teljes lefedettség nem biztosítható R1-ben |
-| **MMSI + hívójel + AIS-méretek** | AIS feed statikus üzenetei (R2-től); R1-ben: gyűjtött statikus snapshot | előfizetéses feed | NMEA / JSON | hetente | közepes – a feed a licenc kötöttsége miatt R2 feladat |
-| **Nemzetközi hajószám** | Nemzeti nyilvántartások (pl. DE: WSV hajószám-nyilvántartás, AT, SRB, RO, BG) | hatóságonként eltérő | | ritka | közepes |
-| **Hajótípus (UN E-rek. 28)** | hajószám-adatbázis + AIS `type` mező | nyilvános | kódtábla | ritka | alacsony |
-| **Flotta-összetétel (ellenőrzés)** | Danube Commission éves navigációs statisztika | nyilvános, PDF | PDF/Excel | évente | alacsony – rekordonkénti adat nincs benne, csak ellenőrzésre jó |
-| **Kikötők** | KH kikötő-nyilvántartás + OSM `industrial=port` + terminál-operátörök | nyilvános | API/CSV | félévente | közepes |
-| **Zsilipek** | KH + ERDMS hajózási referenciaadatok | nyilvános | táblázat | ritka | alacsony |
-| **Üzemeltetők** | Nemzeti cégnyilvántartás + üzemeltetői honlapok | nyilvános | API / kézi | negyedévente | alacsony |
-| **Folyószakaszok, vízút** | Duna-közlöny, VTS, hatósági tájékoztatók | nyilvános | kézi | évente | alacsony |
-
-**Következtetés:** a Duna-katalógus **nagyrészt magyar hatósági adaton** és a nemzeti nyilvántartásokon áll. Ez az R1 legfontosabb kockázata, és a 2. sprint első hetében meg kell indítani az írásos adatkérést — a válaszidő határozza meg a R1 ütemezését.
-
----
-
-## 4. Adatforrás-mátrix – Balaton
-
-| Adatkör | Elsődleges forrás | Hozzáférés | Formátum | Frissítés | Kockázat |
-|---|---|---|---|---|---|
-| **Balatoni hajólajstrom** (nagyhajó, komp, úszómű, úszómunkagép, kishajó) | Közlekedési Hatóság | **Adatszolgáltatási kérelem** | XLSX / PDF | szezon előtt | **magas** – a Balatoni flotta töredékesen dokumentált, és nem ENI-vel azonosított |
-| **Kikötők + kikötőrendek** | Közlekedési Hatóság **„Hajósoknak szóló hirdetmény"** és a Balatoni Hajózási Zrt. kikötőrendjei | nyilvános, PDF | PDF | évente + szezon előtt | közepes |
-| **Hajók szolgáltatásai, kapacitás, fedélzet** | Üzemeltetők flottaoldalai (BAHART, Balatonmáriafürdő, Siófok, Tihany, Füred, Veszprém és további szolgáltatók) | nyilvános | kézi bevitel a szerkesztői felületen | szezon előtt | **magas** – nincs központi lista, minden üzemeltető másképp közöl |
-| **Menetrend** | Üzemeltetők heti menetrendje | nyilvános | PDF / táblázat | szezon előtt | közepes – R3-adat, de a szezonlogikához már R1-ben kell a szezon határai |
-| **Üzemeltetők** | Üzemeltetői honlapok + cégnyilvántartás | nyilvános | kézi | évente | alacsony |
-| **Vitorlások, kishajók** | Magyar vitorlásszövetségi nyilvántartás | korlátozott | – | – | **magas** – nyitott kérdés, nem döntöttük el |
-| **Balatoni közlekedési rend, meteorológiai tájékoztató** | KH hirdetmények | nyilvános, PDF | PDF | hetente a szezonban | közepes – R3-adat |
-
-**Következtetés:** a Balatoni katalógus **szerkesztői munkával** készül el: hatósági alapadat + üzemeltetői információ kézi bevitel. Ez ~150–250 hajó, tehát kétszer-háromszor kisebb mint a Duna-katalógus, és emberi munkával megoldható. A kockázat itt nem a mennyiség, hanem a **hatósági lista elérhetősége** és az **üzemeteltetői együttműködés**.
-
----
-
-## 5. Mezőenkénti kitöltési terv
-
-### 5.1 Duna-hajó
-
-| Mező | Forrás | Várható kitöltöttség | Megjegyzés |
-|---|---|---|---|
-| ENI | hatósági lajstrom | 95% | a nem magyar hajóknál hiányozhat |
-| IMO-szám | hajószám-adatbázis | 40% | csak a nemzetközi forgalomban járóknál van |
-| MMSI | AIS | 90% | a bárkáknál nincs – helyette a konvojt vezető hajója |
-| Nemzetközi hajószám | hajószám-adatbázis | 85% | |
-| Hajónév | lajstrom / AIS | 98% | latin betűs, egységes – **nem fordítandó** |
-| UN E-rek. 28 típuskód | hajószám-adatbázis | 90% | |
-| Szállítási kategória | származtatott a típuskódból | 95% | |
-| Hossz / szélesség | lajstrom | 95% | |
-| Max. merülés | lajstrom (vízkiszorítás) | 90% | |
-| Bruttó tonnage | hajószám-adatbázis | 85% | |
-| Teherkapacitás (DWT) | hajószám-adatbázis | 80% | csak teherhajnál értelmes |
-| Motorteljesítmény | hajószám-adatbázis | 75% | |
-| Építési év | hajószám-adatbázis | 80% | |
-| Üzemeltető / tulajdonos | lajstrom (tulajdoni lap) | 90% | |
-| Zászlóállapot | lajstrom | 95% | |
-| Közlekedési engedély hatályossága | KH | 60% | a többi a lajstromból vagy a statuszból |
-| Állapot (közlekedik / áll) | származtatott | 85% | AIS-alapú származtatás R2-ben, R1-ben kézi |
-| Leggyakoribb szakasz | AIS-ből származtatott | R2 | R1-ben a lajstrom „működési terület" mezője |
-
-### 5.2 Balatoni hajó
-
-| Mező | Forrás | Várható kitöltöttség | Megjegyzés |
-|---|---|---|---|
-| Nemzetközi hajószám | KH lajstrom | 70% (a nagyhajóknál 100%) | kishajóknál nincs |
-| Nemzeti nyilvántartási szám | KH lajstrom | 90% | |
-| IMO-szám | lajstrom | 20% | csak a nemzetköti hajóknál |
-| Hajónév | lajstrom / üzemeltető | 98% | latin betűs – **nem fordítandó** |
-| Kategória (nagyhajó / komp / kishajó / munkagép / vitorlás) | KH lajstrom | 95% | |
-| Befogadóképesség (fő) | KH lajstrom / üzemeltető | 85% | |
-| Hossz / szélesség | lajstrom | 90% | |
-| Szolgáltatások (WC, étterem, akadálymentes, védett hely) | üzemeltető | 70% | kézi, ellenőrizendő |
-| Üzemeltető | KH / üzemeltető | 95% | |
-| Szezon határai | üzemeltető | 80% | a szezononkénti változás miatt a `vessel_service_period` **időbeli** |
-| Medence | szerkesztői meghatározás | 90% | a hajó fő járási területe |
-| Kikötő | üzemeltető / KH | 70% | |
-
----
-
-## 6. Azonosítók és formátum-ellenőrzés
-
-### 6.1 Szerkezeti szabályok
-
-| Azonosító | Szabály | Ellenőrzés |
+| | v1.0 | v2.0 |
 |---|---|---|
-| **ENI** | 8 számjegy. Az **első 3 számjegy az ENI-kiosztó hatóság kódja**, az utolsó 5 a sorozatszám. **Nem azonos a MID-del** (Magyarország MID-je 243, az ENI-hatósági kód más tartomány) | 8 számjegy; a 3 számjegyes hatóságkód létezik az ENI-kiosztók listáján |
-| **MMSI** | 9 számjegy, az első 3 a **MID**. Belvízi hajónál a 4. számjegy `0` (ITU-R M.585) | 9 számjegy; MID létezik; a 4. számjegy `0` **figyelmeztető**, nem elutasító szabály (kivételek vannak) |
-| **MID-ellenőrzőlista** (Duna-országok) | AT 203 · BG 207 · HR 238 · HU 243 · DE 211 és 218 · MD 214 · RO 264 · RS 279 · SK 267 · UA 272 | MMSI első 3 számjegye a listában van |
-| **IMO-szám** | 7 számjegy, az utolsó **ellenőrző számjegy** (a számjegyek súlyozása 7-től 2-ig, maradék 10 → 0, különben 10 − maradék) | teljes ellenőrzőszám-algoritmus |
-| **Nemzetközi hajószám** | legfeljebb 7 karakter, nagybetűk és számjegyek | regex + karakterkészlet |
-| **UN/LOCODE** | 5 karakter: 2 karakteres országkód + 3 karakteres helykód | forma + létezés a hivatalos listában |
-| **ENI-duplikátum** | egy ENI-hez egy hajó | **elutasító** |
+| Elsődleges forrás | Közlekedési Hatóság lajstromja | **AIS (Inland FI 10 + Message 5)** |
+| ENI honnan | hatósági lajstrom | **AIS Inland FI 10 üzenetből** |
+| Folyó-km honnan | geometriai illesztés | **AIS fairway hectometre – közvetlenül** |
+| Kikötők honnan | hatósági lista + OSM | AIS cél-UN/LOCODE + Duna Bizottság port-km táblázat + OSM |
+| Tulajdonos, kapacitás, építési év | hatósági lajstrom | **üzemeltetői önbevallás (claim)** |
+| Balaton | hatósági lista | üzemeltetői flottaoldalak + AIS (nagyhajók) + publikált kikötőrendek |
+| Feed igény | R2 | **R1 (statikus gyűjtés)** – lásd 8. fejezet |
 
-### 6.2 Cross-field konzisztencia-szabályok
+---
+
+## 1. Mit ad az AIS – és mi a Duna-specifikus rész
+
+### 1.1 Tengeri AIS – Message 5 (Class A statikus és útvonaladat)
+
+| AIS mező | Tartalom | Pontosság | Használható a katalógusban? |
+|---|---|---|---|
+| MMSI | 9 számjegy | – | ✅ **elsődleges kulcs** |
+| IMO-szám | 7 számjegy | – | ⚠️ **belvízi hajóknál a szabály szerint nem érvényes** („not available for Inland vessels") |
+| Hívójel | max. 7 karakter | – | ✅ azonosító |
+| Hajónév | max. 20 karakter | – | ✅ |
+| Hajótípus | 1–99 (AIS-kód) | – | ✅ (de nem azonos az UN E-rek. 28 kóddal) |
+| Méretek | antenna-horgonyponttól számolva | 1 m | ⚠️ lásd 1.4 |
+| Merülés | 0,1 m | 0,1 m | ✅ |
+| Célállomás | 20 karakter, szabad szöveg | – | ⚠️ nem strukturált |
+| ETA | MMDDHHMM UTC | – | ✅ |
+
+### 1.2 Belvízi AIS – Inland FI 10 (ez a Duna-specifikus kincs)
+
+Az EU belvízi AIS technikai specifikációja (2019/838/EU melléklet, 3. szakasz) külön **Inland FI 10** üzenetet definiál a belvízi hajók számára. **Ez tartalmazza az ENI-t.**
+
+| FI 10 mező | Tartalom | Formátum |
+|---|---|---|
+| **1** | **ENI (Egyedi Európai Hajóazonosító)** | `cccccccc` – 8 karakter |
+| 2 | Belvízi hajótípus (ERI, APPENDIX C) | 14 bit |
+| 3 | Hajó hossza | `x.x` méter, 0–800,0 m |
+| 4 | Hajó szélessége | `x.x` méter, 0–100,0 m |
+| 5–7 | Sebesség / út / irány minőségi jelzés | 1 bit |
+| 8–11 | B/C értékek (belső és külső referenciapont) | `x.x` méter |
+| **Útvonaladat (szintén FI 10)** | | |
+| – | **Zászlóállapot** | UN country code (2 karakter) |
+| – | **Célállomás** | UN location code (3 karakter) = UN/LOCODE |
+| – | **Terminál** | Terminal code (5 karakter) |
+| – | **Zsóldemér szakasz** | Fairway section number (5 karakter) |
+| – | **Folyó-km** | Fairway hectometre (5 karakter) |
+| – | **ETA zsilipnél / hídnál / terminálnál** | MMDDHHMM UTC |
+| – | **Vontató hajók száma** | 3 bit (0–6, 7 = ismeretlen) |
+| – | **Légmagasság** | 12 bit, 1/100 m |
+| – | **Veszélyes áru jelölés** | 3 bit (0–3 kék kúp, 4 = B-Flag) |
+| – | **Rakott / üres** | 2 bit |
+| – | **Merülés** | 11 bit, 1/100 m |
+
+> **Ez a válasz a kérdésre: az ENI igenis AIS-ból szerezhető meg** – Inland AIS felszerelés esetén, az FI 10 üzenet első mezőjeként. Nem kell hozzá hatósági lajstrom.
+>
+> A 2019/838/EU az Inland AIS-t a Duna hajózási szakaszán kötelezővé teszi (a „Standard Vessel Tracking and Tracing for Inland Navigation" melléklet), tehát a gyakorlatban a hajók FI 10-et küldenek.
+
+### 1.3 Amit az AIS **nem** ad (teljes lista)
+
+| Hiányzó adat | Miért fontos | Honnan pótolható |
+|---|---|---|
+| **Üzemeltető / tulajdonos** | a katalógus egyik legkeresettebb mezője | **üzemeltetői önbevallás (claim)** |
+| **Építési év** | korsorbecslés | claim |
+| **Bruttó tonnage / DWT** | kapacitás | claim |
+| **Utasbefogadóképesség** | Balatoni turisztikai döntéshez kritikus | claim |
+| **IMO-szám** | belvízi hajóknál nincs | – (a szabály szerint sem) |
+| **Hajótörténet** (átnevezés, tulajdonosváltás) | | claim + szerkesztői |
+| **Hajó szolgáltatásai** (WC, étterem, akadálymentesség) | | claim (Balaton) |
+| **Szezon** (mikor közlekedik) | | claim (Balaton) |
+| **Fotó** | SEO, vizuális | claim / szerkesztői |
+
+### 1.4 Amit az AIS **korlátozottan** ad – ahol vigyázni kell
+
+| Korlát | Részlet | Következmény a katalógusban |
+|---|---|---|
+| **A méretek a konvoj méretei lehetnek** | A szabály szerint a konvoj méretét a legnagyobb téglalap alakú burkolólap méretre kell állítani | A hossz/szélesség **nem feltétlenül a hajóé**; a `length_m`/`beam_m` mezőt „AIS méretként" kell jelölni, nem hivatalos hajóméretként |
+| **A méret a horgonyreferenciapontból számolódik** | `L = A + B`, `W = C + D` (a közlés irányához igazítva) | Az érték a hajó teljes hosszát adja meg, de a *referenciapont* eltolás miatt a hossz- és szélesség-arány nem pontos |
+| **A merülés RNW-re vonatkozik** | A Duna szabályos alacsony vízállása (Regulierungsniederwasserstand) a Kelheim (km 2411,60) – Sulina (km 0) szakaszon, 1961–1990 megfigyelésekből | A merüléshez **mindig hozzá kell mondani az RNW-t** – a felületen: „merülés: 3,2 m (RNW)". Az `RNW` referencia a sémában kötelező |
+| **Az ENI csak Inland AIS esetén van** | Csak Class A (tengeri) felszerelésnél nincs FI 10 | Az ENI nélküli hajókat MMSI + hívójel alapján azonosítjuk, és ezt a felületen jelöljük |
+| **Az AIS hajótípus-kódja nem az UN E-rek. 28 kód** | Az AIS 1–99 kódja műszaki kategória | Külön leképezés kell: `ais_type_code` → `vessel_type_code` (ERI-kód). A katalógus a **normált** típust mutatja |
+| **A hívójel a rádióengedély szerinti név** | Nem feltétlenül egyezik a hajó „kereskedelmi" nevével | Két névmező: `callsign` és `vessel_name` (a kereső mindkettőre keres) |
+| **A célállomás szabad szöveg** | Kivéve az FI 10-ban, ahol UN/LOCODE | Az elsődleges kikötő-feloldás az FI 10 UN location code-ja; a Message 5 szövege csak tartalék |
+
+### 1.5 A folyó-km: **nincs átváltás**
+
+Ez a legkevésbé várt, de leghasznosabb megkönnyítés.
+
+- A Duna km-számlálása **egyetlen, nemzetközileg használt skálán** történik: **0 km a Sulinánál (a Fekete-tenger torkolatánál), és felfelé nő** (Duna Bizottság; a WSV Streckenatlas Donau: „Die Kilometrierung beginnt an der Donaumündung (Hafen von Sulina) und steigt stromaufwärts").
+- Fontosabbrázok: **Sulina 0** · **Kelheim 2414,72** · **Regensburg 2379** · **Passau 2226** · **Bécs 1929** · **Pozsony 1868** · **Budapest 1758** · **Mohács 1447** · **Belgrád 1167** · **Turnu Severin 931** · **Brăila 300** · **Galați 71**.
+- A hivatalos szakaszhatárok: **Felső Duna** (2414,72–1791) · **Középső Duna** (1791–931) · **Alsó Duna** (931–0).
+- Az AIS **fairway hectometre** mezője **ugyanebben a skálában** értendő.
+
+> **Következmény:** a `river_km` denormalizált mező **közvetlenül az AIS-ból jön**. Nem kell geometriai illesztést csinálnunk (GPS-pont → legközelebbi km-tábla), és nem kell PostGIS-alapú river-km-indexet építenünk. A `river_section` meghatározása is AIS-ból történik (fairway section number), a mi szakaszainkra leképezve.
+
+---
+
+## 2. A négy forrásréteg
+
+| Réteg | Tartalom | Forrás | Megbízhatóság | Felhasználói jelölés |
+|---|---|---|---|---|
+| **A – AIS statikus** | ENI, MMSI, hívójel, név, típus, méretek, merülés, zászló | Inland FI 10 + Message 5 | nagy (a hajó önkényes adata) | „AIS alapján" |
+| **B – AIS útvonal** | folyó-km, szakasz, célkikötő, terminál, ETA zsilipnél, rakomány-jelölés, vontatók száma | Inland FI 10 | nagy, idővel változó | „AIS alapján" |
+| **C – Üzemeltetői önbevallás** | üzemeltető, kapacitás, építési év, szolgáltatások, szezon, fotó | claim űrlap (4. fejezet) | közepes – de ellenőrizhető | „Az üzemeltető adata" |
+| **D – Publikált hatósági anyag** | kikötőrendek, tájékoztatók, Duna Bizottság port-km táblázat, Danube Commission flotta-statisztika | nyilvános PDF | nagy | „Hatósági adat" |
+
+**A lényeg a D rétegben:** a v1 terv a hatósági *adatbázist* kérte – ez hozzáférési probléma. A **publikált dokumentumok** (kikötőrendek, tájékoztatók, a Duna Bizottság távolságtáblázata) viszont szabadon elérhetők, és pont a kikötők/szakaszok adatait tartalmazzák. **A Duna-katalógus kikötő- és szakasz-adatait ezekből lehet felépíteni – adatkérés nélkül.**
+
+---
+
+## 3. A Duna-katalógus felépítése AIS-ből
+
+### 3.1 A folyamat
+
+```
+AIS feed (Inland FI 10 + Msg 5)
+   ↓
+① statikus üzenetek gyűjtése, kulcs: ENI (ha van) egyébként MMSI
+   ↓
+② vessel entitás létrehozás/upsert, státusz: 'ais_identified'
+   ↓
+③ FI 10 → river_km, river_section, célkikötő (UN/LOCODE), terminál
+   ↓
+④ hiányzó mezők → üres, 'is_missing' jelölés (nem kitalálunk!)
+   ↓
+⑤ üzemeltetői claim → a hiányzó mezők kitöltése, 'operator_claimed'
+   ↓
+⑥ publikálás a katalógusban; a bizonyosság szintje látható
+```
+
+### 3.2 A hajó „bizonyossági szintje" – ez az R1 legfontosabb új fogalma
+
+Mivel az adatok forrása és minősége hajónként eltér, **a katalógusnak ezt láthatóvá kell tennie**, különben a felhasználó nem tudja, mit érdemes elhinnie.
+
+| Szint | Jelölés | Mit jelent | Hány hajó várható |
+|---|---|---|---|
+| `ais_identified` | ✅ zöld | Van ENI-ja **és** hívójele – a rádióengedély szerinti azonosítás, AIS-ből | ~55–65% |
+| `ais_partial` | 🟡 sárga | Van MMSI-je, de nincs ENI-je (nem Inland AIS felszerelés) | ~25–35% |
+| `operator_claimed` | 🔵 kék | Nincs AIS-azonosítás, de az üzemeltető igazolta a hajót | a többi |
+| `name_only` | ⚪ szürke | Csak a neve ismert (Balaton, kishajók) | a Balaton-vitorlásoknál |
+
+**A felületen ez egy badge**, a hajóoldalon pedig mezőnkénti forrásjelölés. Ez nem gyengeség, hanem **hitelesítési előny** – a versenytársak nem mutatják meg, honnan van az adat.
+
+---
+
+## 4. Az üzemeltetői önbevallás (claim) – a hiányzó mezők pótlása
+
+### 4.1 Miért ez a megoldás
+
+Az AIS nem ad üzemeltetőt, kapacitást, építési évet. Ezek nélkül a katalógus „félkész": a hajóról tudjuk, hogy létezik, de nem tudjuk, ki birtokolja és mit szállít. A v1 terv ezt hatósági adattal oldotta meg – mostantól a termék maga szerzi be.
+
+### 4.2 Hogyan működik
+
+| Lépés | Leírás |
+|---|---|
+| 1. A hajó adatlapján a „Jelentem a hajót" gomb (vagy az üzemeltető saját oldala) | Az űrlap a hajó MMSI-jéhez kötődik, így nem kell új hajót létrehozni |
+| 2. Az üzemeltető megadja a hajó azonosítóját: **MMSI vagy ENI** (vagy hívójel + név) | Az ENI a belvízi AIS-ből érkező hivatalos azonosító, az MMSI a rádióállomás azonosítója |
+| 3. Az ellenőrzés: az azonosító egyezik a rendszerben lévő AIS-rekorddal **ÉS** a megadott cég adatai illeszkednek a hajószámhoz vagy az üzemeltető nevéhez | Ha nincs egyezés, a claim elutasítható vagy kézi egyeztetésre vár |
+| 4. Az üzemeltető kitölti a hiányzó mezőket (kapacitás, év, szolgáltatások, szezon, fotó) | Csak az AIS-ből hiányzó mezők jelennek meg az űrlapon – a meglévő AIS-adatot nem lehet átírni |
+| 5. A mezők `origin = 'operator_claimed'` eredettel kerülnek be, **a hajót nem írjuk felül automatikusan** – ha az AIS-ben van adat, azt megőrizzük, és a kettő konfliktusa látható | A konfliktus nem oldódik fel automatikusan: a szerkesztő dönt, a felületen mindkét érték látszik |
+| 6. A szerkesztő ellenőrzi, és publikálja | A jóváhagyás után a mezők a hajóoldalon „az üzemeltető adata" jelöléssel jelennek meg |
+
+### 4.3 Jogi és adatvédelmi keretek
+
+- Az önbevallás **nem hatósági adat**, és ezt a felületen **explicit jelölni kell** („Az üzemeltető által megadott, ellenőrzésre váró adat").
+- Az üzemeltető csak **a saját hajójához** férhet hozzá – a claim kötődik egy `operator` rekordhoz, amit ellenőrizni kell.
+- A `vessel` entitásban **továbbra sem** lehet személyes adat (kapitány, magánszemély tulajdonos neve) – a claim űrlap ezt tiltja, és a validáció elutasítja.
+- GDPR: az üzemeltető kapcsolattartója a cég jogi képviselője – természetes személy adatai nem kerülnek a `vessel` rekordba, hanem az `operator` entitásba (ott kezelhető).
+
+### 4.4 Séma-követelmény: `vessel_data_origin`
+
+A mezőnkénti eredet nyilvántartása új táblát igényel, mert egy mezőnek több eredete is lehet (AIS + üzemeltető), és a konfliktust meg kell tudni mutatni.
+
+| Tábla | Oszlopok |
+|---|---|
+| `vessel_data_origin` | `id` PK, `vessel_id` FK, `field_name`, `origin` (ais/operator_claimed/official/editorial), `value_snapshot`, `source_id` FK, `observed_at`, `confidence`, `is_current` bool |
+
+A `vessel` rekord tárolja az **aktuális** értéket (a gyors olvasás kedvéért), a `vessel_data_origin` pedig a **történetet és az eredetet**. A UI így tudja: „Merülés: 3,2 m — AIS (2026-11-14)"; „Kapacitás: 850 t — az üzemeltető adata (2026-11-02)".
+
+---
+
+## 5. A Balaton: miért kell más megoldás
+
+| Tény | Következmény |
+|---|---|
+| A Balatonon ~40–50 kishajó és több száz vitorlás van, ezek **nincsenek AIS-felszereléssel** | Az AIS itt **nem fedi le** a katalógust – a megközelítés megfordul |
+| A nagyhajók (Szent György, Jókai, Csongor, Balaton katamarán…) **vannak AIS-en** | A nagyhajók AIS-ből kiegészíthetők |
+| A kikötőrendek és tájékoztatók **publikáltak** (KH, Balatoni Hajózási Zrt.) | A kikötő-adatokhoz **nem kell adatkérés** |
+| A hajók listája az **üzemeltetők saját oldalain** van (~15 üzemeltető) | Ez a legkisebb ráfordítású és legfrissebb forrás |
+| A közlekedés **szezonális** | A szezon az üzemeltetőtől jön (claim), nem a hatóságtól |
+
+**A Balaton-katalógus tehát: üzemeltetői flottaoldalak (a gerinc) + AIS (a nagyhajók kiegészítése) + publikált kikötőrendek (a kikötők).** Nincs szükség hatósági adatkérésre.
+
+> **Kockázat:** az üzemeltetői oldalak nem stabilak (a flottaoldal URL-je és tartalma évente változik). **Mitigáció:** a bevitel éves, kézi, ellenőrzött – és a `data_source` rekordban minden forráshoz mentjük a *beolvasás dátumát és a mentett URL-t*. Ha egy üzemeltető megszűnik, a rekordja nem tűnik el, csak „megerősítésre vár" státuszba kerül.
+
+---
+
+## 6. Mező-mátrix (v2.0)
+
+| Mező | Duna – AIS | Duna – claim | Balaton | Jelölés a UI-ban |
+|---|---|---|---|---|
+| ENI | ✅ Inland FI 10 | – | ❌ nincs | „ENI (AIS)" |
+| MMSI | ✅ | – | ✅ nagyhajóknál | „MMSI (AIS)" |
+| Nemzetközi hajószám | ✅ | ✅ | ✅ | „Hajószám (AIS)" / „(üzemeltető)" |
+| Hajónév | ✅ | ✅ | ✅ | latin betűs, nem fordítandó |
+| Típus | ✅ ERI-kód | – | ✅ (kategória) | „típus (AIS)" |
+| Hossz / szélesség | ✅ (AIS méret, figyelem: konvoj) | ✅ pontosabb | ✅ | „AIS méret" vs. „műszaki adat" |
+| Merülés | ✅ (RNW-re) | – | – | „merülés (RNW)" |
+| Zászlóállapot | ✅ UN country code | – | ✅ | |
+| Üzemeltető | ❌ | ✅ | ✅ (nyilvános oldalról) | „Az üzemeltető adata" |
+| Kapacitás (DWT/TEU/utas) | ❌ | ✅ | ✅ | „Az üzemeltető adata" |
+| Építési év | ❌ | ✅ | ✅ | „Az üzemeltető adata" |
+| Folyó-km | ✅ | – | – (helyette partkm) | „AIS pozíció" |
+| Folyószakasz | ✅ fairway section | – | – medence | |
+| Célkikötő | ✅ UN/LOCODE | – | – | |
+| ETA zsilipnél | ✅ | – | – | R4-ben válik hasznos |
+| Veszélyes áru jelölés | ✅ | – | – | |
+| Rakott/üres | ✅ | – | – | |
+| Szezon | – | ✅ | ✅ | „Szezonban közlekedik" |
+| Kikötő | ✅ (célállomásból) | – | ✅ kikötőrendből | |
+
+---
+
+## 7. Validációs szabályok (v2.0)
+
+### 7.1 Azonosítók
 
 | Szabály | Szint |
 |---|---|
-| `length_m > beam_m` | elutasító |
-| `draught_max_m < 0,35 × length_m` | figyelmeztető (a Duna 12 m-es hajóinál a merülés ~4 m, de a széles hátú bárkáknál a 0,35 alacsony – pontosítás a valós adatok alapján) |
-| `passenger_capacity > 0` ⇔ hajótípus = személyhajó | figyelmeztető |
-| `deadweight_t > 0` ⇔ szállítási kategória = teher | figyelmeztető |
-| Személyhajó → `passenger_capacity` kötelező | elutasító |
-| `operating_area = 'balaton'` ⇔ nincs ENI | elutasító |
-| `operating_area = 'duna'` → legalább egy ENI vagy MMSI | elutasító |
-| Duplikált hajónév | **figyelmeztető** – ugyanaz a név több hajón is lehet (átnevezés, új hajó ugyanazzal a névvel) |
-| Üzemeltető nevéből a `operator` rekord | fuzzy illesztés, kézi megerősítés |
+| ENI: 8 karakter, az első 3 a hatósági kód (nem a MID!) | elutasító |
+| MMSI: 9 számjegy, az első 3 a MID (Duna-országok: AT 203, BG 207, HR 238, HU 243, DE 211/218, MD 214, RO 264, RS 279, SK 267, UA 272) | elutasító |
+| Az IMO-mező belvízi hajónál 0 → „nem érvényes", **nem hiba** | figyelmeztető |
+| Hívójel: max. 7 karakter, nagybetű + szám | elutasító |
+| Azonos ENI-vel két hajó | **elutasító** |
+| Azonos MMSI-vel két hajó | **elutasító** |
+| Duplikált hajónév | figyelmeztető (átnevezés miatt lehet) |
 
-### 6.3 Illesztési (entity resolution) sorrend az új forrás beemelésekor
+### 7.2 AIS-specifikus mezőértékek
 
-1. **ENI pontos egyezés** – azonnali, automatikus
-2. **IMO pontos egyezés** – azonnali, automatikus
-3. **MMSI pontos egyezés** – azonnali, automatikus
-4. **Nemzetközi hajószám pontos egyezés** – azonnali, automatikus
-5. **Név + hossz (±10%) egyezés** – automatikus, de **naplózva**; a mezőket nem írja felül
-6. **Név fuzzy egyezés (trigram hasonlóság > 0,8)** – **emberi jóváhagyás**; a szerkesztő a felületen összeveti a két rekordot
-7. **Nincs illesztés** → **új hajó**, emberi jóváhagyással jön létre
-
-> **Fontos:** az R1-ben **nincs automatikus rekord-összevonás**. Két hajót nem szabad automatikusan egyesíteni, mert a téves egyesítés rosszabb, mint a duplikátum — a duplikátum jelezhető, az összevonás nem.
-
----
-
-## 7. A bevitel folyamata
-
-```
-nyers forrásfájl          →  0. megőrzés (source_id-hoz kötve, újrafuttatható)
-        ↓
-parse                     →  1. staging (minden mező stringként, nyersen)
-        ↓
-normalizálás              →  2. vezető nullák, whitespace, kis/nagybetű, egység, dátum
-        ↓
-validáció                 →  3. hibanapló (sor- és mezőszinten, nem dobódik el)
-        ↓
-illesztés                  →  4. az ENI→IMO→MMSI→hívójel→név sorrend szerint
-        ↓
-upsert                    →  5. temporális zárás (valid_to) + új sor
-        ↓
-QA + emberi jóváhagyás    →  6. az új hajók és a kétséges illesztések jóváhagyása
-        ↓
-publikálás                →  7. a jóváhagyott rekord válik „published" állapotúvá
-```
-
-**Fájlok és eszközök:**
-- A nyers forrásfájl (XLSX/PDF/CSV) **a `data_source` rekordhoz kötve megőrzendő** – a feldolgozás bármikor újrafuttatható, és a licenc/audit miatt is kell.
-- A bevitel **CSV-en keresztül** történik a szerkesztői felületre (F-ADM-07) – ez a kézi források miatt a reális út, nem a nagy betöltő.
-- Minden futás a `job_run` táblába ír: bemenő sorok, elutasított sorok, létrehozott/frissített rekordok.
-
-**Idempotencia:** a feldolgozás újrafuttatható anélkül, hogy duplikálna. A kulcs az azonosító (`vessel_identifier`), nem a sorszám.
-
----
-
-## 8. Adatminőségi mérőszámok (R1 átvételi küszöbök)
-
-| Metrika | Küszöb |
+| Szabály | Szint |
 |---|---|
-| ENI-duplikátum a Duna-katalógusban | **0** |
-| MMSI-duplikátum | **0** (üres kivételével) |
-| ENI-vel azonosítható Duna-hajók aránya | ≥ 95% |
-| Hajószámmal vagy IMO-val azonosítható Balatoni hajók aránya | ≥ 90% |
-| Hajó nevének kitöltöttsége | ≥ 98% |
-| Típus kitöltöttsége | ≥ 90% |
-| Méret (hossz + szélesség) kitöltöttsége | ≥ 95% |
-| Üzemeltető kitöltöttsége | ≥ 90% |
-| Forrásjelölés a kézzel módosított mezőknél | **100%** |
-| Nyelvi hiánylista: UI-szövegek | **0** |
-| Nyelvi hiánylista: hajótípus-nevek | **0** |
-| Nyelvi hiánylista: kikötő- és zsilipnevek | ≤ 5% (a többi a forrásnyelven marad, jelöléssel) |
-| Elutasított sorok aránya egy beviteli futásban | ≤ 2% (a többi emberi javításra vár, nem dobódik el) |
-| Felhasználói észrevételek feldolgozása | a beérkezéstől 5 munkanapon belül |
+| `length_m` > 0 és `beam_m` > 0, ha AIS-ből jött | figyelmeztető, ha 0 (a 0 = „not available") |
+| A méret 0,1 m-es pontosságú, a referenciapont a közlés irányához igazított | **dokumentálva**, nem hiba |
+| `draught` > 0 és a hajó merülése RNW-re értendő | kötelező jelölés a UI-on |
+| A zászló-ország nem egyezik a hajó hazai kikötőjének országával | figyelmeztető |
+| `fairway hectometre` a 0–2414,72 tartományon kívül | figyelmeztető |
+| A `fairway section` kód nem létezik a `river_section` táblánkban | figyelmeztető → a szakasz-leképezés bővítése |
+| Az UN location code nem létezik a `port` táblánkban | figyelmeztető → új kikötő-jelölt |
+| A `destination` szöveg és az UN/LOCODE eltér egymástól | figyelmeztető |
+| Az ERI-típuskód 0 (nem elérhető) | figyelmeztető |
 
----
+### 7.3 Claim-validáció
 
-## 9. Mi kerül be automatikusan, mi emberi jóváhagyással
-
-| Automatikus (jóváhagyás nélkül) | Emberi jóváhagyással |
+| Szabály | Szint |
 |---|---|
-| Hatósági adatsor beemelése azonosító mezőkkel | **Új hajó létrehozása** |
-| Mezőfrissítés, ha az azonosító egyértelmű és az érték nem üres | **Rekord-összevonás** (7. pont, illesztés) |
-| Típuskód-változás (UN E-rek. 28 alapján) | Minden kézzel írt mező első betöltése |
-| Fordítások gátolt státuszba (publikálás külön lépés) | Fordítás publikálása |
-
-**Elv:** *az automatizmus soha nem töröl és nem ír felül nem üres értéket üresre, és soha nem von össze rekordokat.* Az üres → érték irány automatikus, az érték → más érték irány naplózott, az érték → üres irány soha.
-
----
-
-## 10. Az R1 adatkészlet elfogadási checklist
-
-Tartalom:
-- [ ] A Duna-katalógusban minden hajótípus (teher száraz, teher folyadék, vegyes, bárka, toló, vontató, személy, munkahajó, kishajó, uszály) legalább 3 példánnyal szerepel
-- [ ] A Balaton-katalógusban a nagyhajók, kompok, kishajók és munkagépek mind jelen vannak
-- [ ] Minden hajótípusnak van háromnyelvű neve
-- [ ] Minden kikötőnek és zsilipnek van háromnyelvű neve
-- [ ] A `vessel_service_period` a Balatoni hajóknál kitöltött (szezon), a Duna-hajóknál `year_round`
-- [ ] Az `operator` rekordok nem duplikáltak (név + ország szinten)
-- [ ] A `marina` rekordok hivatkoznak a kikötőrend-re
-
-Megkötés:
-- [ ] A nyers forrásfájlok megőrzöttek és visszatöltésre alkalmasak
-- [ ] A bevitel újrafuttatható duplikátum nélkül
-- [ ] Minden `data_source` rekord tartalmaz jogalapot, licencet és frissítési gyakoriságot
-- [ ] A `content_text` státuszok: a hu és en minden kulcsnál `published`, a de-nél a hiányzó elemek jelölve
-
-Felület:
-- [ ] A kereső ENI-re, IMO-ra, MMSI-re, hajószámra, névre talál (a Duna- és a Balaton-keresés nem szivárog át)
-- [ ] Minden hajóoldalon látható a forrás és a frissítés dátuma
-- [ ] A hiányzó fordítás jelölést kap, nem üres mezőt
+| A claim MMSI/ENI-je létező AIS-rekordra mutat | elutasító |
+| A claimben szereplő üzemeltető már létezik az `operator` táblában | figyelmeztető (új operator → jóváhagyás) |
+| Személyes adatot tartalmazó mező (kapitány, magánszemély) | **elutasító** |
+| A kapacitás nem negatív, és a típushoz illik (DWT csak teherhajnál) | figyelmeztető |
+| A claimben szereplő mező nem írhatja felül az AIS-értéket konfliktus nélkül | **kötelező**: a konfliktus feloldandó vagy a felületen mindkettő látszik |
 
 ---
 
-## 11. Kockázatok és a konkrét mitigációs lépés
+## 8. Az AIS feed – a legelső döntés
 
-| Kockázat | Hatás | Konkrét lépés (a 2. sprint első hete) |
+### 8.1 Miért kell már R1-ben
+
+A statikus hajóadat **ugyanabból a feedből** jön, mint a pozíció. Nem külön beszerzendő dolog – de **időbeli problémát okoz**:
+
+> **A feed csak a szerződés kezdete után ad statikus adatot.** Az AIS statikus üzenet (Message 5, FI 10) csak ritkán küldi el a hajó – hetente-hónaponta, az aktivitásától függően. **Egy frissen indított feeddel tehát az R1-ben még nem lesz teljes katalógus.**
+
+**Következmény – az R1 előkészítő fázisa:**
+
+| Fázis | Időtartam | Tartalom |
 |---|---|---|
-| A KH nem ad adatot, vagy lassan | az R1 késik | Írásos megkeresés a `hhf@tim.gov.hu` csatornán, a lajstrom és a hajóokmány-nyilvántartás **részleges** (Egy adatkészlet) adatkérésével – a részleges is elindíthatja a katalógust |
-| A nemzetközi ENI-lista nem elérhető | a Duna-katalógus 60–70%-a ENI nélkül | A magyar ENI-vel rendelkező hajók + AIS-azonosítható hajók adják a teljes lefedettséget; a hiányzókat a nemzeti hajószám-adatbázisokból pótoljuk |
-| A Balatoni lista hiányos | gyenge Balaton-katalógus | Két megközelítés együtt: hatósági lista **+** üzemeltetői oldalak kézi begyűjtése (~15 üzemeltető) |
-| A forrásfájlok formátuma változik | a bevitel elbukik | A bevitel a `data_source` + fájlverzió alapján fut; a formátumváltozás új `source_file` bejegyzés, nem kódmódosítás |
-| A kézi bevitel hibás | bizalomvesztés | Kötelező forrás- és dátummező; mezőnkénti hibajegyzet a UI-on; a felhasználói észrevétel visszacsatol |
-| A fordítás nem készül el | a 3 nyelv ígéret sérül | A német fordítási kapacitás **az R1 2. sprintjében** eldöntendő; a hiánylista nyilvános belső dashboard |
-| A jogszabályi háttér változik | mezők értelmezése elcsúszik | A `data_source` és a `vessel` mezők dokumentálva, a jogszabály-hivatkozás a rekord mellett |
+| **R1-0 (előkészítő)** | **2–3 hónap a formális R1 előtt** | A feed megkötése + a statikus adatok gyűjtése, hogy a katalógus indulásra kész legyen |
+| R1 | – | A gyűjtött statikus adatból felépül a katalógus |
+
+Ez az ütemezésben **a legfontosabb változás** a v1-hez képest, és a release-tervet is módosítja.
+
+### 8.2 A feed lehetőségek
+
+| Lehetőség | Előny | Hátrány | Következő tevékenység |
+|---|---|---|---|
+| **Fizetős aggregátor** (pl. AIS-hub, Kpler/Spire, MarineTraffic) | globális lefedettség, S-AIS is, historikus adat | költség, licencfeltételek a terjesztésre | ajánlatot kérni |
+| **Fejlesztői feed** (pl. valós idejű WebSocket feed) | olcsó, azonnal elérhető | nincs historikus adat, korlátozott lekérdezés | prototípushoz, nem élesre |
+| **Saját vevők a Dunán** | függetlenség, olcsó hosszú távon, teljes kontroll | hardver + hálózat + üzemeltetés, és a folyó mentén sok vevő kell a teljes lefedettséghez | műszaki megvalósíthatóság vizsgálata |
+| **Nemzetközi szervezeti adatok** | egyes szervezetek AIS-adatot osztanak | általában csak aggregált vagy korlátozott tartalom | megkeresés |
+
+### 8.3 Amit a feed kiválasztásakor **döntően** vizsgálni kell
+
+| Szempont | Miért kritikus itt |
+|---|---|
+| **A Duna menti lefedettség** | A VHF-alapú AIS a part felé terjed; a szárazföldi (terrestrial) lefedettség a folyó mentén korlátozott. Ha a feed csak S-AIS-t ad, a köztes vízi állapotok kimaradnak |
+| **Statikus üzenetek (Msg 5, FI 10) elérhetősége** | Nem minden feed ad statikus adatot, és nem minden hajó küldi el |
+| **Historikus visszamenőleg** | Az R1-nek a gyűjtés alatt keletkezett statikus adatot kell kapnia |
+| **Terjesztési jog** | A nyilvános AIS-adat és a szolgáltatói licenc nem ugyanaz |
+| **Adatminőség** | Duplikált MMSI-k, hibás nevek, „ghost" hajók (a szárazföldi pozíciók) – a szárazföldi AIS-fantomok kiszűrése a katalógus minőségét közvetlenül meghatározza |
+
+> **Fontos gyakorlati részlet:** a szárazföldi (terrestrial) AIS-források **fantompozíciókat** is adnak – olyan hajókat, amelyek valójában nem a vízen vannak. A katalógusba beépülő hajók listáját ezért **pozíció-alapú szűréssel kell tisztítani** (víz felett, a folyó geometriáján belül), nem pusztán a statikus üzenet alapján. Ez egy külön szabály a pipeline-ban, és a nyers AIS-„flotta" mérete jóval nagyobb a valós flottánál.
 
 ---
 
-## 12. A konkrét következő 10 munkanap
+## 9. Mit nem csinálunk R1-ben (és miért)
 
-| Nap | Feladat | Kimenet |
-|---|---|---|
-| 1–2 | Adat-hozzáférési megkeresések megírása és elküldése (KH: hajólajstrom + hajóokmány-nyilvántartás + Balatoni hajólajstrom; KH: kikötőrendek) | 3 levél, válaszhatáridő megkérve |
-| 1–3 | A `data_source` tábla feltöltése a lehetséges forrásokkal (név, típus, jogalap, formátum, várható mennyiség) | 12–15 forrásrekord |
-| 3–5 | A mezőlista véglegesítése a funkcióleírás 6. fejezete alapján | Mezőspecifikáció |
-| 4–6 | A `vessel_type` kódkészlet véglegesítése (UN E-rek. 28 + Balatoni kategóriák) + a háromnyelvű nevek | ~45 típus × 3 nyelv |
-| 5–8 | A `content_key` lista véglegesítése (UI-szövegek) és a hu + en szövegek megírása | ~300 kulcs × 2 nyelv |
-| 6–9 | Az üzemeltetői lista összeállítása (Duna + Balaton) a honlapokról | ~300 üzemeltető |
-| 7–10 | A validációs szabályok kódolása a séma-ellenőrzésekbe (CHECK constraint + betöltő szabályok) | Validátor |
-| 8–10 | A Balatoni nagyhajók kézi lista (~50–70 hajó) üzemeltetői oldalakról | Első Balaton-adathalmaz |
+| Nincs | Miért |
+|---|---|
+| Térkép | a kérés szerint; R2 |
+| Élő pozíció megjelenítése | R2 – de az adat **már R1-ben gyűjtődik** |
+| ETA-modell | R4 – de az AIS-ból származó **ETA zsilipnél/terminálnál már R1-ben megvan** |
+| Tulajdonjog, érték, ár | nem az adatbázis feladata |
+| Személyzet, kapitány | GDPR – nem tároljuk |
+| Bérlet, foglalás | nem az R1 célja |
+| A bárkák önálló katalógusbejegyzése | a bárka nem AIS-entity; a konvoj tagjaként kezeljük |
 
 ---
 
-## 13. Forráshivatkozások
+## 10. A pipeline szabályai (v2.0)
 
-- Közlekedési Hatóság, Hajózási Hatósági Főosztály – a hajólajstrom, a hajóokmány-nyilvántartás és az adatszolgáltatás (`hhf@tim.gov.hu`) – [KH](https://www.kozlekedesihatosag.kormany.hu/hu/haj%C3%B3z%C3%A1si-hat%C3%B3s%C3%A1gi-f%C5%91oszt%C3%A1ly-hhf-bemutatkoz%C3%A1s)
-- Közlekedési Hatóság – „Hajósoknak szóló hirdetmény" és tájékoztatók (Balaton, kikötőrendek) – [dokumentumtár](https://www.kozlekedesihatosag.kormany.hu/hu/dokumentumtar?delta=60&start=22&category=66908&modified=past-year)
-- 5/1974. (V. 21.) KPM rendelet a hajózásról – a hajójegyzékbe bejegyzett adatok köre (jelleg, méretek, vízkiszorítás, tulajdonos) – [FAOLEX](https://faolex.fao.org/docs/pdf/hun27974.pdf)
-- ITU-R M.585 – MMSI szerkezet, MID-értékek – [ITU](https://www.itu.int/en/ITU-R/terrestrial/Pages/by-categories-faq.aspx?categorizedby=17)
-- Közlekedési Hatóság – Balatoni meteorológiai megfigyelő rendszer hirdetmény (a 4 szigetüzemű állomás) – [KH](https://www.kozlekedesihatosag.kormany.hu/documents/66222/66315/016_Ba_2025.+sz%C3%A1m%C3%BA+Haj%C3%B3soknak+sz%C3%B3l%C3%B3+hirdetm%C3%A9ny+-+a+Balatonon,+t%C3%B3k%C3%B6z%C3%A9pen+m%C5%B1k%C3%B6d%C5%91+meteorol%C3%B3giai+megfigyel%C5%91+%C3%A9s+t%C3%A1j%C3%A9koztat%C3%B3+rendszer+%C3%A1llom%C3%A1sainak+n%C3%A1ri+id%C5%91szakra+t%C3%B6rt%C3%A9n%C5%91+%C3%A1llap%C3%ADt%C3%A1s%C3%A1r%C3%B3l.pdf/e2936517-2b3f-383d-d102-7d868eb6350e)
-- Balatoni flotta összetétele (4 komp, 29 személyhajó, 17 szolgálati hajó, 17 uszály, 16 úszó munkagép, 70–80 kikötő) – [balatonihajok.hu](http://www.balatonihajok.hu/technika/hajozas)
-- BAHART hajóflotta (nagyhajók, nosztalgiahajók, kapacitások) – [bahart.hu](https://bahart.hu/hu/bahart-hajoflotta)
-- Balatonmáriafürdő – 19 személyhajó, 6 komp, 18 kikötő – [menetrend](https://www.balatonmariafurdo.hu/wp-content/uploads/2025/03/BH_Menetrend_kiadvany_2024.pdf)
+| Szabály | |
+|---|---|
+| **A kulcs MMSI**, nem ENI | Az ENI hiányozhat; az MMSI soha. Az ENI elsődleges azonosító *ha van* |
+| **Üres értéket soha nem töltünk ki találgatással** | Hiányzó mező = üres + `is_missing` jelölés |
+| **Értéket soha nem törölünk felül üresre** | Az `origin` történet megőrzi az előző értéket |
+| **A „ghost" hajók kiszűrése** | Pozícióalapú validáció (a folyó geometriáján belül) a statikus listában |
+| **Idempotencia** | Az azonosító a kulcs; a feldolgozás újrafuttatható |
+| **Nyers adat megőrzése** | A nyers AIS-üzenetek 14 napig, a statikus kivonatok korlátlan ideig a `data_source`-hoz kötve |
+| **Minden mező eredete nyilvántartva** | `vessel_data_origin` |
+
+---
+
+## 11. Akciólista
+
+| # | Feladat | Ki | Mikor |
+|---|---|---|---|
+| 1 | **AIS feed kiválasztása és megkötése** – 3 ajánlat bekérése (lefedettség, statikus adat, historikus, licenc, ár) | törzs | 1. hét |
+| 2 | A feed próba-üzemeltetése a magyar Duna-szakaszon, lefedettség-mérés (milyen gyakran látszunk magyar hajót) | fejlesztés | 1–2. hét |
+| 3 | AIS parser (Msg 5 + Inland FI 10) – prototípus | fejlesztés | 2. hét |
+| 4 | Statikus gyűjtő indítása (a teljes R1-0 időszak alatt fut) | fejlesztés | 2. hét |
+| 5 | **„Ghost"-szűrő** kialakítása és validálása a magyar szakaszon | fejlesztés | 3. hét |
+| 6 | ENI → hajó, MMSI → hajó, hívójel → hajó illesztési logika + ütközéskezelés | fejlesztés | 3. hét |
+| 7 | `vessel_data_origin` séma és a claim-űrlap (R1 végére) | fejlesztés | 4. hét |
+| 8 | Port-km táblázat bevitele (Duna Bizottság) + kikötőrendek feldolgozása (Balaton) | tartalom | 2–3. hét |
+| 9 | `river_section` kódok leképezése a fairway section kódokra | fejlesztés + tartalom | 3–4. hét |
+| 10 | UN/LOCODE kikötőlista bevitele + ellenőrzés | tartalom | 3. hét |
+
+---
+
+## 12. Forráshivatkozások
+
+- Commission Implementing Regulation (EU) 2019/838 – belvízi AIS technikai specifikáció, **Inland FI 10 (ENI, ERI-típus, fairway km, UN/LOCODE, ETA zsilipnél)** – [EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32019R0838&rid=5) · [legislation.gov.uk melléklet](https://www.legislation.gov.uk/eur/2019/838/annex/division/3/data.xht)
+- Commission Regulation (EC) No 415/2007 – belvízi elektronikus hajójelentés, az Inland FI 10 és az ERI-hajótípus kódok – [EUR-Lex](https://eur-lex.europa.eu/eli/reg/2007/415/2012-08-17/eng)
+- AIS Message 5 mezőleírás – [USCG NAVCEN](https://navcen.uscg.gov/ais-class-a-static-voyage-message-5)
+- ITU-R M.585 – MMSI szerkezet és MID-értékek – [ITU](https://www.itu.int/en/ITU-R/terrestrial/Pages/by-categories-faq.aspx?categorizedby=17)
+- Danube Commission – a Duna km-számlálása (Sulina 0), szakaszhatárok (2414,72 / 1791 / 931), **RNW** definíciója, kikötőtávolság-táblázat – [Danube Commission](http://www.danubecommission.org/extranet/e-library/publication/KM_ANZEIGER/HTML/ALLGEMEINES1.htm)
+- WSV Streckenatlas Donau – „Die Kilometrierung beginnt an der Donaumündung (Hafen von Sulina) und steigt stromaufwärts" – [WSV](https://www.gdws.wsv.bund.de/SharedDocs/Downloads/DE/Karten/Streckenatlas/Streckenatlas_Donau.pdf)
+- Közlekedési Hatóság – Balatoni tájékoztatók és kikötőrendek (publikált) – [KH](https://www.kozlekedesihatosag.kormany.hu/hu/dokumentumtar?delta=60&start=22&category=66908&modified=past-year)
+- BAHART hajóflotta, Balatonmáriafürdő menetrend – [bahart.hu](https://bahart.hu/hu/bahart-hajoflotta) · [menetrend](https://www.balatonmariafurdo.hu/wp-content/uploads/2025/03/BH_Menetrend_kiadvany_2024.pdf)

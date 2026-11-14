@@ -27,11 +27,7 @@ Két, egymástól **térben és adatmodellben is elkülönített** katalógus eg
 
 | Szerep | Igénye | Elsődleges felület |
 |---|---|---|
-| **Hajókereső** (hajótulajdonos, hajóügynök) | „Ki ez a hajó, milyen, ki üzemelteti, mekkora a kapacitása" | Web |
-| **Fuvarozó / logisztikus** | „Hol van a hajó, mikor ér ide, mekkora a teher" | Web + app |
-| **Balatoni utazó** | „Melyik hajó jár, hány fő, mikor indul, hol van a kikötő" | App (elsődlegesen) |
-| **Hajóbérlő / rendezvényszervező** | „Lefoglalható-e a hajó, milyen a felszerelése, van-e étterem/WC" | Web + app |
-| **Hajóügynök / operátor** | „A saját hajóm adatai rendben vannak-e, jönnek-e érdeklődők" | Web (szerkesztői belépés) |
+| **Hajó érdeklődő** (hajótulajdonos, hajóügynök, turista, hobbista) | „Ki ez a hajó, milyen, ki üzemelteti, mekkora a kapacitása" | Web |
 | **Szerkesztő (redakció)** | „Frissítsem a hajó adatait, a tájékoztatókat, a fordításokat" | Web (admin) |
 | **Fejlesztő / B2B partner** | „Programozottan elérhető hajóadat" | API |
 
@@ -69,6 +65,7 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 | F-CAT-11 | A katalógus üzemeltető szerinti aggregált nézetben is megjeleníthető („ez a cég hajói") | S | R1 |
 | F-CAT-12 | A katalógus exportálható (CSV) kiválasztott szűréssel | L | R3 |
 | F-CAT-13 | A katalógus összehasonlító nézet: legfeljebb 3 hajó adatlapja egymás mellett | L | R4 |
+| F-CAT-14 | A katalógus szűrhető az **azonosítás bizonyossági szintjére** (AIS-azonosított / csak MMSI / üzemeltető igazolta / csak név) | S | R1 |
 
 ### 4.2 B. Hajóadatlap (R1)
 
@@ -87,6 +84,9 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 | F-DET-11 | Az adatlapra a felhasználó küldhet **javító észrevételt** (hiányzó vagy elavult adat), ami a szerkesztői felületre kerül | S | R1 |
 | F-DET-12 | Az adatlap nyomtatható / PDF-ként menthető (szerkesztői felhasználás) | L | R4 |
 | F-DET-13 | Az adatlap tükrözi a fordítások teljességét: hiányzó fordításnál jelzi, hogy a megjelenített adat csak az adott nyelven érvényes | S | R1 |
+| F-DET-14 | Az adatlap fejlécében **bizonyossági badge**: mennyire megbízható a hajó azonosítása (AIS-azonosított ENI-vel, csak MMSI, üzemeltető igazolta, csak név) | M | R1 |
+| F-DET-15 | **Mezőnkénti forrásjelölés**: minden adatnál látszik, honnan származik (AIS / az üzemeltető adata / hatósági / szerkesztői) és mikor frissült | M | R1 |
+| F-DET-16 | A hiányzó adat **üresen és jelölve** jelenik meg (adat nélkül), nem találgatott értékkel | M | R1 |
 
 ### 4.3 C. Keresés és szűrés (R1)
 
@@ -185,6 +185,8 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 | F-ADM-05 | A fordítási hiánylista: mely kulcsok/szövegek hiányoznak vagy elavultak | S | R1 |
 | F-ADM-06 | Előnézet a hajóoldal minden nyelvén, a megjelenés ellenőrzéséhez | S | R1 |
 | F-ADM-07 | Tömeges import hajólista CSV-ből (ENI-vel) | M | R1 |
+| F-ADM-08 | Az üzemeltetői önbevallás (claim) kezelése: beérkezett kérelmek listája, egyeztetés az AIS-rekorddal, jóváhagyás vagy elutasítás indoklással | M | R1 |
+| F-ADM-09 | Konfliktuskezelés: ha az AIS-adat és az üzemeltetői állítás eltér, **mindkettő látszik**, és a szerkesztő dönt | M | R1 |
 
 ### 4.11 K. B2B API (R5)
 
@@ -231,6 +233,10 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 | F-NF-14 | Adatvédelem | Cookie-banner, GDPR-nyilatkozat, fióktörlés önkiszolgáló | megfelelő |
 | F-NF-15 | Karbantarthatóság | A katalógus API visszafelé kompatibilis (verziózott séma) | – |
 | F-NF-16 | Nyelvi minőség | Minden publikált fordítás átnézett (nem gépi egyezés) | 100% |
+| F-NF-17 | Adatminőség | A katalógusban nincs **fantom hajó** (olyan AIS-rekord, aminek nincs víz feletti pozíciója) | 0 db |
+| F-NF-18 | Adatminőség | A Duna-katalógus hajóinak ≥ 60%-a ENI-vel azonosított (AIS Inland FI 10 alapján) | ≥ 60% |
+| F-NF-19 | Adatminőség | A hajóméret AIS-értéke mindenhol **AIS méretként** jelölve, a konvojméretek korlátja feltüntetve | 100% |
+| F-NF-20 | Adatminőség | A merülés mindenhol az **RNW-re** vonatkozó jelöléssel jelenik meg | 100% |
 
 ---
 
@@ -240,45 +246,49 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 
 | Csoport | Mező | Forrás | Kötelező |
 |---|---|---|---|
-| Azonosítás | ENI (8 jegy) | ENI-nyilvántartás | igen |
-| | IMO-szám | hajószám-adatbázis | ha van |
-| | MMSI | AIS | igen |
-| | Hívójel (call sign) | AIS / hajószám | igen |
-| | Korábbi nevek | nyilvántartás története | opcionális |
-| Osztályozás | UN E-rek. 28 szerinti típuskód | hajószám-adatbázis | igen |
+| Azonosítás | ENI (8 jegy) | **AIS – Inland FI 10** | ha van |
+| | IMO-szám | AIS (belvízi hajónál nem érvényes) | ha van |
+| | MMSI | **AIS** | igen |
+| | Hívójel (call sign) | **AIS – Message 5** | igen |
+| | Korábbi nevek | üzemeltetői állítás / szerkesztői | opcionális |
+| Osztályozás | ERI-típuskód (UN E-rek. 28 szerinti) | **AIS – Inland FI 10** | igen |
 | | Szállítási kategória (száraz teher / folyadék / vegyes / személy / munkahajó / kishajó) | származtatott | igen |
 | | Önjáró / nem önjáró (bárka) | származtatott | igen |
-| Műszaki | Hossz, szélesség, max. merülés | hajószám-adatbázis | igen |
-| | Bruttó tonnage, teherkapacitás (DWT), TEU | hajószám-adatbázis | igen |
-| | Motorteljesítmény, építési év | hajószám-adatbázis | igen |
-| Tulajdonos | Üzemeltető / tulajdonos | hajószám-adatbázis | igen |
-| | Zászlóállapot, hazai kikötő | hajószám-adatbázis | igen |
-| | Közlekedési engedély hatályossága | KH / engedély | igen |
+| Műszaki | Hossz, szélesség | **AIS méret** (figyelem: lehet konvojméret) | igen |
+| | Max. merülés (RNW-re) | **AIS – Inland FI 10** | igen |
+| | Bruttó tonnage, teherkapacitás (DWT), TEU | üzemeltetői állítás | opcionális |
+| | Motorteljesítmény, építési év | üzemeltetői állítás | opcionális |
+| Tulajdonos | Üzemeltető / tulajdonos | **üzemeltetői önbevallás** | opcionális |
+| | Zászlóállapot | **AIS – Inland FI 10** (UN country code) | igen |
+| | Hazai kikötő | üzemeltetői állítás / szerkesztői | opcionális |
+| | Közlekedési engedély hatályossága | üzemeltetői állítás | opcionális |
 | Állapot | Aktív / állandóan álló / nem közlekedik | származtatott | igen |
-| Terület | Leggyakoribb vízi szakasz (szövegesen, R1) | AIS-ből származtatott | opcionális |
-| | Érintett kikötők | AIS-ből származtatott | opcionális |
-| Történet | Tulajdonosváltás, átalakítás (dátumtartomány) | nyilvántartás | opcionális |
+| Terület | Leggyakoribb vízi szakasz (szövegesen, R1) | **AIS – fairway section** | opcionális |
+| | Érintett kikötők | **AIS – cél UN/LOCODE** | opcionális |
+| Történet | Tulajdonosváltás, átalakítás (dátumtartomány) | üzemeltetői állítás | opcionális |
 | Belső | Forrás, frissítés dátuma, megjegyzés | belső | igen |
 
 ### 6.2 Balatoni hajó adatlap mezői
 
 | Csoport | Mező | Forrás | Kötelező |
 |---|---|---|---|
-| Azonosítás | Nemzetkövi hajószám (call sign) | nyilvántartás | nagyhajónál igen |
-| | Nemzeti hajónyilvántartási szám | nyilvántartás | igen |
-| | IMO-szám (a nemzetközi hajószámhoz tartozó, ha van) | nyilvántartás | ha van |
-| | Hajónév | nyilvántartás | igen |
-| Osztályozás | Kategória: nagyhajó (több mint 100 fő) / személyhajó / komp / szolgálati hajó / munkagép / kishajó / vitorlás | nyilvántartás | igen |
+| Azonosítás | Nemzetközi hajószám (call sign) | üzemeltetői lista / AIS | nagyhajónál igen |
+| | Nemzeti hajónyilvántartási szám | üzemeltetői lista | igen |
+| | IMO-szám (ha van) | AIS / üzemeltetői lista | ha van |
+| | Hajónév | üzemeltetői lista / AIS | igen |
+| Osztályozás | Kategória: nagyhajó (több mint 100 fő) / személyhajó / komp / szolgálati hajó / munkagép / kishajó / vitorlás | üzemeltetői lista | igen |
 | | Ezen belül: „nosztalgia-hajó" / modern motoros hajó | üzemeltető | opcionális |
-| Műszaki | Befogadóképesség (fő), hossz, szélessé | nyilvántartás | igen |
+| Műszaki | Befogadóképesség (fő), hossz, szélesség | üzemeltetői lista | igen |
 | | Szolgáltatások: fedélzet, étterem, WC, akadálymentesség, védett hely | üzemeltető | opcionális |
-| Üzemeltető | Cég neve, webhely, elérhetőség | üzemeltető / KH | igen |
-| Szezon | Szezonban közlekedik (dátumtartomány), heti menetrend hivatkozás | üzemeltető / KH | igen |
-| Terület | Medence (nyugati / középső / keleti), partkm | nyilvántartás / számítás | opcionális |
-| Kikötő | Hozzáférhető kikötők, kikötőrend hivatkozás | KH / üzemeltető | opcionális |
+| Üzemeltető | Cég neve, webhely, elérhetőség | üzemeltető saját oldala | igen |
+| Szezon | Szezonban közlekedik (dátumtartomány), heti menetrend hivatkozás | üzemeltető | igen |
+| Terület | Medence (nyugati / középső / keleti), partkm | szerkesztői meghatározás | opcionális |
+| Kikötő | Hozzáférhető kikötők, kikötőrend hivatkozás | **publikált kikötőrend** | opcionális |
 | Belső | Forrás, frissítés dátuma | belső | igen |
 
-**Különbség a két terület között, ami a sémát is meghatározza:** a Duna-hajónál az *azonosítás központi* (ENI, MMSI, IMO mind létezik, és mind kereshető), a Balaton-hajónál az *azonosítás gyenge* (a nagyhajóknál van nemzetközi hajószám, a kishajóknál és a vitorlásnál nincs) — ott a *szolgáltatás és a szezon* a keresési és döntési alap. Ezért a katalógus szűrői is területenként eltérnek.
+**Különbség a két terület között, ami a sémát is meghatározza:** a Duna-hajónál az *azonosítás központi* (MMSI mindig van, ENI a belvízi AIS-ből jön, és mind kereshető), a Balaton-hajónál az *azonosítás gyenge* (a nagyhajóknál van nemzetközi hajószám, a kishajóknál és a vitorlásnál nincs) — ott a *szolgáltatás és a szezon* a keresési és döntési alap. Ezért a katalógus szűrői is területenként eltérnek.
+
+**Adatforrás-táblázat:** a mezők forrásának részletes táblázata a [`r1-adat-terv.md`](r1-adat-terv.md) 6. fejezetében van (AIS / üzemeltetői állítás / publikált hatósági anyag szerinti bontásban).
 
 ### 6.3 Katalógusszűrők területenként
 

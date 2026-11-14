@@ -1,11 +1,13 @@
 # Dunai hajókövető – adatbázis terv
 
-**Verzió:** 1.1 (2026-11-14)
+**Verzió:** 1.2 (2026-11-14)
 **Hatály:** a készülő weboldal és mobilapplikáció közös, háttérben futó adatbázise
 **Nyelvek:** magyar (hu) · német (de) · angol (en)
 **Területek:** Duna-rendszer és Balaton-tó – elkülönítve (2.10 fejezet)
 
 **Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+
+**v1.2 változás:** **AIS-first azonosítási modell** – a hajó elsődleges kulcsa az MMSI (nem az ENI), az ENI az AIS Inland FI 10 üzenetből érkezik opcionális enrichmenteként; új `vessel_data_origin` mezőnkénti eredettábla és `verification_level` (bizonyossági szint). A folyó-km közvetlenül az AIS fairway hectometre mezőből jön (a Duna km-skálája: Sulina 0), így a geometriai km-illesztés kiesik. Új: `draught_reference` (RNW).
 
 **v1.1 változás:** Balaton elkülönítése (terület-diszcriminátor, `vessel_identifier` mellék-tábla, szezon- és menetrend-táblák), valamint az első release (R1) katalógus-központú igényéhez igazított azonosítási modell.
 
@@ -17,7 +19,7 @@
 |---|---|---|
 | Adatbázis-motor | **PostgreSQL 16 + PostGIS 3.4** | Erős relációs modell, kiforrott geospatial (Pont/LineString), partícionálás, JSONB, szabványos SQL, olcsó üzemeltetés |
 | Földrajzi modell | PostGIS `geometry(Point,4326)` + **folyó-km** (`river_km`) első osztályú attribútumként | A Dunán a „hová tartasz" kérdés a km-hez képest értelmezhető; a GPS-koordináta önmagában nem elég |
-| Hajóazonosítás | **ENI** (8 jegyű, EU-s belvízi hajószám) elsődleges kulcs, **MMSI** másodlagos | Az ENI az élete végéig állandó (2016/1629/EU irányelv 18. cikk), az MMSI újrakiosztható |
+| Hajóazonosítás | **MMSI** az elsődleges kulcs (minden AIS-hajónál van), **ENI** opcionális (a belvízi AIS Inland FI 10 üzenet első mezője) | Az MMSI sosem hiányzik; az ENI csak Inland AIS felszerelésnél érkezik, de akkor a hajó egész életére szól (2016/1629/EU 18. cikk) |
 | Területi elkülönítés | A `vessel.operating_area` mező választja el a **Dunát** és a **Balatont**, külön azonosító-táblával | A Balaton-hajóknak nincs ENI-jük, a hajószámuk a kulcs; egyetlen „összes hajó" lista félrevezető lenne (lásd 13. fejezet) |
 | Fő nyelvi modell | Fordítás **mellék-táblákban** (`*_i18n`), nem `name_hu/name_de/name_en` oszlopokban | A fordítandó mezők száma és halmaza entitásonként változik; 3 nyelv esetén 40+ táblánál a „nulla vagy három" oszlopminta karbantartási réteget |
 | Élő adat | AIS-pozíció **előzménnyel**, havi partícionálással, 30 s → 5 perc → 1 óra felbontás-lépcsővel | 1 perc feletti pontosság a térképen nem látszik, viszont a tárolás 10×-es |
@@ -322,14 +324,15 @@ erDiagram
 
 | Tábla | Oszlopok (típus) | Megjegyzés |
 |---|---|---|
-| `vessel` | `id` PK, `eni` UQ-null char(8), `imo` UQ-null char(7), `mmsi` UQ-null, `callsign`, `vessel_type_id` FK, `operating_area` (duna/balaton), `flag_country_code` FK, `operator_id` FK, `home_port_id` FK, `build_year`, `length_m`, `beam_m`, `draught_max_m`, `gross_tonnage`, `deadweight_t`, `teu`, `power_kw`, `ais_class` (A/B/C), `status` (active/inactive/scrapped), `is_passenger_certified`, `passenger_capacity`, `source_id` FK, `valid_from`, `valid_to`, `updated_at` | A Duna-hajóknál az `eni` kötelező, a Balaton-hajóknál üres – ezért az `eni` egyediség csak részleges indexként (`WHERE eni IS NOT NULL`) érvényes; a többi azonosító a `vessel_identifier` mellék-táblában (13. fejezet). `valid_from/valid_to`: temporális táblázat a hajónév- és státuszváltozásokhoz |
+| `vessel` | `id` PK, `mmsi` UQ-null (elsődleges kulcs), `eni` UQ-null char(8), `imo` UQ-null char(7), `callsign`, `vessel_type_id` FK, `operating_area` (duna/balaton), `flag_country_code` FK, `operator_id` FK, `home_port_id` FK, `build_year`, `length_m`, `beam_m`, `draught_max_m`, `draught_reference` (RNW), `gross_tonnage`, `deadweight_t`, `teu`, `power_kw`, `ais_class` (A/B/C), `status` (active/inactive/scrapped), `verification_level` (ais_identified/ais_partial/operator_claimed/name_only), `is_passenger_certified`, `passenger_capacity`, `source_id` FK, `valid_from`, `valid_to`, `updated_at` | **MMSI az elsődleges kulcs** (AIS-ből mindig jön), az `eni` részleges egyediségű (`WHERE eni IS NOT NULL`, AIS Inland FI 10-ből). `verification_level` = a felhasználónak megjelenő bizonyossági badge. `draught_reference` a Duna RNW-re hivatkozik (szabályos alacsony vízállás), mert az AIS-merülés ehhez képest értendő. `valid_from/valid_to`: temporális táblázat |
 | `vessel_i18n` | PK(`vessel_id`,`lang`), `name`, `description` | |
 | `vessel_alias` | `id` PK, `vessel_id` FK, `name`, `name_type` (former/official/shipyard), `valid_from`, `valid_to` | |
 | `vessel_cert` | `id` PK, `vessel_id` FK, `cert_type`, `authority`, `issued_at`, `expires_at`, `document_ref` | |
 | `operator` | `id` PK, `legal_name`, `country_code`, `website`, `founded` | `operator_i18n` |
 | `convoy` | `id` PK, `lead_vessel_id` FK, `convoy_type`, `formed_at`, `dissolved_at`, `status` | |
 | `convoy_member` | PK(`convoy_id`,`vessel_id`), `role` (lead/push/barge/towed), `position_in_unit` | A bárka-sorrend a fizikai becsléshez kell |
-| `vessel_identifier` | `id` PK, `vessel_id` FK, `identifier_type` (eni/imo/mmsi/callsign/national_reg_no/internal_code), `value`, `is_primary`, `valid_from`, `valid_to`, `source_id` FK | Területenként eltérő azonosítók (13. fejezet); egyértelműség: egy típusra egy aktív érték |
+| `vessel_identifier` | `id` PK, `vessel_id` FK, `identifier_type` (eni/imo/mmsi/callsign/national_reg_no/internal_code), `value`, `is_primary`, `origin` (ais/official/operator_claimed), `valid_from`, `valid_to`, `source_id` FK | Területenként eltérő azonosítók (13. fejezet); egyértelműség: egy típusra egy aktív érték. Az `eni` AIS Inland FI 10-ből érkezik, a hívójel Message 5-ből |
+| `vessel_data_origin` | `id` PK, `vessel_id` FK, `field_name`, `origin` (ais/operator_claimed/official/editorial), `value_snapshot`, `source_id` FK, `observed_at`, `confidence`, `is_current` bool | **Mezőnkénti eredet és előzmény.** Egy mezőnek több eredete lehet (AIS + üzemeltetői állítás); a konfliktus a felületen látható. A `vessel` az aktuális értéket tartja (gyors olvasás), ez a tábla a történetet |
 | `vessel_service_period` | `id` PK, `vessel_id` FK, `season_start`, `season_end`, `service_status` (seasonal/year_round/suspended), `source_id` FK | Balatoni szezonlogika; a Duna-hajóknál `year_round` |
 | `vessel_schedule` | `id` PK, `vessel_id` FK, `route_id` FK, `weekday`, `departure_time`, `valid_from`, `valid_to` | Balatoni heti menetrend (R3) |
 
@@ -338,7 +341,7 @@ erDiagram
 | Tábla | Oszlopok | Partíció / index |
 |---|---|---|
 | `ais_message_raw` | `id`, `vessel_id`, `received_at`, `msg_type`, `raw_nmea` text, `source_id` | Havi partíció, 14 nap TTL |
-| `position` | `vessel_id`, `ts`, `geom` Point, `sog_mps`, `cog_deg`, `heading_deg`, `nav_status`, `rot_deg`, `ais_accuracy_m`, `lat_e7`, `lon_e7`, `source_id`, `source_kind` (ais/derived/manual), `ingested_at` | Havi partíció; PK(`vessel_id`,`ts`); BRIN(ts); GiST(geom) az aktuális partíciókon |
+| `position` | `vessel_id`, `ts`, `geom` Point, `sog_mps`, `cog_deg`, `heading_deg`, `nav_status`, `rot_deg`, `ais_accuracy_m`, `lat_e7`, `lon_e7`, `river_km`, `river_section_id` FK, `basin_id` FK, `shoreline_km`, `source_id`, `source_kind` (ais/derived/manual), `ingested_at` | Havi partíció; PK(`vessel_id`,`ts`); BRIN(ts); GiST(geom) az aktuális partíciókon. A `river_km` **közvetlenül az AIS fairway hectometre mezőből** jön (Inland FI 10), nem geometriai illesztésből |
 | `position_archive` | Ugyanaz, 5 perces aggregációval (`avg_sog`, `sample_count`) | Éves partíció, BRIN |
 | `position_hourly` | Ugyanaz, 1 órás aggregációval | Éves partíció |
 | `ais_gap` | `id` PK, `vessel_id` FK, `from_ts`, `to_ts`, `reason`, `detected_at` | |
@@ -534,7 +537,7 @@ A(z) {vessel} hajó {delay} perc késéssel érkezik a(z) {port} kikötőbe.
 | `position` | `BRIN (ts)` | A kronologikus beillesztés miatt a BRIN rendkívül tömör |
 | `position` (csak az aktuális + 1 hó) | `GiST (geom)` | Térkép-nézőzet; régebbi partíciókon nem kell |
 | `position` | `BRIN (geom)` (PostGIS 3.x) | Nagy partíciók olcsó alternatíva a GiST-hez |
-| `vessel` | `UNIQUE (eni)`, `UNIQUE (mmsi) WHERE mmsi IS NOT NULL` | Azonosítás |
+| `vessel` | `UNIQUE (mmsi) WHERE mmsi IS NOT NULL`, `UNIQUE (eni) WHERE eni IS NOT NULL` | Azonosítás; a kulcs az MMSI, az ENI enrichmentszám |
 | `vessel_i18n` | `GIN (name gin_trgm_ops)` | Keresés hajónévre 3 nyelven |
 | `port` | `GiST (geom)`, `UNIQUE (unlocode)` | |
 | `notice`/`article` | `GIN (tsvector)` (HU: `simple` + hunstem, DE: `german`, EN: `english`) | Full-text keresés |
@@ -573,7 +576,7 @@ A(z) {vessel} hajó {delay} perc késéssel érkezik a(z) {port} kikötőbe.
 A GPS-pont önmagában nem elég a térképi megjelenítéshez és a szűréshez. Ezért:
 
 1. `geom` PostGIS `Point(4326)` – a tényleges pozíció.
-2. `river_km` – **tranzakció nélküli, denormalizált** érték, amelyet az ingest réteg számol a legközelebbi `river_km_point` pont alapján. Denormalizálás azért kell, mert a térkép-lekérdezés szűrése (`river_km BETWEEN x AND y`) millió soron fut – ezt nem lehet minden lekérdezéskor PostGIS-tel számolni.
+2. `river_km` – **tranzakció nélküli, denormalizált** érték, amelyet az ingest réteg **az AIS Inland FI 10 „fairway hectometre" mezőjéből** vesz át. A Duna km-számlálása egységes (0 km = Sulina, felfelé nő; Duna Bizottság, WSV Streckenatlas), és az AIS ugyanebben a skálában közli – **így nincs szükség geometriai km-illesztésre**, és a szűrés (`river_km BETWEEN x AND y`) millió soron futó indexen olvasódik. Tartalék eljárásként (a régebbi, nem FI 10-es hajóknál) megmarad a geometriai illesztés, `source_kind = 'derived'` jelöléssel.
 3. `river_section_id` – a szakasz, amelybe a pont esik (szintén denormalizált).
 4. `lat_e7` / `lon_e7` – egész számokban tárolt koordináta (1 cm-es pontosság), a hosszú távú tárolás és a kompresszió kedvéért.
 
