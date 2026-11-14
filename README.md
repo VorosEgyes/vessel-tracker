@@ -5,7 +5,7 @@
 **Nyelvek:** magyar (hu) · német (de) · angol (en)
 **Területek:** Duna-rendszer és Balaton-tó – elkülönítve (2.10 fejezet)
 
-**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/ais-vevo-terv.md`](docs/ais-vevo-terv.md) (saját AIS vevőhálózat) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/ais-vevo-terv.md`](docs/ais-vevo-terv.md) (saját AIS vevőhálózat) · [`docs/pi-eloallitas.md`](docs/pi-eloallitas.md) (Pi előállítás: AIS + ADS-B) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
 
 **v1.3 változás:** a **saját AIS vevőhálózat** mint elsődleges adatbeszerzési mód rögzítése (új `ais_receiver_site` tábla), és a **Balaton-katalógus hatókörének szűkítése** (kishajók és vitorlások kihagyása).
 

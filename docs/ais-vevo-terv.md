@@ -1,7 +1,7 @@
 # Saját AIS vevőhálózat – tervezés
 
 **Verzió:** 1.0 (2026-11-14)
-**Kapcsolódó dokumentumok:** [`r1-adat-terv.md`](r1-adat-terv.md) (8. fejezet: a feed) · [`release-terv.md`](release-terv.md) (R1-0 fázis) · [`../README.md`](../README.md) (adatbázis terv)
+**Kapcsolódó dokumentumok:** [`r1-adat-terv.md`](r1-adat-terv.md) (8. fejezet: a feed) · [`release-terv.md`](release-terv.md) (R1-0 fázis) · [`pi-eloallitas.md`](pi-eloallitas.md) (a Pi előkészítése lépésről lépésre) · [`../README.md`](../README.md) (adatbázis terv)
 
 ---
 
@@ -289,6 +289,8 @@ A vevő nem csak adatot ad – **adatarchívumot** épít, amit a termék késő
 ## 10. A Budapesti vevő – konkrét konfiguráció és értékelés
 
 **Terv (2026-11-14):** egyetlen vevő, Budapest, a parttól ~2 km-re, egy lakóház 3. emeletén. Hardver: Raspberry Pi 3B+ + RTL2832U USB dongle.
+
+> **A konkrét telepítési lépések** (OS, SDR-driver, AIS-catcher, systemd, hűtés, biztonság) külön dokumentumban vannak: [`pi-eloallitas.md`](pi-eloallitas.md) – és ugyanott az **ADS-B lánc** beállítása is, ha a Pi-t a Flightradar24-feedhez is használod.
 
 ### 10.1 A lefedettség – a konkrét számok
 
