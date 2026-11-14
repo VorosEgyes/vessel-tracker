@@ -69,7 +69,7 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 
 ### 3.4 Adathátter (milyen adat kell az R1-hez)
 
-> **A részletes adat-terv: [`r1-adat-terv.md`](r1-adat-terv.md)** – forrásmátrix, mezőnkénti kitöltöttség, validációs szabályok, pipeline, átvételi küszöbök. Az alábbi táblázat az összefoglaló.
+> **A részletes adat-terv: [`r1-adat-terv.md`](r1-adat-terv.md) · [`ais-vevo-terv.md`](ais-vevo-terv.md)** – forrásmátrix, mezőnkénti kitöltöttség, validációs szabályok, pipeline, átvételi küszöbök. Az alábbi táblázat az összefoglaló.
 
 | Adat | Honnan | Mennyi | Kockázat |
 |---|---|---|---|
@@ -92,7 +92,7 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 
 | Fázis | Időtartam | Tartalom |
 |---|---|---|
-| **R1-0** | **2–3 hónap a formális R1 előtt** | Feed megkötése, parser, statikus adatok gyűjtése, „fantom"-szűrő kidolgozása |
+| **R1-0** | **3–6 hónap a formalis R1 előtt** | **Saját AIS vevőhálózat építése** (próbavevő → 30 napos mérés → F1 site-ek), parser, statikus adatok gyűjtése, „fantom"-szűrő kidolgozása – részletek: [`ais-vevo-terv.md`](ais-vevo-terv.md) |
 | **R1** | – | A katalógus a gyűjtött statikus adatból épül fel |
 
 Az R1-0 nem nyilvános release, de **a projekt legfontosabb időablaka**: ha itt csúszik, az R1 is csúszik. A feed kiválasztása ezért az **első döntés**, nem a fejlesztés második hete.
@@ -132,8 +132,9 @@ Az R1-0 nem nyilvános release, de **a projekt legfontosabb időablaka**: ha itt
 
 | Kockázat | Valószínűség | Hatás | Mitigáció |
 |---|---|---|---|
-| **A feed lefedettsége a Dunán gyenge** (főként S-AIS, a köztes vízi szakaszok kimaradnak) | közepes | a katalógusban hiányzó hajók | A feed kiválasztásakor **kifejezetten a magyar szakasz lefedettségét** kell mérni (próbaüzem, 1 hónap, „hány magyar hajót látunk naponta"); ennek a mérésnek az eredménye a go/no-go |
-| **A statikus adatok csak hetek-hónapok alatt gyűlnek össze** | biztos | az R1 indulása csúszik | Az **R1-0 előkészítő fázis** (2–3 hónap) a terv része, nem egy plusz |
+| **A saját vevő lefedettsége nem elég** a teljes magyar Duna-szakaszra | közepes | a katalógusban hiányzó hajók | A **30 napos próbavevős mérés** (Budapest) a go/no-go: ha nem éri el a magyar flotta 50%-át, F1 helyett S-AIS feed + vevő hibrid; a telephelyek számát a mérésből méretezjük |
+| **A telephelyek engedélyezése elakad** | közepes | egy site csúszik, a hálózat építése lassul | Minden site-hoz 2–3 tartalék telephely; a kikötők és vízügyi objektumok a legegyszerűbbek |
+| **A statikus adatok csak hetek-hónapok alatt gyűlnek össze** | biztos | az R1 indulása csúszik | Az **R1-0 előkészítő fázis** (3–6 hónap) a terv része, nem egy plusz |
 | A „fantom" hajók (szárazföldi pozíciók) bekerülnek a katalógusba | magas | hitelességi probléma | Pozícióalapú szűrő kötelező a pipeline-ban, a folyó geometriáján belül |
 | A Balatoni hajólista nem áll össze egyetlen forrásból | magas | gyenge Balaton-katalógus | Két megközelítés együtt: üzemeltetői oldalak kézi begyűjtése (~15 üzemeltető) + AIS a nagyhajókra |
 | Az üzemeltetők nem élnek a claimmel (a kapacitás/év hiányzik) | közepes | a katalógus „félkész" | A hiányzó mező a felületen **„adat nélkül"** jelenik meg, nem elrejtve; a claim előnye a keresésben és a szűrésben |
@@ -145,13 +146,13 @@ Az R1-0 nem nyilvános release, de **a projekt legfontosabb időablaka**: ha itt
 
 | Sprint | Tartalom | Kimenetel |
 |---|---|---|
-| 0. (R1-0) | **Feed megkötése, AIS parser (Msg 5 + Inland FI 10), „fantom"-szűrő, statikus gyűjtés indítása** – részletek: [`r1-adat-terv.md`](r1-adat-terv.md) 8. és 11. fejezet | Folyamatosan bővülő AIS-adatbázis |
+| 0. (R1-0) | **Saját AIS vevő: próbavevő + 30 napos mérés + F1 site-ek**, parser (Msg 5 + Inland FI 10), „fantom"-szűrő, statikus gyűjtés – részletek: [`ais-vevo-terv.md`](ais-vevo-terv.md) | Folyamatosan bővülő AIS-adatbázis |
 | 1. | Séma, fordítási infrastruktúra, projekt-alapozás (CI, környezetek, migrációk) | Adatbázis váz, nyelvi kulcsok |
 | 2. | **Adatfeldolgozás és -bevitel** (AIS-ból), „fantom"-szűrés, üzemeltetői claim, szerkesztői felület v1 | Valós adat a DB-ben |
 | 3. | Katalóguslista, szűrés, rendezés, kereső, hajóadatlap | Működő katalógus (belső) |
 | 4. | i18n véglegesítés, SEO, statikus tartalomoldalak, API v1, dokumentáció, hibajegyzet | **R1 kiadás** |
 
-> **A sprint-sorrend nem véletlen:** a 2. sprint azért megy a 3. elé, mert a 3. sprint felülete a 2. sprintben behozott adat nélkül nem lenne megmutatható. **Az R1 legnagyobb ütemezési kockázata az AIS feed:** a statikus hajóadat hetek-hónapok alatt gyűl össze, ezért a 0. sprint (előkészítő) a formális R1 **eleje**, nem utólagos teendő.
+> **A sprint-sorrend nem véletlen:** a 2. sprint azért megy a 3. elé, mert a 3. sprint felülete a 2. sprintben behozott adat nélkül nem lenne megmutatható. **Az R1 legnagyobb ütemezési kockázata az adatbeszerzés:** a statikus hajóadat hetek-hónapok alatt gyűl össze, ezért a 0. sprint (előkészítő, saját vevő építése) a formális R1 **eleje**, nem utólagos teendő.
 
 ---
 

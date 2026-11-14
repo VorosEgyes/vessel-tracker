@@ -1,7 +1,7 @@
 # R1 adat-terv – AIS-first hajókatalógus
 
-**Verzió:** 2.0 (2026-11-14) — *az 1.0 teljesen újraírásra került, lásd 0. fejezet*
-**Kapcsolódó dokumentumok:** [`funkcio-leiras.md`](funkcio-leiras.md) · [`release-terv.md`](release-terv.md) · [`../README.md`](../README.md) (adatbázis terv)
+**Verzió:** 2.1 (2026-11-14) — *az 1.0 teljesen újraírásra került, lásd 0. fejezet; a 2.1 a feed-döntést és a Balaton-hatókört rögzíti*
+**Kapcsolódó dokumentumok:** [`funkcio-leiras.md`](funkcio-leiras.md) · [`release-terv.md`](release-terv.md) · [`../README.md`](../README.md) (adatbázis terv) · [`ais-vevo-terv.md`](ais-vevo-terv.md) (saját AIS vevőhálózat)
 
 ---
 
@@ -16,7 +16,11 @@ Az 1.0 verzió a katalógust a **Közlekedési Hatóság hajólajstromjára** é
 
 > **A katalógus AIS-ból épül fel. Amit az AIS nem ad, azt az üzemeltető önbevallása pótolja. Amit sem az AIS, sem az üzemeltető nem ad, az nem jelenik meg – és nincs is rá igény.**
 
-Ez a terv **nem függ hatósági adatkéréstől**. Csak egy **AIS feedtől** – és azt R1-ben *statikus adatgyűjtésre* használjuk, nem pozíciókra.
+Ez a terv **nem függ hatósági adatkéréstől**. Az AIS-adatot **saját vevőhálózattal** gyűjtjük ([`ais-vevo-terv.md`](ais-vevo-terv.md)), és azt R1-ben *statikus adatgyűjtésre* használjuk, nem pozíciókra.
+
+> **Rögzített döntések (2026-11-14):**
+> 1. **Adatbeszerzés:** ha a legális feed-hozzáférés nem megoldható (és a scraping szolgáltatói feltételeket sért), **saját AIS vevőhálózat** épül. A részletes terv: [`ais-vevo-terv.md`](ais-vevo-terv.md).
+> 2. **Balatoni hatókör:** a **vitorlások és kishajók nem kerülnek be** a katalógusba. A Balaton-katalógus a jelentős motoros hajókat tartalmazza (nagyhajók, kompok, szolgálati hajók, úszó munkagépek, uszályok) — kb. **80–100 rekord**.
 
 ### Mi változott a v1 → v2 összevetésben
 
@@ -120,7 +124,7 @@ Ez a legkevésbé várt, de leghasznosabb megkönnyítés.
 
 | Réteg | Tartalom | Forrás | Megbízhatóság | Felhasználói jelölés |
 |---|---|---|---|---|
-| **A – AIS statikus** | ENI, MMSI, hívójel, név, típus, méretek, merülés, zászló | Inland FI 10 + Message 5 | nagy (a hajó önkényes adata) | „AIS alapján" |
+| **A – AIS statikus** | ENI, MMSI, hívójel, név, típus, méretek, merülés, zászló | Inland FI 10 + Message 5 – **saját vevőhálózatból** | nagy (a hajó önkényes adata) | „AIS alapján" |
 | **B – AIS útvonal** | folyó-km, szakasz, célkikötő, terminál, ETA zsilipnél, rakomány-jelölés, vontatók száma | Inland FI 10 | nagy, idővel változó | „AIS alapján" |
 | **C – Üzemeltetői önbevallás** | üzemeltető, kapacitás, építési év, szolgáltatások, szezon, fotó | claim űrlap (4. fejezet) | közepes – de ellenőrizhető | „Az üzemeltető adata" |
 | **D – Publikált hatósági anyag** | kikötőrendek, tájékoztatók, Duna Bizottság port-km táblázat, Danube Commission flotta-statisztika | nyilvános PDF | nagy | „Hatósági adat" |
@@ -204,13 +208,15 @@ A `vessel` rekord tárolja az **aktuális** értéket (a gyors olvasás kedvéé
 
 | Tény | Következmény |
 |---|---|
-| A Balatonon ~40–50 kishajó és több száz vitorlás van, ezek **nincsenek AIS-felszereléssel** | Az AIS itt **nem fedi le** a katalógust – a megközelítés megfordul |
+| A Balatonon ~40–50 kishajó és több száz vitorlás van, ezek **nincsenek AIS-felszereléssel** – és **a döntés alapján nem is kerülnek be** a katalógusba | Az AIS itt **nem fedi le** a katalógust, de a kizárt hajók miatt ez nem probléma: a maradék ~80–100 jelentős motoros hajó nagy része AIS-elhető |
 | A nagyhajók (Szent György, Jókai, Csongor, Balaton katamarán…) **vannak AIS-en** | A nagyhajók AIS-ből kiegészíthetők |
 | A kikötőrendek és tájékoztatók **publikáltak** (KH, Balatoni Hajózási Zrt.) | A kikötő-adatokhoz **nem kell adatkérés** |
-| A hajók listája az **üzemeltetők saját oldalain** van (~15 üzemeltető) | Ez a legkisebb ráfordítású és legfrissebb forrás |
+| A hajók listája az **üzemeltetők saját oldalain** van (~15 üzemeltető) | Ez a legkisebb ráfordítású és legfrissebb forrás; a kizárt kishajók miatt a lista kezelhető méretű |
 | A közlekedés **szezonális** | A szezon az üzemeltetőtől jön (claim), nem a hatóságtól |
 
 **A Balaton-katalógus tehát: üzemeltetői flottaoldalak (a gerinc) + AIS (a nagyhajók kiegészítése) + publikált kikötőrendek (a kikötők).** Nincs szükség hatósági adatkérésre.
+
+**A katalógusba kerülő Balatoni hajók (döntés szerint):** nagyhajók (több mint 100 fő), személyhajók, kompok, szolgálati hajók, úszó munkagépek, uszályok. **Nem kerülnek be:** a kishajók és a vitorlások. A teljes katalógus így ~80–100 hajó – **kézzel tartható**, és minden bejegyzéshez van ellenőrizhető forrás.
 
 > **Kockázat:** az üzemeltetői oldalak nem stabilak (a flottaoldal URL-je és tartalma évente változik). **Mitigáció:** a bevitel éves, kézi, ellenőrzött – és a `data_source` rekordban minden forráshoz mentjük a *beolvasás dátumát és a mentett URL-t*. Ha egy üzemeltető megszűnik, a rekordja nem tűnik el, csak „megerősítésre vár" státuszba kerül.
 
@@ -282,7 +288,11 @@ A `vessel` rekord tárolja az **aktuális** értéket (a gyors olvasás kedvéé
 
 ---
 
-## 8. Az AIS feed – a legelső döntés
+## 8. Az AIS adat beszerzése – a saját vevőhálózat
+
+> **A döntés (2026-11-14):** ha a legális feed-hozzáférés nem megoldható, **saját AIS vevőket építünk**. A vevőhálózat teljes terve: [`ais-vevo-terv.md`](ais-vevo-terv.md).
+
+Az alábbiak a vevőterv összefoglalója; a részletek (hardver, lefedettség-számítás, jogi keret, mérési protokoll) ott vannak.
 
 ### 8.1 Miért kell már R1-ben
 
@@ -294,19 +304,21 @@ A statikus hajóadat **ugyanabból a feedből** jön, mint a pozíció. Nem kül
 
 | Fázis | Időtartam | Tartalom |
 |---|---|---|
-| **R1-0 (előkészítő)** | **2–3 hónap a formális R1 előtt** | A feed megkötése + a statikus adatok gyűjtése, hogy a katalógus indulásra kész legyen |
+| **R1-0 (előkészítő)** | **3–6 hónap a formális R1 előtt** | **A vevőhálózat építése és a statikus adatok gyűjtése** – ha saját vevőt építünk, a statikus adat a vevő üzembe helyezése pillanatától rendelkezésre áll, tehát nincs „várakozás a feedre" |
 | R1 | – | A gyűjtött statikus adatból felépül a katalógus |
 
 Ez az ütemezésben **a legfontosabb változás** a v1-hez képest, és a release-tervet is módosítja.
 
+> **A saját vevő itt előny:** egy fizetős feedet csak a szerződés kezdetétől tudunk gyűjteni (2–3 hónap várakozás, és közben nem tudunk mérni), a saját vevő viszont **már a próbaüzem első napjától** adatot termel – ezért a mérés és a gyűjtés ugyanaz a tevékenység.
+
 ### 8.2 A feed lehetőségek
 
-| Lehetőség | Előny | Hátrány | Következő tevékenység |
+| Lehetőség | Státusz | Előny | Hátrány |
 |---|---|---|---|
-| **Fizetős aggregátor** (pl. AIS-hub, Kpler/Spire, MarineTraffic) | globális lefedettség, S-AIS is, historikus adat | költség, licencfeltételek a terjesztésre | ajánlatot kérni |
-| **Fejlesztői feed** (pl. valós idejű WebSocket feed) | olcsó, azonnal elérhető | nincs historikus adat, korlátozott lekérdezés | prototípushoz, nem élesre |
-| **Saját vevők a Dunán** | függetlenség, olcsó hosszú távon, teljes kontroll | hardver + hálózat + üzemeltetés, és a folyó mentén sok vevő kell a teljes lefedettséghez | műszaki megvalósíthatóság vizsgálata |
-| **Nemzetközi szervezeti adatok** | egyes szervezetek AIS-adatot osztanak | általában csak aggregált vagy korlátozott tartalom | megkeresés |
+| **Fizetős aggregátor** (AIS-hub, Kpler/Spire, MarineTraffic) | **tartalék opció** | globális lefedettség, S-AIS is, nincs hardvermunka | költség, licencfeltételek, a statikus adat csak a szerződés kezdetétől |
+| Fejlesztői feed (valós idejű WebSocket) | **csak prototípushoz** | olcsó, azonnal elérhető | nincs historikus adat, korlátozott lekérdezés |
+| **Saját vevőhálózat a Dunán** | **a fő út** | teljes kontroll, korlátlan historikus nyers NMEA, nincs vendor-lock, a cég saját adatbázisa | hardver + hálózat + üzemeltetés, és a folyó mentén sok site kell a teljes lefedettséghez |
+| Nemzetközi szervezeti adatok (Duna Bizottság, RIS-rendszerek) | **megkeresendő, nem a terv alapja** | a hivatalos forgalmi statisztika | általában aggregált vagy korlátozott tartalom, kutatási célra |
 
 ### 8.3 Amit a feed kiválasztásakor **döntően** vizsgálni kell
 
@@ -317,6 +329,7 @@ Ez az ütemezésben **a legfontosabb változás** a v1-hez képest, és a releas
 | **Historikus visszamenőleg** | Az R1-nek a gyűjtés alatt keletkezett statikus adatot kell kapnia |
 | **Terjesztési jog** | A nyilvános AIS-adat és a szolgáltatói licenc nem ugyanaz |
 | **Adatminőség** | Duplikált MMSI-k, hibás nevek, „ghost" hajók (a szárazföldi pozíciók) – a szárazföldi AIS-fantomok kiszűrése a katalógus minőségét közvetlenül meghatározza |
+| **A lefedettség mérése** | Egyetlen vevő nem mutatja meg a teljes lefedettséget – **30 napos próbaüzem kell**, a számok pedig csak a tervezéshez valók, ha a végleges lefedettség több site-ot igényel |
 
 > **Fontos gyakorlati részlet:** a szárazföldi (terrestrial) AIS-források **fantompozíciókat** is adnak – olyan hajókat, amelyek valójában nem a vízen vannak. A katalógusba beépülő hajók listáját ezért **pozíció-alapú szűréssel kell tisztítani** (víz felett, a folyó geometriáján belül), nem pusztán a statikus üzenet alapján. Ez egy külön szabály a pipeline-ban, és a nyers AIS-„flotta" mérete jóval nagyobb a valós flottánál.
 

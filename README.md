@@ -1,11 +1,13 @@
 # Dunai hajókövető – adatbázis terv
 
-**Verzió:** 1.2 (2026-11-14)
+**Verzió:** 1.3 (2026-11-14)
 **Hatály:** a készülő weboldal és mobilapplikáció közös, háttérben futó adatbázise
 **Nyelvek:** magyar (hu) · német (de) · angol (en)
 **Területek:** Duna-rendszer és Balaton-tó – elkülönítve (2.10 fejezet)
 
-**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/ais-vevo-terv.md`](docs/ais-vevo-terv.md) (saját AIS vevőhálózat) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+
+**v1.3 változás:** a **saját AIS vevőhálózat** mint elsődleges adatbeszerzési mód rögzítése (új `ais_receiver_site` tábla), és a **Balaton-katalógus hatókörének szűkítése** (kishajók és vitorlások kihagyása).
 
 **v1.2 változás:** **AIS-first azonosítási modell** – a hajó elsődleges kulcsa az MMSI (nem az ENI), az ENI az AIS Inland FI 10 üzenetből érkezik opcionális enrichmenteként; új `vessel_data_origin` mezőnkénti eredettábla és `verification_level` (bizonyossági szint). A folyó-km közvetlenül az AIS fairway hectometre mezőből jön (a Duna km-skálája: Sulina 0), így a geometriai km-illesztés kiesik. Új: `draught_reference` (RNW).
 
@@ -318,7 +320,7 @@ erDiagram
 | `route_stop` | `route_id` FK, `seq`, `port_id` FK, `typical_offset_h` | PK(`route_id`,`seq`) |
 | `route_i18n` | PK(`route_id`,`lang`), `name`, `description` | |
 | `cargo_type` | `code` PK, `nst_code`, `adn_code`, `imdg_code`, `is_bulk`, `is_container` | `cargo_type_i18n` |
-| `vessel_type` | `code` PK, `un_code_28`, `ais_type_code`, `cargo_category`, `is_self_propelled` bool | `vessel_type_i18n` |
+| `vessel_type` | `code` PK, `un_code_28`, `ais_type_code`, `cargo_category`, `is_self_propelled` bool, `operating_area` (duna/balaton) | `vessel_type_i18n`. A Balatoni kategoriák: nagyhajó, személyhajó, komp, szolgálati hajó, úszó munkagép, uszály – **kishajó és vitorlás nincs a katalógusban** (2026-11-14 döntés) |
 
 #### B) Flotta
 
@@ -391,6 +393,7 @@ erDiagram
 | Tábla | Oszlopok |
 |---|---|
 | `data_source` | `id` PK, `code` UQ, `name`, `provider`, `license_type`, `license_ref`, `coverage_desc`, `quality_tier`, `is_primary`, `active` |
+| `ais_receiver_site` | `id` PK, `code` UQ, `name`, `waterway_id` FK, `river_km`, `geom` Point, `antenna_height_m`, `installed_at`, `operator_name`, `status` (planned/active/maintenance/retired), `last_seen_at`, `coverage_note` — **A saját vevőhálózat telephelyei.** A `data_source`-hoz kapcsolódik; a `last_seen_at` a heartbeatből, a kiesés = adatlyuk → riasztás. A lefedettség-tervezéshez a `river_km` + `antenna_height_m` a lényeges |
 | `data_quality_event` | `id` PK, `source_id` FK, `entity_type`, `entity_id`, `severity`, `detected_at`, `detail`, `resolved_at` |
 | `job_run` | `id` PK, `job_name`, `started_at`, `ended_at`, `status`, `rows_in`, `rows_out`, `error_text` |
 | `unit` | `code` PK, `dimension`, `symbol`, `factor_to_base` |

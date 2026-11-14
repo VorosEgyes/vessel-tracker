@@ -1,7 +1,7 @@
 # Funkcióleírás – Dunai hajókövető és Balatoni hajókatalógus
 
 **Verzió:** 1.0 (2026-11-14)
-**Kapcsolódó dokumentumok:** [`../README.md`](../README.md) (adatbázis terv) · [`release-terv.md`](release-terv.md) (release terv) · [`sema-core.mmd`](sema-core.mmd) · [`sema-irodalom.mmd`](sema-irodalom.mmd)
+**Kapcsolódó dokumentumok:** [`../README.md`](../README.md) (adatbázis terv) · [`release-terv.md`](release-terv.md) (release terv) · [`r1-adat-terv.md`](r1-adat-terv.md) (R1 adat-terv) · [`ais-vevo-terv.md`](ais-vevo-terv.md) (saját AIS vevőhálózat) · [`sema-core.mmd`](sema-core.mmd) · [`sema-irodalom.mmd`](sema-irodalom.mmd)
 
 ---
 
@@ -276,7 +276,7 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 | | Nemzeti hajónyilvántartási szám | üzemeltetői lista | igen |
 | | IMO-szám (ha van) | AIS / üzemeltetői lista | ha van |
 | | Hajónév | üzemeltetői lista / AIS | igen |
-| Osztályozás | Kategória: nagyhajó (több mint 100 fő) / személyhajó / komp / szolgálati hajó / munkagép / kishajó / vitorlás | üzemeltetői lista | igen |
+| Osztályozás | Kategória: **nagyhajó** (több mint 100 fő) / **személyhajó** / **komp** / **szolgálati hajó** / **úszó munkagép** / **uszály** – *kishajó és vitorlás nincs a katalógusban* | üzemeltetői lista | igen |
 | | Ezen belül: „nosztalgia-hajó" / modern motoros hajó | üzemeltető | opcionális |
 | Műszaki | Befogadóképesség (fő), hossz, szélesség | üzemeltetői lista | igen |
 | | Szolgáltatások: fedélzet, étterem, WC, akadálymentesség, védett hely | üzemeltető | opcionális |
@@ -285,6 +285,8 @@ Prioritás: **M** = kötelező (Must) · **S** = fontos (Should) · **L** = kív
 | Terület | Medence (nyugati / középső / keleti), partkm | szerkesztői meghatározás | opcionális |
 | Kikötő | Hozzáférhető kikötők, kikötőrend hivatkozás | **publikált kikötőrend** | opcionális |
 | Belső | Forrás, frissítés dátuma | belső | igen |
+
+> **Hatókör (döntve):** a Balaton-katalógus a **jelentős motoros hajókat** tartalmazza (nagyhajók, személyhajók, kompok, szolgálati hajók, úszó munkagépek, uszályok) – kb. **80–100 hajó**. A **kishajók és a vitorlások nem kerülnek be**. Ennek két következménye: a katalógus kézzel tartható, és minden bejegyzésnek ellenőrizhető forrása van.
 
 **Különbség a két terület között, ami a sémát is meghatározza:** a Duna-hajónál az *azonosítás központi* (MMSI mindig van, ENI a belvízi AIS-ből jön, és mind kereshető), a Balaton-hajónál az *azonosítás gyenge* (a nagyhajóknál van nemzetközi hajószám, a kishajóknál és a vitorlásnál nincs) — ott a *szolgáltatás és a szezon* a keresési és döntési alap. Ezért a katalógus szűrői is területenként eltérnek.
 
