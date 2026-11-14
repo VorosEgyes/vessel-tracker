@@ -69,6 +69,8 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 
 ### 3.4 Adathátter (milyen adat kell az R1-hez)
 
+> **A részletes adat-terv: [`r1-adat-terv.md`](r1-adat-terv.md)** – forrásmátrix, mezőnkénti kitöltöttség, validációs szabályok, pipeline, átvételi küszöbök. Az alábbi táblázat az összefoglaló.
+
 | Adat | Honnan | Mennyi | Kockázat |
 |---|---|---|---|
 | Duna-hajók (ENI, IMO, MMSI, méretek, típus, üzemeltető) | ENI- és hajószám-nyilvántartás, KH | ~3 500 hajó | **közepes** – a nyilvántartás részletessége változó |
@@ -126,9 +128,11 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 | Sprint | Tartalom | Kimenetel |
 |---|---|---|
 | 1. | Séma, fordítási infrastruktúra, projekt-alapozás (CI, környezetek, migrációk) | Adatbázis váz, nyelvi kulcsok |
-| 2. | **Adatbeszerzés** (Duna + Balaton), szerkesztői felület v1, CSV-import | Valós adat a DB-ben |
+| 2. | **Adatbeszerzés** (Duna + Balaton), szerkesztői felület v1, CSV-import — részletek: [`r1-adat-terv.md`](r1-adat-terv.md) 12. fejezet | Valós adat a DB-ben |
 | 3. | Katalóguslista, szűrés, rendezés, kereső, hajóadatlap | Működő katalógus (belső) |
 | 4. | i18n véglegesítés, SEO, statikus tartalomoldalak, API v1, dokumentáció, hibajegyzet | **R1 kiadás** |
+
+> **A sprint- sorrend nem véletlen:** a 2. sprint azért megy a 3. elé, mert a 3. sprint felülete a 2. sprintben behozott adat nélkül nem lenne megmutatható. Ha a hatósági adat késik, a 3. sprint elcsúszik – ez az R1 legnagyobb ütemezési kockázata, ezért a 2. sprint első hetében el kell indítani az írásos adatkérést.
 
 ---
 

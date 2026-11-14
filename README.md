@@ -5,7 +5,7 @@
 **Nyelvek:** magyar (hu) · német (de) · angol (en)
 **Területek:** Duna-rendszer és Balaton-tó – elkülönítve (2.10 fejezet)
 
-**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+**Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
 
 **v1.1 változás:** Balaton elkülönítése (terület-diszcriminátor, `vessel_identifier` mellék-tábla, szezon- és menetrend-táblák), valamint az első release (R1) katalógus-központú igényéhez igazított azonosítási modell.
 
@@ -392,7 +392,7 @@ erDiagram
 | `job_run` | `id` PK, `job_name`, `started_at`, `ended_at`, `status`, `rows_in`, `rows_out`, `error_text` |
 | `unit` | `code` PK, `dimension`, `symbol`, `factor_to_base` |
 | `currency` | `code` PK, `name`, `symbol`, `decimals` |
-| `fx_rate` | PK(`rate_date`,`base`,`quote`), `rate` | |
+| `fx_rate` | PK(`rate_date`,`base`,`quote`), `rate` |
 | `audit_log` | `id` PK, `actor_id`, `action`, `entity_type`, `entity_id`, `before` jsonb, `after` jsonb, `at` |
 | `feature_flag` | `key` PK, `enabled`, `rollout_pct`, `variants` jsonb |
 

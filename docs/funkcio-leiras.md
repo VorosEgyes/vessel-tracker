@@ -12,7 +12,7 @@ Két, egymástól **térben és adatmodellben is elkülönített** katalógus eg
 | | **Duna-katalógus** | **Balatoni hajókatalógus** |
 |---|---|---|
 | Mi ez | A Duna (és mellékfolyói) nemzetközi és hazai hajóparkja | A Balaton-tó hajókatalógusa |
-| Ki érdeklődik | Hajótulajdonos, hajóügynök, fuvarozó, logisztikus | Turista, hajóbérlő, rendezvényszervező, hajószállás-kereső |
+| Ki érdeklődik | Akit érdekelnek a hajók | Turista, Akit érdekelnek a hajók |
 | Azonosítás | **ENI** (8 jegyű EU-s belvízi hajószám) | **Nemzetközi hajószám + nemzeti nyilvántartási szám** (nincs ENI) |
 | Helyzethez kötött | Igen (folyó-km, szakasz, kikötő) | Igen, de **medence** (3 vízmedence) és **partkm** szerint |
 | Éves ciklus | Egész év | **Szezonális** (tavasztól őszig) |
