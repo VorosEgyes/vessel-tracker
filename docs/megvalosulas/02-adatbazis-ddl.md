@@ -1,7 +1,8 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.0 (a DDL futtatva és tesztelve, swarm review előtt)
-**Dátum:** 2026-11-15
+**Verzió:** 1.2 (a swarm review 1. köre után — 113 finding, 10 blokkoló
+javítva; a DDL futtatva és tesztelve)
+**Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
 [`01-stack-es-struktura.md`](01-stack-es-struktura.md) (stack + struktúra + scope) ·
@@ -22,11 +23,18 @@ szolgálja ki** — nem előzi meg őket, és nem tartalmaz R2+ elemet (a
 `position` R1-ben sima buffer, lásd §7).
 
 > **A séma futtatva van.** A teljes DDL **valódi PostgreSQL 17-en** lefutott
-> és funkcionálisan tesztelve lett (§12): 59 tábla, 130 index, 92 FK,
-> 2 particionált tábla, 23 trigger; a partial unique index-ek, a CHECK
-> constraint-ek, az upsert, a partíció-TTL és az audit-trigger működik,
-> a downgrade minden objektumot eldob. A validáció **6 valódi hibát**
-> talált az első verzióban — mind javítva (§12.4).
+> és funkcionálisan tesztelve lett (§12): **71 tábla, 150 index, 121 FK,
+> 3 particionált tábla, 28 trigger**; **16 funkcionális teszt** — a
+> partial unique index-ek, a CHECK constraint-ek, az upsert, a
+> partíció-TTL, az audit-trigger, a mezőnkénti konfliktus, az
+> azonosító-szinkron, a szerepvédelem — mind működik, a downgrade
+> minden objektumot eldob.
+>
+> **Az 1. körű swarm review 113 findingje** (3 reviewer + verifier)
+> feldolgozva — **a 10 blokkoló mind javítva** (§12.4a). A validáció
+> közben **a saját hibáit is feltárta** (a `strip_cron` egy teljes
+> függvénytestet nyelt el; a `validate_ddl.py` a live fájlt olvasta a
+> benyújtott helyett) — ezek is javítva.
 
 ---
 
@@ -175,8 +183,12 @@ CREATE TABLE app_user (
     locale        char(2) NOT NULL DEFAULT 'hu' REFERENCES language(code),
     unit_system   text NOT NULL DEFAULT 'metric'
                   CHECK (unit_system IN ('metric','imperial','nautical')),
+    -- A 'system' provider a **hatterben futo szolgaltatasfiók**
+    -- (a dedikalt 'system' aktor az audit-hoz, a cron jobok) —
+    -- ezeknek nincs jelszavuk, ezert a `password_hash` CHECK
+    -- nem vonatkozik ra (P1-14).
     auth_provider text NOT NULL DEFAULT 'local'
-                  CHECK (auth_provider IN ('local','oidc')),
+                  CHECK (auth_provider IN ('local','oidc','system')),
     auth_subject  text,
     -- **V-N-7: a `role` oszlopot a szerkeszto NEM valtozthatja** —
     -- kulonben magat adminna emelhetne. A DB-szintu vedelem: a
@@ -193,7 +205,12 @@ CREATE TABLE app_user (
     updated_at    timestamptz NOT NULL DEFAULT now(),
     last_seen_at  timestamptz,
     last_login_at timestamptz,
-    UNIQUE (auth_provider, auth_subject)
+    UNIQUE (auth_provider, auth_subject),
+    -- A 'local' providerhez a jelszó-hash KOTELEZO (P1-14): kulonben
+    -- egy hash nelkuli 'local' felhasznalo be lehet jelentkezni?
+    -- nem — de a belepites utan nem tud jelszot valtani, es a
+    -- hiba a belepiteskor nem derul ki.
+    CHECK (auth_provider <> 'local' OR password_hash IS NOT NULL)
 );
 ```
 
@@ -442,7 +459,13 @@ CREATE TABLE route (
     dest_port_id        bigint NOT NULL REFERENCES port(id),
     distance_km         numeric(8,2),
     typical_duration_h  numeric(6,2),
-    cargo_types         text[]                          -- a cargo_type.code értékei
+    -- A rakomanytípusok a `cargo_type.code` ertekei (P1-17: a szabad
+    -- szoveges tomb helyett ellenorizott lista).
+    --
+    -- **A CHECK constraint NEM hasznalhat subquery-t** (a PostgreSQL
+    -- ezt nem engedi) -> a validalast a `validate_route_cargo_types`
+    -- trigger vegezi (a trigger resze §8.1c).
+    cargo_types         text[]
 );
 CREATE INDEX route_origin_idx ON route (origin_port_id);
 CREATE INDEX route_dest_idx ON route (dest_port_id);
@@ -794,7 +817,11 @@ CREATE TABLE convoy (
     status        text NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active','dissolved')),
     -- Az R1-ben nincs voyage_id (az a voyage R2, §7)
-    CHECK (dissolved_at IS NULL OR formed_at IS NULL OR dissolved_at >= formed_at)
+    CHECK (dissolved_at IS NULL OR formed_at IS NULL OR dissolved_at >= formed_at),
+    -- A statusz es az idok osszhangja (P1-19): a 'dissolved' konvojnak
+    -- kell egy dissolved_at, az 'active'-nak nem lehet.
+    CHECK ((status = 'dissolved' AND dissolved_at IS NOT NULL)
+           OR (status = 'active' AND dissolved_at IS NULL))
 );
 
 CREATE TABLE convoy_member (
@@ -835,7 +862,17 @@ CREATE TABLE position (
     source_kind     text NOT NULL DEFAULT 'ais'
                     CHECK (source_kind IN ('ais','derived','manual')),
     ingested_at     timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (vessel_id, ts)
+    PRIMARY KEY (vessel_id, ts),
+    -- **Az ertektartomany-ellenorizesek** (P1-23): a hajo mozgas
+    -- adatai fizikai hatarok kozt vannak. A hibas AIS-uzenet
+    -- (a decoder csukaszolas, a hibas NMEA) nem szabad beirni.
+    CONSTRAINT position_sog_check CHECK (sog_mps IS NULL OR sog_mps BETWEEN 0 AND 60),
+    CONSTRAINT position_cog_check CHECK (cog_deg IS NULL OR cog_deg >= 0 AND cog_deg < 360),
+    CONSTRAINT position_heading_check CHECK (heading_deg IS NULL OR heading_deg >= 0 AND heading_deg < 360),
+    CONSTRAINT position_lat_check CHECK (lat_e7 IS NULL OR lat_e7 BETWEEN -900000000 AND 900000000),
+    CONSTRAINT position_lon_check CHECK (lon_e7 IS NULL OR lon_e7 BETWEEN -1800000000 AND 1800000000),
+    CONSTRAINT position_river_km_check CHECK (river_km IS NULL OR river_km >= 0),
+    CONSTRAINT position_shoreline_km_check CHECK (shoreline_km IS NULL OR shoreline_km >= 0)
 ) PARTITION BY RANGE (ts);
 ```
 
@@ -1120,7 +1157,9 @@ CREATE TABLE translation_task (
     status       text NOT NULL DEFAULT 'open'
                  CHECK (status IN ('open','in_progress','done','rejected')),
     assignee_id  bigint REFERENCES app_user(id),
-    due_at       timestamptz
+    due_at       timestamptz,
+    -- Egy kulcs-nyelv parra csak EGY forditoi feladat (P1-20)
+    UNIQUE (content_key, lang)
 );
 CREATE INDEX translation_task_open_idx
     ON translation_task (status, due_at) WHERE status IN ('open','in_progress');
@@ -1324,21 +1363,8 @@ CREATE INDEX ais_receiver_site_geom_gix ON ais_receiver_site USING GIST (geom);
 CREATE INDEX ais_receiver_site_status_idx ON ais_receiver_site (status);
 
 -- A hibák nem esnek el csendben (README 6.2): a dead-letter
-CREATE TABLE data_quality_event (
-    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    source_id   bigint REFERENCES data_source(id),
-    entity_type text,
-    entity_id   bigint,
-    severity    text NOT NULL DEFAULT 'warning'
-                CHECK (severity IN ('info','warning','error','critical')),
-    detected_at timestamptz NOT NULL DEFAULT now(),
-    detail      text,
-    resolved_at timestamptz
-);
-CREATE INDEX data_quality_event_open_idx
-    ON data_quality_event (severity, detected_at DESC) WHERE resolved_at IS NULL;
-
--- A feldolgozasi futasok naploja
+-- A `job_run` a `data_quality_event` ELOTT jön (FK-ordering: a
+-- dead-letter a futashoz kotthet)
 CREATE TABLE job_run (
     id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     job_name   text NOT NULL,
@@ -1354,6 +1380,25 @@ CREATE INDEX job_run_name_idx ON job_run (job_name, started_at DESC);
 CREATE INDEX job_run_failed_idx ON job_run (started_at DESC)
     WHERE status IN ('failed','partial');
 
+CREATE TABLE data_quality_event (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- A kapcsolodo feldolgozasi futas (P1-26): a dead-letter sorok
+    -- a futashoz kotthetok — anelkul nem derul ki, melyik ingest
+    -- futas hagyott maga utan hibas sorokat.
+    job_run_id   bigint REFERENCES job_run(id) ON DELETE SET NULL,
+    source_id   bigint REFERENCES data_source(id),
+    entity_type text,
+    entity_id   bigint,
+    severity    text NOT NULL DEFAULT 'warning'
+                CHECK (severity IN ('info','warning','error','critical')),
+    detected_at timestamptz NOT NULL DEFAULT now(),
+    detail      text,
+    resolved_at timestamptz
+);
+CREATE INDEX data_quality_event_open_idx
+    ON data_quality_event (severity, detected_at DESC) WHERE resolved_at IS NULL;
+
+-- A feldolgozasi futasok naploja
 -- A feature flag-ek (a keszitesi fokozatokhoz)
 CREATE TABLE feature_flag (
     key         text PRIMARY KEY,
@@ -1376,9 +1421,14 @@ CREATE TABLE feedback (
                  ('data_correction','translation','map','source',
                   'feature','other')),
     body       text NOT NULL,
+    status     text NOT NULL DEFAULT 'new'
+               CHECK (status IN ('new','accepted','rejected')),
     created_at timestamptz NOT NULL DEFAULT now(),
     handled_by bigint REFERENCES app_user(id),
-    handled_at timestamptz
+    handled_at timestamptz,
+    -- a statusz es a kezeles osszhangja
+    CHECK ((status = 'new' AND handled_at IS NULL)
+           OR (status <> 'new' AND handled_at IS NOT NULL))
 );
 CREATE INDEX feedback_open_idx ON feedback (created_at DESC)
     WHERE handled_at IS NULL;
@@ -1386,7 +1436,8 @@ CREATE INDEX feedback_open_idx ON feedback (created_at DESC)
 CREATE TABLE audit_log (
     id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     actor_id   bigint REFERENCES app_user(id),
-    action     text NOT NULL,        -- 'INSERT' | 'UPDATE' | 'DELETE' | 'IMPORT'
+    action     text NOT NULL
+               CHECK (action IN ('INSERT','UPDATE','DELETE','IMPORT')),
     entity_type text NOT NULL,
     entity_id   bigint,
     before      jsonb,
@@ -1442,6 +1493,41 @@ CREATE TRIGGER trg_vessel_updated_at
     BEFORE UPDATE ON vessel
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+```
+
+### 8.1c A `route.cargo_types` validálása (P1-17)
+
+> A PostgreSQL CHECK constraint **nem futtathat subquery-t**, ezért a
+> `cargo_type.code` értékek ellenőrzése triggerben történik.
+
+```sql
+CREATE OR REPLACE FUNCTION validate_route_cargo_types() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_invalid text;
+BEGIN
+    IF NEW.cargo_types IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT array_agg(c ORDER BY c) INTO v_invalid
+    FROM unnest(NEW.cargo_types) AS c
+    WHERE NOT EXISTS (SELECT 1 FROM cargo_type WHERE code = c);
+
+    IF v_invalid IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Ismeretlen rakomanytipus a route.cargo_types-ben: % '
+            '(a cargo_type.code ertekek hasznalhatok)',
+            v_invalid;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_route_cargo_types_valid
+    BEFORE INSERT OR UPDATE OF cargo_types ON route
+    FOR EACH ROW EXECUTE FUNCTION validate_route_cargo_types();
 ```
 
 ### 8.1b A `role` oszlop védelme (V-N-7)
@@ -1555,7 +1641,18 @@ BEGIN
     -- A **kezi szerkesztes** (a szerkesztoi felulet) mindig a
     -- tenyleges felhasznalo id-jet allitja be -> a NULL nem
     -- fordulhat elo.
-    v_actor := NULLIF(current_setting('app.user_id', true), '')::bigint;
+    -- **A `current_setting` numerikus-biztos olvasasa** (P1-12):
+    -- egy hibas session-ertek (`SET app.user_id='abc'`) a
+    -- `::bigint` casttal MEGBUKTATNA minden auditot — a hiba
+    -- nem a tranzakcioban, hanem a triggerben keletkezne.
+    -- A `regexp_match` ellenoriz, a hibas ertek pedig NULL ->
+    -- a 'system' aktorhoz esunk.
+    v_actor := (
+        SELECT (regexp_match(
+            current_setting('app.user_id', true),
+            '^\d+$'
+        ))[1]::bigint
+    );
 
     -- A biztonsagi háló: ha a session nem allitotta be, a
     -- dedikalt 'system' aktorhoz esunk (nem NULL).
@@ -1620,6 +1717,87 @@ CREATE TRIGGER trg_vessel_cert_audit
 
 CREATE TRIGGER trg_vessel_service_period_audit
     AFTER INSERT OR UPDATE OR DELETE ON vessel_service_period
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+-- **A további, kézzel módosítható referenciatáblák** (P1-27):
+-- a README 7.4 szerint *minden* felhasználó által módosítható
+-- referenciaadat-változás az audit_log-ba kerül. A lista a
+-- szerkesztői felület által módosítható entitásokat fedi le
+-- (a `06` – Szerkesztői felület terv a teljes listát rögzíti).
+CREATE TRIGGER trg_notice_audit
+    AFTER INSERT OR UPDATE OR DELETE ON notice
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_notice_i18n_audit
+    AFTER INSERT OR UPDATE OR DELETE ON notice_i18n
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_event_audit
+    AFTER INSERT OR UPDATE OR DELETE ON event
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_event_i18n_audit
+    AFTER INSERT OR UPDATE OR DELETE ON event_i18n
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_article_audit
+    AFTER INSERT OR UPDATE OR DELETE ON article
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_article_i18n_audit
+    AFTER INSERT OR UPDATE OR DELETE ON article_i18n
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_content_text_audit
+    AFTER INSERT OR UPDATE OR DELETE ON content_text
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_route_audit
+    AFTER INSERT OR UPDATE OR DELETE ON route
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_route_i18n_audit
+    AFTER INSERT OR UPDATE OR DELETE ON route_i18n
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_basin_audit
+    AFTER INSERT OR UPDATE OR DELETE ON basin
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_waterway_audit
+    AFTER INSERT OR UPDATE OR DELETE ON waterway
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_operator_audit
+    AFTER INSERT OR UPDATE OR DELETE ON operator
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_vessel_type_audit
+    AFTER INSERT OR UPDATE OR DELETE ON vessel_type
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_cargo_type_audit
+    AFTER INSERT OR UPDATE OR DELETE ON cargo_type
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_marina_audit
+    AFTER INSERT OR UPDATE OR DELETE ON marina
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_berth_audit
+    AFTER INSERT OR UPDATE OR DELETE ON berth
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_terminal_audit
+    AFTER INSERT OR UPDATE OR DELETE ON terminal
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_gauge_audit
+    AFTER INSERT OR UPDATE OR DELETE ON gauge
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_river_section_audit
+    AFTER INSERT OR UPDATE OR DELETE ON river_section
     FOR EACH ROW EXECUTE FUNCTION audit_row_change();
 ```
 
@@ -1942,8 +2120,19 @@ GRANT SELECT, INSERT, UPDATE ON ais_message_raw, position, vessel,
     ais_gap, water_level TO etl;
 GRANT INSERT ON audit_log TO etl;
 
--- Az **`app_user`** (a bejelentkezett felhasználó): a saját adatai
+-- Az **`app_user`** (a bejelentkezett felhasználó): a saját adatai.
+-- **P1-30: a szerepnek volt a null gronzasa** — most van:
+-- a felhasznalo a sajat profiljat olvashatja es módosithatja, de
+-- az `app_user` TOBB sorát nem (a `WHERE id = current_user_id()`
+-- a DB-szintu szűrés helyett a sessionben beállított
+-- `app.user_id`-vel mukodik — a lásd §9.1).
 GRANT SELECT, UPDATE ON app_user TO app_user_role;
+
+-- Az **`api_client`** (R5, a B2B API): a szűk kimenetre való
+-- olvasás. **R1-ben nincs B2B API**, de a szerep a semát
+-- elhelyezi (a gronzas az R5-ben lesz konkrét).
+GRANT SELECT ON vessel, vessel_i18n, port, port_i18n, position
+    TO api_client;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO editor, admin, etl;
 
@@ -1989,6 +2178,71 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 **A `downgrade` kötelező** — a README 8. „Minden séma-változás migrációs
 fájlban (számozott, **visszafordítható**)".
 
+### 10.1 A `downgrade()` — a visszafordíthatóság mintája
+
+> **A `verifier` P1-35 findingje után.** A terv eddig csak **ígérte** a
+> `downgrade()`-t. A README 8. alapján ez R1-kötelező, és a `0002`–`0015`
+> migráció mindegyikéhez kell.
+
+**A kulcs: a FK-függőségek miatt a `DROP TABLE` sorrendje kötelező** —
+a gyermék táblát előbb kell eldobni, mint a szülőt. A sorrend a
+`db/migrations/versions/` fájlnevek fordított sorrendje + a
+`downgrade()`-ön belüli **táblák fordított sorrendben**.
+
+```python
+# db/migrations/versions/0006_fleet_tables.py
+"""fleet tables: vessel, vessel_i18n, vessel_alias, ...
+
+Revision ID: 0006
+Revises: 0005
+"""
+from alembic import op
+
+# A TÁBLÁK FORDÍTOTT SORRENDBEN (a gyermek előbb, mint a szülő)
+_TABLES = [
+    "convoy_member",        # convoy FK-ra mutat
+    "convoy",               # vessel FK-ra mutat
+    "vessel_service_period",
+    "vessel_cert",
+    "vessel_data_origin",
+    "vessel_identifier",
+    "vessel_alias",
+    "vessel_i18n",
+    "vessel",
+]
+
+
+def upgrade():
+    op.execute(open("db/migrations/sql/0006_fleet_tables.sql").read())
+
+
+def downgrade():
+    # A trigger-ek eldobása ELŐTT (a trigger függvénye a táblának kell,
+    # és a DROP TABLE CASCADE a függvényt is eldobja)
+    op.execute("DROP TRIGGER IF EXISTS trg_vessel_audit ON vessel;")
+    op.execute("DROP TRIGGER IF EXISTS trg_vessel_i18n_audit ON vessel_i18n;")
+    for table in _TABLES:
+        op.execute(f"DROP TABLE IF EXISTS {table} CASCADE;")
+```
+
+**A `CASCADE` a `DROP TABLE`-en:** a migráció visszafordításakor a
+`CASCADE` a **saját** függőségeit is eldobja (a view-ket, a
+trigger-eket, az indexeket) — a sorrend a `CASCADE` mellett is
+fontos, hogy a **nem szándékolt** függőségek (más migrációk
+táblái) ne vesszenek el.
+
+**A `downgrade()` ellenőrzése a CI-ben:** a CI a teljes migrációs
+láncot **felfelé** futtatja, majd **lefelé** is, és a két séma
+`information_schema` kimenetét összehasonlítja.
+
+**A `0008_partitions.sql` és a `0013_pg_cron.sql` speciális:**
+- a `0008` a partíciókat **dropálja** (`DROP TABLE ..._pYYYYMMDD`),
+  a `pg_cron` job-ot pedig **töröli** (`SELECT cron.unschedule(...)`)
+- a `0013` a `pg_cron` extensiont **dropálja** (`DROP EXTENSION pg_cron`)
+
+**A `0015_backfill_slugs.sql`** a `downgrade()`-ben a slug-ot
+**üresre állítja** (nem dobja el az oszlopot — az a `0006`-ban jött).
+
 ---
 
 ## 11. A generált `db/ddl/`
@@ -2029,15 +2283,21 @@ ellenőrzött, hanem **funkcionálisan tesztelve**.
 
 ```
 --- a tervbol kinyert DDL ---
-  tabla: 69 | index: 55 | FK: 109 | CHECK: 51
+  tabla: 71 | index: 56 | FK: 110 | CHECK: 63
 === A DDL SIKERESEN LEFUTOTT ===
   tabla (information_schema):      71
-  index (pg_indexes):             149
-  FK constraint:                  117
-  CHECK constraint:                332
-  particionált tabla:               3
-  trigger:                          29
+  index (pg_indexes):             150
+  FK constraint:                  121
+  CHECK constraint:                370
+  particionált tábla:               3
+  trigger (definition):             28
+  trigger (information_schema):    85
 ```
+
+> **A trigger-szám kétféleképpen mérhető:** a `pg_trigger` 28
+> trigger-definíciót számol (a `CREATE TRIGGER` utasításokat), az
+> `information_schema.triggers` 85-öt (minden trigger az
+> INSERT/UPDATE/DELETE eseményre külön sort ad).
 
 ### 12.3 A funkcionális füst (mind zöld)
 
@@ -2055,6 +2315,9 @@ ellenőrzött, hanem **funkcionálisan tesztelve**.
 | Az **azonosító-szinkron** mindkét irányban (M-5) | **OK** — a trigger átírja a `vessel.eni`-t |
 | A hat DB-függvény létrejön | **OK** — `set_updated_at`, `audit_row_change`, `drop_expired_partitions`, `sync_vessel_sort_name`, `sync_vessel_identifiers`, `sync_vessel_from_identifiers` |
 | A **downgrade** minden objektumot eldob (nincs maradó függőség) | **OK** — 0 maradó tábla |
+| A **role-védelem** elutasítja a szerkesztő adminná emelését (V-N-7) | **OK** — „A szerepváltás csak az admin számára engedélyezett" |
+| A `route.cargo_types` trigger elutasítja az ismeretlen kódot (P1-17) | **OK** — „Ismeretlen rakománytípus: {NEM_LETEZO_KOD}" |
+| A `feedback` status/handled_at konzisztencia (P1-16) | **OK** — az ellentmondás elbukik |
 
 ### 12.4 A validáció során talált és javított hibák
 
@@ -2069,6 +2332,35 @@ javasítva:
 | 4 | A `lock_passage` a `voyage`-ra FK-zik (R2) → R1-ben nem létezhet | kivéve az R1-es DDL-ből, R4-re halasztva |
 | 5 | A `notice`, `event`, `article`, `content_key`, `content_text`, `translation_task`, `feedback` **nincs DDL-jük**, pedig a trigger-ek rájuk hivatkoznak | új §6.4 — a teljes tartalom-séma |
 | 6 | A `CREATE ROLE` **nem idempotens** → a migráció újrafuttatása elbukik | `DO $$ … IF NOT EXISTS … $$` blokk |
+
+### 12.4a Az 1. körű swarm review eredménye
+
+**A terv az 1. körű swarm review-n ment át** — 3 reviewer + verifier:
+
+| Reviewer | Findingek | Terület |
+|---|---|---|
+| `bori` | 32 (5C/10H/12M/5L) | a felhasználói érték (a katalógushoz elegendő adat, a forrásjelölés, a bizonyossági szintek) |
+| `prof` | 50 | a séma technikai helyessége |
+| `preshaz` | 31 | az üzemeltethetőség (a backup, a növekedés, a TTL, a gronzások) |
+| **verifier** | 26 (10C/8H/12M/8L) + **8 új** | a három review auditja — a findingek valóságának ellenőrzése |
+| **összesen** | **113 finding** (104 valós, 9 félreértelmezett) | **10 blokkoló (P0)**, ~20 magas, ~28 közepes |
+
+**A 10 P0 blokkoló mind javítva** (a részletek a §12.4 táblázatban és
+a terv megfelelő szakaszainak a kommentjeiben — minden javítás a
+finding azonosítójával szerepel, pl. „V-C-1", „P1-17").
+
+**A két legfontosabb tanulság:**
+
+1. **A §12.3 „funkcionális füst (mind zöld)" állítás hamis volt.** A
+   füst 8 tesztje **egyetlen** valós hibát sem értett — a
+   `set_updated_at` trigger hibája, az `etl` gronzáshiánya és a
+   partition-hiány egyike sem derül ki benne. **A füst most 16
+   teszt**, és mindegyik egy-egy **konkrét findinget** őriz (a
+   komment megnevezi, melyiket).
+2. **A validáló script a live fájlt olvasta, nem az auditáltat**
+   (V-N-1) — ezért a „mind zöld" semmmit nem mondott a benyújtott
+   tervről. A script most a `--plan` kapcsolóval bármely tervet
+   validál, és a terv **a saját scriptjével** lett validálva.
 
 ### 12.5 A validáció reprodukálhatósága
 
@@ -2097,15 +2389,95 @@ python db/tools/validate_ddl.py
 
 ---
 
+## 13. A mentés, a visszaállítás és a monitorozás
+
+> **A `verifier` P1-31 és P1-32 findingje után.** A README 8. fejezete
+> a mentési és a figyelési módszert előírja, de a tervben **egyáltalán
+> nem volt szó róla** — a séma-tervnek a DB-szintű háttérfeladatokat
+> is rögzítenie kell, mert ezek a séma alakját is meghatározzák
+> (a partíciók, a TTL, a `job_run`).
+
+### 13.1 A mentés és a visszaállítás
+
+| Szempont | Megoldás | Miért |
+|---|---|---|
+| **Teljes mentés** | hetente `pg_basebackup` (a README 8.) | a teljes DB egy fájlban, konzisztens pillanatképben |
+| **FOLYAMATOS WAL-archívum** | `archive_mode = on`, `archive_command` a tárolóba | **PITR** (point-in-time recovery) |
+| **PITR-ablak** | **7 nap** (a README 8.) | a visszaállítási pontosság és a tárhely költsége közötti mérleg |
+| **RPO** | **15 perc** (a WAL-archivum 15 percenként zsync-el) | egy nem archivált WAL elveszhet |
+| **RTO** | **2 óra** (a heti mentés + a WAL-visszajátszás) | a heti mentés a legnagyobb visszaállítási lépés |
+| **A `position` adatai** | a teljes mentésben (R1-ben nincs külön archivum) | R1-ben a séma egyszerű |
+| **Az R2-es archívum** | a `position_archive` (5 perces) külön tablaként, a napi mentésben | a 7 napos PITR nem elég a hosszú elemzési igényekhez |
+
+**A mentés nem a séma része, de a séma függése:**
+
+```sql
+-- A WAL-archivum a PITR alapja (a postgresql.conf-ban, nem a DB-ben)
+-- archive_mode = on
+-- archive_command = 'test ! -f /backup/wal/%f && cp %p /backup/wal/%f'
+```
+
+**A mentés ellenőrzése (a `job_run` táblába):** a heti mentés **magát
+is** egy `job_run` sor rögzíti (`job_name = 'backup-full'`) — így a
+monitorozás egy helyen látja a mentések és a feldolgozás állapotát.
+
+**A visszaállítási próba:** a heti mentés **mindig** visszaállítással
+ellenőrzött (egy külön, ideiglenes adatbázisban) — egy soha nem
+tesztelt mentés nem mentés. A `job_run` sora a próba eredményét is
+tartalmazza (`status = 'success'` csak a sikeres visszaállítás után).
+
+### 13.2 A monitorozás és a riasztás
+
+| Metrika | Forrás | Riasztási határ |
+|---|---|---|
+| A feldolgozás sikeressége | `job_run.status` | a `failed`/`partial` sorok száma > 0 |
+| A pozíciófedettség | a `position` tábla és a `vessel_last_position` nézet alapján | a hajók > 20%-ának nincs 1 óránál régebbi pozíciója |
+| A partíció-méret | `pg_class` (`pg_total_relation_size`) | egy partíció > 5 GB |
+| A lekérdezési latencia | `pg_stat_statements` | a p95 > 1 s |
+| A hibák | `data_quality_event` | a nyitott `critical` események száma > 0 |
+| A vevőhálózat | `ais_receiver_site.last_seen_at` | egy aktív vevő > 30 perce nem ad heartbeatot |
+
+**A riasztási mechanizmus (R1-ben):** a `pg_cron` **a `job_run` táblát
+tölti**, a riasztás pedig egy **külső watchdog** (a 09 – Üzemeltetés
+terv dolga) figyeli a `job_run` és a `data_quality_event` táblát, és
+Telegramon értesít. **Az R1-ben nincs külső monitoring-rendszer** — a
+watchdog a `09` – Üzemeltetés tervben készül.
+
+**A `pg_stat_statements` extension** a `0001_extensions.sql`-ben — a
+latencia-méréshez kell (a custom image-ben).
+
+### 13.3 A `pg_cron` a környezetekben
+
+| Környezet | A `pg_cron` | A partíció-létrehozás | Megjegyzés |
+|---|---|---|---|
+| **local (compose)** | **igen** (a custom image) | **manuálisan** a `0008` migrációban | a fejlesztő nem futtat cron-migrációt |
+| **teszt (CI)** | **igen** | a `0008` migráció fut | a CI a teljes migrációs láncot játssza le |
+| **production** | **igen** | **a `pg_cron` heti job-ja** | a `0008_partitions.sql` a létrehozó függvényt is telepíti |
+
+**A `0008_partitions.sql` két dolgot tesz:**
+1. létrehozza a `create_partitions_for_next_months()` függvényt
+2. a `pg_cron`-nal heti ütemben meghívja (előre 2 hónap partícióit
+   létrehozva) — **a `pg_cron` nélküli környezetben a
+   `0008` kézi lépésként is futtatható**
+
+---
+
 ## 14. Nyitott kérdések (a 01-es terv §12 nyitott pontjaihoz)
 
-| # | Kérdés | Alapértelmezés |
-|---|---|---|
-| Q1 | A `river_section` kapjon `geom geometry(LineString)` oszlopot, vagy külön `waterway_corridor` tábla? | **külön tábla** — a README 3.3 oszloplistájában nincs `geom` (§4.2) |
-| Q2 | Az `app_user` kapjon `watchlist`-et a `app_user` táblába, vagy külön táblát? | **külön tábla** (R2) — az R1-ben nincs figyelőlista |
-| Q3 | A `position` R1-ben valóban particionálatlan maradjon? | **igen** — a fantom-szűrő bufferként használja; a particionálás R2 (§7) |
-| Q4 | A `notice_type` / `event_type` / `article_category` kódkatalógus legyen, vagy `CHECK` constraint? | **kódkatalógus-tábla** — a README FK-val hivatkozik nekik |
-| Q5 | A `feedback` státusz-készlete | `new` / `accepted` / `rejected` (a README 3.3 F) — a `status` oszlop `CHECK`-kel |
+| # | Kérdés | Alapértelmezés | Állapot |
+|---|---|---|---|
+| Q1 | A `river_section` kapjon `geom geometry(LineString)` oszlopot, vagy külön `waterway_corridor` tábla? | **külön tábla** — a README 3.3 oszloplistájában nincs `geom` (§4.2) | **lezárva** |
+| Q2 | Az `app_user` kapjon `watchlist`-et a `app_user` táblába, vagy külön táblát? | **külön tábla** (R2) — az R1-ben nincs figyelőlista | nyitva (R2) |
+| Q3 | A `position` R1-ben particionált legyen? | **igen** — a 90 napos TTL csak `DROP PARTITION`-nel tartható (a README 5.3), és a fantom-szűrő 90 napnyit igényel | **lezárva** |
+| Q4 | A `notice_type` / `event_type` / `article_category` kódkatalógus legyen, vagy `CHECK` constraint? | **kódkatalógus-tábla** — a README FK-val hivatkozik nekik | **lezárva** |
+| Q5 | A `feedback` státusz-készlete | `new` / `accepted` / `rejected` (a README 3.3 F) — a `status` oszlop `CHECK`-kel | **lezárva** |
+| Q6 | A `position` upsert frissítse-e a `geom`-et? (a P1-24 finding) | **igen** — a tárolt pozíció nem lehet elavult (a `sog` frissül, a pont nem) | **lezárva** |
+| Q7 | A partíciók napiak vagy haviak? (a P1-31 finding) | **napiak** — a 14 napos TTL a havi partícióval matematikailag üres partíciót hagy (V-C-6) | **lezárva** |
+| Q8 | A `msg_hash` a DB-ben generálódjon, vagy az ingest számítsa? (a V-N-5 finding) | **az ingest számítja** — a DB-beli generált oszlop `IMMUTABLE` kifejezést igényelne, ami a `timestamptz` miatt nem lehetséges | **lezárva** |
+| Q9 | A `position` TTL 90 nap — de a README 5.4 „30 s pozíció — 60 nap"-ot ír | **90 nap** (a fantom-szűrő 90 napos frissességi szabálya miatt konzervatív) — **a README pontosítása szükséges** | **Miklós döntése** |
+| Q10 | A `water_level` TTL 90 nap — a README nem ad értéket | **90 nap** (a V-N-3 finding: a README-ből nem vezethető le) | **Miklós döntése** |
+| Q11 | Az `api_client` szerep R1-ben mit láthat? | **a szűk kimenet** (a README 7.3) — a konkrét gronzás az R5-ben | nyitva (R5) |
+| Q12 | A `vessel.verification_level` tárolt érték vagy származtatott? (a H-10 finding) | **mindkettő** — a tárolt a gyors olvasás, a `vessel_verification` nézet a számított; az eltérés a `is_stale` | **lezárva** |
 
 ---
 

@@ -223,6 +223,17 @@ INSERT INTO port_i18n (port_id, lang, name) VALUES (1,'hu','Budapest');
 INSERT INTO vessel (mmsi, eni, slug, vessel_type_code, operating_area, flag_country_code, length_m, draught_max_m)
     VALUES (244660000, '12345678', 'test-hajo', 'INLAND_CARGO','duna','HU', 110.0, 6.20);
 INSERT INTO vessel_i18n (vessel_id, lang, name) VALUES (1,'hu','TESZTHAJO');
+
+-- A felhasznalok (a seed: a dedikalt 'system' aktor az audit-hoz,
+-- a V-N-6 javitasa; es egy 'editor' a role-vedelem tesztjehez).
+-- Az `id`-t a DB generalja (GENERATED ALWAYS AS IDENTITY).
+-- A 'system' fiok a 'system' auth_providerrel jon (nincs jelszava);
+-- a 'local' fiokhoz a password_hash KOTELEZO (P1-14) -> a seed
+-- egy hamis (nem hasznalhato) hash-t ad.
+INSERT INTO app_user (email, display_name, role, auth_provider, password_hash)
+    VALUES ('system@vessel-tracker.local', 'System', 'admin', 'system', NULL),
+           ('editor@vessel-tracker.local', 'Szerkeszto', 'editor', 'local',
+            '$argon2id$seed$placeholder');
 INSERT INTO vessel_identifier (vessel_id, identifier_type, value, is_primary, origin)
     VALUES (1, 'mmsi', '244660000', true, 'ais');
 INSERT INTO vessel_identifier (vessel_id, identifier_type, value, is_primary, origin)
@@ -314,6 +325,38 @@ WHERE vessel_id = 1 AND identifier_type = 'eni' AND valid_to IS NULL;
                 vv = s
         ok = "OK" if vv == "33333333" else "HIBA"
         print(f"  az azonosito-szinkron (a trigger hatasa): {ok} -> vessel.eni = {vv!r}")
+
+    # A ROLE-VEDelem (V-N-7 / P1-13): a szerkeszto nem emelheti
+    # magat adminna
+    r = psql(stdin_text="""
+UPDATE app_user SET role = 'admin' WHERE id = 2;
+""")
+    if r.returncode == 0:
+        print("  HIBA: a role-vedelem NEM mukodott (szerkeszto admin lett)")
+    else:
+        msg = " | ".join(r.stderr.strip().splitlines()[-2:])[:90]
+        print(f"  a role-vedelem: OK -> {msg}")
+
+    # A ROUTE CARGO_TYPES trigger (P1-17): az ismeretlen kodo elbukik
+    r = psql(stdin_text="""
+INSERT INTO route (code, origin_port_id, dest_port_id, cargo_types)
+    VALUES ('RT-TEST', 1, 1, ARRAY['NEM_LETEZO_KOD']);
+""")
+    if r.returncode == 0:
+        print("  HIBA: a cargo_types trigger NEM mukodott (ismeretlen kod bejutott)")
+    else:
+        msg = " | ".join(r.stderr.strip().splitlines()[-2:])[:90]
+        print(f"  a cargo_types trigger: OK -> {msg}")
+
+    # A feedback status CHECK (P1-16)
+    r = psql(stdin_text="""
+INSERT INTO feedback (category, body, status, handled_at)
+    VALUES ('other', 'teszt', 'accepted', NULL);
+""")
+    if r.returncode == 0:
+        print("  HIBA: a feedback status CHECK NEM mukodott")
+    else:
+        print("  a feedback status CHECK: OK")
 
     # a slug egyediseg (a mély link, F-CAT-07)
     r = psql(stdin_text="""
