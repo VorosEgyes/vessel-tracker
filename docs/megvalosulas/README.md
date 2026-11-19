@@ -9,7 +9,9 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 |---|---|---|---|
 | 01 | [stack és projektstruktúra](01-stack-es-struktura.md) | Technológiai stack, monorepo-struktúra, környezetek, az AIS-adatút, az R1-scope | **v1.3** — swarm review 2 körön átesett, a 2. kör 17 új findingje javítva |
 | 02 | [adatbázis-DDL v1.1 + migrációk](02-adatbazis-ddl.md) | A teljes R1-séma (71 tábla), a partíciós terv, az indexek, a nézetek, a trigger-ek, a DB-szerepkörök, a mentés és a monitorozás | **v1.2 — futtatva és tesztelve** valódi PostgreSQL 17-en (16 funkcionális teszt); 1. körű swarm review: **113 finding**, **10 blokkoló** — mind javítva és újra validálva |
-| 03 | [API-specifikáció](03-api-specifikacio.md) | A belső R1 API és az R5 B2B API határvonala, a hibakódok, a lokalizáció | **v0.1 — draft** |
+| 03 | [API-specifikáció](03-api-specifikacio.md) | A belső R1 API és az R5 B2B API határvonala, a hibakódok, a lokalizáció | **v0.1 — draft** (1. körű swarm review fut) |
+| 04 | [AIS-parser specifikáció](04-ais-parser.md) | A NMEA frame-validáció, a 6 bites dekódolás, az üzenettípus-dispatch, a normalizált rekord (a `02` és a `04` közötti közös szerződés), a dedup, a mérési protokoll | **v0.1 — draft** |
+| 05 | [frontend-arkitektúra](05-frontend-arkitektura.md) | Az Astro SSR, az i18n routing (a F-INTL-01…08), a SEO (a `hreflang`, a JSON-LD, a sitemap), a komponensmodell, a hajóadatlap blokkjai | **v0.1 — draft** |
 | 03 | API-specifikáció | OpenAPI, a verziózott publikus API | várakozik a 02-re |
 | 04 | AIS-parser specifikáció | A dekóder pontos specifikációja, a fixture-ök, az elfogadási teszt | várakozik az 01-re (R1-0) |
 | 05 | frontend-arkitektúra | SEO, az i18n routing, a komponensmodell | várakozik a 03-ra |

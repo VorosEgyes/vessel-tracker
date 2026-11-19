@@ -854,7 +854,11 @@ CREATE TABLE position (
     ais_accuracy_m  numeric(6,1),
     lat_e7          integer,
     lon_e7          integer,
-    river_km        numeric(8,3),        -- a FI 10 fairway hectometreből
+    river_km        numeric(8,3),        -- a **pozíció** üzenet fairway
+                                    -- hectometre mezőjéből (a 04-es
+                                    -- terv §4.5 pontosítja: a FI 10 a
+                                    -- STATIKUS üzenet, a river_km a
+                                    -- szokásos pozíció kiterjesztése)
     river_section_id bigint REFERENCES river_section(id),
     basin_id        bigint REFERENCES basin(id),
     shoreline_km    numeric(8,3),        -- a Balaton partkm-je
@@ -2327,11 +2331,26 @@ javasítva:
 | # | Hiba | Javítás |
 |---|---|---|
 | 1 | A `data_source` tábla **egyáltalán nem volt** a DDL-ben, pedig 7 tábla FK-val hivatkozik rá | új §4.1 — a legkorábbi migrációba kerül |
-| 2 | A `app_user` a `audit_log`/`feedback`/`content_text` **után** jött → FK-hiba | új §4.1a — a referenciatáblák közé |
+| 2 | Az `app_user` a `audit_log`/`feedback`/`content_text` **után** jött → FK-hiba | új §4.1a — a referenciatáblák közé |
 | 3 | A `country`, `waterway`, `waterway_i18n`, `river_section` DDL-je **nem kódblokkban** volt → a generátor kihagyta | a blokkok egységesítve |
 | 4 | A `lock_passage` a `voyage`-ra FK-zik (R2) → R1-ben nem létezhet | kivéve az R1-es DDL-ből, R4-re halasztva |
 | 5 | A `notice`, `event`, `article`, `content_key`, `content_text`, `translation_task`, `feedback` **nincs DDL-jük**, pedig a trigger-ek rájuk hivatkoznak | új §6.4 — a teljes tartalom-séma |
 | 6 | A `CREATE ROLE` **nem idempotens** → a migráció újrafuttatása elbukik | `DO $$ … IF NOT EXISTS … $$` blokk |
+
+**A validáció a swarm review közben további hibákat talált** — ezek
+mind a **javítások beírása közben** keletkeztek, és mind javítva:
+
+| # | Hiba | Javítás |
+|---|---|---|
+| 7 | A `strip_cron` regexe **a `drop_expired_partitions` függvény teljes testét elnyelte** (a `cron.schedule` mintája mohó volt) → a függvény csonka maradt a tervben | a minta a dollar-quoted string végéig megy; a függvénytest visszaírva; **páratlanság-ellenőrző** a preprocesszorban |
+| 8 | A `sync_vessel_identifiers` és a `sync_vessel_from_identifiers` **függvények eltűntek** a tervből egy átrendezéskor | visszaírva; a trigger-ek **a függvények után** jönnek (a Postgres a trigger létrehozásakor már ismeri a függvényt) |
+| 9 | A kétirányú azonosító-szinkron **rekurzál** volt (a `vessel` → `vessel_identifier` → `vessel` lánc) | egyirányú: a `vessel_identifier` AFTER trigger UPDATE-el a `vessel`-t, a `vessel` BEFORE trigger a NEW-be betölti az értékeket → a lánc egy lépésben leáll |
+| 10 | A `sync_vessel_to_identifiers` trigger `ON CONFLICT DO NOTHING`-t használt, de a `vessel_identifier`-ben **nincs `UNIQUE` constraint** (csak partial index) → a `DO NOTHING` nem célzott | `GET DIAGNOSTICS ROW_COUNT` + `UPDATE`/`INSERT` elágazás |
+| 11 | A `msg_hash` generált oszlop kifejezése **nem immutable** volt (a `timestamptz::text` a timezone-től függ) | a hash-t az **ingest** számítja (Python `hashlib`), a DB csak tárolja |
+| 12 | A `route.cargo_types` CHECK constraint **subquery-t tartalmazott** → a PostgreSQL elutasítja | a validálás triggerben (`validate_route_cargo_types`) |
+| 13 | A `job_run` a `data_quality_event` **után** jött, pedig a dead-letter a futáshoz FK-zik | a `job_run` előrébb került (FK-ordering) |
+| 14 | A `guard_role_change` és a `validate_route_cargo_types` **trigger** a függvényük **után** kell, nem előtte | a blokkok átrendezve |
+| 15 | A `data_source`/`content_key` **FK-ordering**: a `basin.name_key` a `content_key`-re mutat, ami később jött | a `content_key` a legkorábbi migrációba került |
 
 ### 12.4a Az 1. körű swarm review eredménye
 
