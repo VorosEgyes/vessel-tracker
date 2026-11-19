@@ -1,4 +1,4 @@
-# Dunai hajókövető – adatbázis terv
+# Vessel Tracker (Duna és Balaton) – adatbázis terv
 
 **Verzió:** 1.3 (2026-11-14)
 **Hatály:** a készülő weboldal és mobilapplikáció közös, háttérben futó adatbázise

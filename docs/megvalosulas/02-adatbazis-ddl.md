@@ -1,0 +1,2113 @@
+# Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
+
+**Verzió:** 1.0 (a DDL futtatva és tesztelve, swarm review előtt)
+**Dátum:** 2026-11-15
+**Kapcsolódó dokumentumok:**
+[`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
+[`01-stack-es-struktura.md`](01-stack-es-struktura.md) (stack + struktúra + scope) ·
+[`README.md`](README.md) (a terv-sorozat tagjai) ·
+[`../../docs/funkcio-leiras.md`](../../docs/funkcio-leiras.md) ·
+[`../../docs/r1-adat-terv.md`](../../docs/r1-adat-terv.md) ·
+[`../../docs/ingest-terv.md`](../../docs/ingest-terv.md) ·
+[`../../docs/ais-vevo-terv.md`](../../docs/ais-vevo-terv.md)
+
+> A dokumentum a repóban a `docs/megvalósulas/02-adatbazis-ddl.md` útvonalon van.
+
+**Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
+
+**Ez a dokumentum** a teljes R1 adatbázis-sémáját rögzíti: a táblákat,
+az oszlopokat, az indexeket, a constraint-eket, a partícionálást, a
+trigger-eket és a DB-szerepköröket. A séma **az R1 kilépési feltételeit
+szolgálja ki** — nem előzi meg őket, és nem tartalmaz R2+ elemet (a
+`position` R1-ben sima buffer, lásd §7).
+
+> **A séma futtatva van.** A teljes DDL **valódi PostgreSQL 17-en** lefutott
+> és funkcionálisan tesztelve lett (§12): 59 tábla, 130 index, 92 FK,
+> 2 particionált tábla, 23 trigger; a partial unique index-ek, a CHECK
+> constraint-ek, az upsert, a partíció-TTL és az audit-trigger működik,
+> a downgrade minden objektumot eldob. A validáció **6 valódi hibát**
+> talált az első verzióban — mind javítva (§12.4).
+
+---
+
+## 1. Mi a séma feladata
+
+A README 3.3 fejezete az **oszloplistát** adja meg — ez a terv abból épül,
+de **nem másolja**:
+
+| A README adja | Ez a terv adja |
+|---|---|
+| az oszlopnevek és a típusok nagyjából | a pontos típust (pontosság, méret, nullability) |
+| a táblák listáját | a PK/FK-constraint-eket, az indexeket, a trigger-eket |
+| a partíció és az index **elvekét** | a konkrét partíciós sémát és a DDL-t |
+| a megőrzési (retention) időtartamokat | a `DROP PARTITION` mechanizmust és a `pg_cron` jobot |
+| a RBAC **szerepeket** | a konkrét `GRANT`/`REVOKE` utasításokat |
+
+**A séma forrása az Alembic migráció** (`db/migrations/versions/`) — a
+`db/ddl/` a **generált** referencia (a CI diff-ellenőrzést futtat a kettő
+között, a 01-es terv §4.3 szerint).
+
+---
+
+## 2. Séma-konvenciók
+
+| Konvenció | Szabály |
+|---|---|
+| **Tábla név** | `snake_case` egyes számban (`vessel`, `port`, `lock`) |
+| **PK** | `id bigint GENERATED ALWAYS AS IDENTITY` (a `vessel` kivételével, lásd §4.2) |
+| **FK oszlop** | `<tábla>_id` + `REFERENCES <tábla>(id) ON DELETE RESTRICT` (a referenciatábláknál), `ON DELETE CASCADE` a gyermék-tábláknál |
+| **Időbélyeg** | `timestamptz`, mindenütt `UTC` (a DB timezone beállítva) |
+| **Enum** | **nem** használunk PostgreSQL `ENUM` típust — a `CHECK` constraint + a `code` kódtábla (a README 3.3 `code`/`type` oszlopokat ír elő, nem enumot) |
+| **Kódkatalógus** | külön `*_type` tábla (`vessel_type`, `cargo_type`, `notice_type`, `event_type`, `article_category`) + FK |
+| **Geometria** | PostGIS `geometry(Point,4326)` a pontokra; `geometry(LineString,4326)` a vonalakra |
+| **Névkódok** | `code text` + `UNIQUE` (a `port.code`, `vessel_type.code`, `lock.code`, `waterway.code`, `data_source.code`, `ais_receiver_site.code`) |
+| **i18n mellék-tábla** | `PK(<entity>_id, lang)`, `lang char(2)` FK → `language.code`, `ON DELETE CASCADE` |
+| **Név** | az entity natív neve (latin betűs) a `name` mezőben; a fordítható **leírás** az `*_i18n.description` |
+| **Időzítés** | `created_at`/`updated_at` `timestamptz NOT NULL DEFAULT now()`; a `updated_at`-et egy trigger tartja karban |
+| **Audit** | minden kézzel módosított referencia-rekord kap egy `audit_log` sort (trigger, §6.3) |
+
+### 2.1 Miért nincs `ENUM`
+
+A PostgreSQL `ENUM` típusa **módosításkor DDL-újraírással jár**
+(`ALTER TYPE ... ADD VALUE` a tranzakción belül korlátozott, a
+törlés pedig a `pg_dump`/`pg_restore` problémája). A projekt referencia-
+táblái (kikötőtípus, hajótípus, rakománytípus, eseménytípus) **a
+`code` táblákban** élnek, így:
+- az értékek **szerkeszthetők** a szerkesztői felületen (új kikötőtípus)
+- nincs `ALTER TYPE` migráció
+- a `code` tábla adja a `*_i18n` fordítást is (egy kódtábla, egy fordítási
+  réteg)
+
+---
+
+## 3. A séma áttekintése (csoportosítás)
+
+```
+referencia        waterway, waterway_i18n, river_section, river_section_i18n,
+                  gauge, gauge_i18n, port, port_i18n, berth, terminal,
+                  lock, lock_i18n, basin, basin_i18n, marina,
+                  vessel_type, vessel_type_i18n, operator, operator_i18n,
+                  country, unit, currency, fx_rate
+
+flotta            vessel, vessel_i18n, vessel_alias, vessel_identifier,
+                  vessel_data_origin, vessel_cert, vessel_service_period,
+                  convoy, convoy_member
+
+időbeli           position (R1: sima buffer), ais_message_raw
+
+tartalom          notice, notice_i18n, notice_type, event, event_i18n,
+                  event_type, article, article_i18n, article_category
+
+i18n              language, content_key, content_text, translation_task
+
+felhasználó       app_user, feedback, audit_log, feature_flag
+
+rendszer          data_source, ais_receiver_site, job_run,
+                  data_quality_event, ais_gap
+```
+
+**Táblaszám: 47** (a README 3.3 táblajegyzékének 60+ sora ebből ~47 konkrét
+tábla — a `*_i18n` mellék-táblákkal együtt).
+
+---
+
+## 4. A referenciatáblák DDL-je
+
+### 4.1 Nyelvkatalógus és i18n
+
+```sql
+CREATE TABLE language (
+    code        char(2) PRIMARY KEY,          -- 'hu', 'de', 'en'
+    name_native text NOT NULL,
+    name_en     text NOT NULL,
+    is_rtl      boolean NOT NULL DEFAULT false
+);
+```
+
+### 4.2 Vízút, szakaszok, mérőállomások
+
+```sql
+-- A forrás-nyilvántartás: a legkorábbi tabla, mert
+-- sok mas tabla source_id-je erre mutat (FK-ordering)
+CREATE TABLE data_source (
+    id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code           text NOT NULL UNIQUE,       -- 'own-ais-budapest', 'spi'
+    name           text NOT NULL,
+    provider       text,
+    license_type   text NOT NULL DEFAULT 'unknown'
+                   CHECK (license_type IN
+                     ('public','own','contractual','unknown')),
+    license_ref    text,                       -- a szerződés vagy a licenc hivatkozása
+    coverage_desc  text,
+    quality_tier   text NOT NULL DEFAULT 'c'
+                   CHECK (quality_tier IN ('a','b','c')),
+    is_primary     boolean NOT NULL DEFAULT false,
+    active         boolean NOT NULL DEFAULT true
+);
+
+-- A nyelvfüggetlen tartalmi kulcs (pl. 'map.legend.locks').
+-- **A `name_key` FK-k miatt ez a tabla KORAN jön** — a `basin`,
+-- a `notice_type`, az `event_type` és az `article_category` erre
+-- mutat (M-3).
+CREATE TABLE content_key (
+    key             text PRIMARY KEY,
+    domain          text NOT NULL,         -- 'ui' | 'vessel' | 'port' | 'article'
+    description     text,
+    source_lang     char(2) NOT NULL REFERENCES language(code),
+    is_placeholder  boolean NOT NULL DEFAULT false
+);
+CREATE INDEX content_key_domain_idx ON content_key (domain);
+```
+
+### 4.1a A felhasználó (a hitelesítés és a session)
+
+> A `app_user` a **referenciatáblák között** van, mert több tábla
+> FK-val hivatkozik rá (`audit_log.actor_id`, `feedback.user_id`,
+> `content_text.author_id`, `translation_task.assignee_id`,
+> `position_report.user_id`) — a FK-ordering miatt korábban kell jönnie.
+> A 01-es terv §3.2.2 szerint a `app_user` bővül a hitelesítéssel:
+
+```sql
+CREATE TABLE app_user (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email         text UNIQUE,
+    display_name  text,
+    locale        char(2) NOT NULL DEFAULT 'hu' REFERENCES language(code),
+    unit_system   text NOT NULL DEFAULT 'metric'
+                  CHECK (unit_system IN ('metric','imperial','nautical')),
+    auth_provider text NOT NULL DEFAULT 'local'
+                  CHECK (auth_provider IN ('local','oidc')),
+    auth_subject  text,
+    -- **V-N-7: a `role` oszlopot a szerkeszto NEM valtozthatja** —
+    -- kulonben magat adminna emelhetne. A DB-szintu vedelem: a
+    -- trigger a `role` oszlop változásat csak a `admin` szerep
+    -- számára engedi.
+    role          text NOT NULL DEFAULT 'editor'
+                  CHECK (role IN ('editor','admin')),
+    password_hash text,               -- Argon2id; a 'local' providerhez
+    session_token_hash text UNIQUE,   -- a session cookie SHA-256-ja
+    session_expires_at timestamptz,
+    status        text NOT NULL DEFAULT 'active'
+                  CHECK (status IN ('active','disabled')),
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    last_seen_at  timestamptz,
+    last_login_at timestamptz,
+    UNIQUE (auth_provider, auth_subject)
+);
+```
+
+**A `session_token_hash` a cookieban a token SHA-256-ja megy** — a DB-ben
+nem a nyers token, így egy DB-szivárgás nem ad sessiont.
+
+```sql
+CREATE TABLE country (
+    code       char(2) PRIMARY KEY,          -- ISO 3166-1 alpha-2
+    name_local text NOT NULL,
+    eu_member  boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE waterway (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code         text NOT NULL UNIQUE,        -- 'Duna', 'Sava', 'RMD'
+    waterway_type text NOT NULL
+                 CHECK (waterway_type IN ('main','tributary','canal','lake')),
+    length_km    numeric(8,2),
+    is_active    boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE waterway_i18n (
+    waterway_id bigint NOT NULL REFERENCES waterway(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    name        text NOT NULL,
+    description text,
+    PRIMARY KEY (waterway_id, lang)
+);
+
+-- A folyószakasz: km-tartomány + kockázati szint
+CREATE TABLE river_section (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    waterway_id  bigint NOT NULL REFERENCES waterway(id),
+    code         text NOT NULL UNIQUE,
+    km_from      numeric(8,3) NOT NULL,        -- a Duna km-skálája: Sulina = 0
+    km_to        numeric(8,3) NOT NULL,
+    country_code char(2) NOT NULL REFERENCES country(code),
+    risk_level   text NOT NULL DEFAULT 'low'
+                  CHECK (risk_level IN ('low','medium','high')),
+    max_draft_m  numeric(4,2),
+    fairway_code text,                          -- 2019/1744/EU fairway section code
+    CHECK (km_to > km_from)
+);
+
+CREATE INDEX river_section_waterway_km_idx
+    ON river_section (waterway_id, km_from, km_to);
+CREATE INDEX river_section_country_idx ON river_section (country_code);
+
+-- A folyoszakasz neve fordul (C-3): a F-DET-06 szoveges helye
+-- ("Szob-Budapest szakasz") innen jon.
+CREATE TABLE river_section_i18n (
+    river_section_id bigint NOT NULL REFERENCES river_section(id) ON DELETE CASCADE,
+    lang            char(2) NOT NULL REFERENCES language(code),
+    name            text NOT NULL,
+    description     text,
+    PRIMARY KEY (river_section_id, lang)
+);
+```
+
+**A `river_section` és a folyó-korridor geometriája** — a 01-es terv
+§5.5 szerint a fantom-szűrőnek kell egy korridor-polygon. Két lehetőség:
+
+| Opció | Előny | Hátrány |
+|---|---|---|
+| **(a)** `river_section.geom geometry(LineString,4326)` | a szakasz középvonala közvetlenül a táblában; a korridor egy `ST_Buffer`-ral épül | a README 3.3 `river_section` oszloplistájában **nincs** `geom` — a terv ellentmond a referenciának |
+| **(b)** külön `waterway_corridor` tábla | a README-hoz hűs; a korridor külön, szerkeszthető objektum | egy új tábla, ami nincs a README-ban |
+
+**Döntés: (b) `waterway_corridor`.** A README 3.3 oszloplistája **nem
+tartalmaz `geom`-et** a `river_section`-ben, ezért a (a) opció séma-
+szintű ellentmondás lenne. A külön tábla ráadásul **szerkeszthető** (a
+szerkesztői felületen rajzolható a korridor), amit a `river_section`
+középvonalából számított automata buffer nem ad.
+
+```sql
+CREATE TABLE waterway_corridor (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    waterway_id bigint NOT NULL REFERENCES waterway(id) ON DELETE CASCADE,
+    code        text NOT NULL UNIQUE,
+    geom        geometry(MultiPolygon,4326) NOT NULL,   -- a folyó korridorja
+    buffer_m    numeric(6,1) NOT NULL DEFAULT 500,       -- a középvonalból számított szélesség
+    source_id   bigint REFERENCES data_source(id),
+    is_active   boolean NOT NULL DEFAULT true
+);
+CREATE INDEX waterway_corridor_geom_gix ON waterway_corridor USING GIST (geom);
+```
+
+**A `gauge`** (vízállás-mérő pont):
+
+```sql
+CREATE TABLE gauge (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code         text NOT NULL UNIQUE,
+    waterway_id  bigint NOT NULL REFERENCES waterway(id),
+    river_km     numeric(8,3) NOT NULL,
+    country_code char(2) NOT NULL REFERENCES country(code),
+    -- A nulla-pont: MINDIG meg kell adni (H-8), mert a szint
+    -- enelkul nem ertelmezheto (abszolut vagy a nullapont felett).
+    datum_type   text NOT NULL DEFAULT 'zero_datum'
+                 CHECK (datum_type IN ('zero_datum','actl','normal')),
+    datum        text NOT NULL,                  -- a nulla-pont leirasa
+    datum_value_cm numeric(8,2),                -- a nullapont erteke cm-ben
+    geom         geometry(Point,4326)
+);
+CREATE INDEX gauge_geom_gix ON gauge USING GIST (geom);
+
+-- A merestallomas neve a fordithato *-i18n tablaban van (C-3):
+-- a `code` a kod, a nev fordul.
+CREATE TABLE gauge_i18n (
+    gauge_id    bigint NOT NULL REFERENCES gauge(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    name        text NOT NULL,
+    description text,
+    PRIMARY KEY (gauge_id, lang)
+);
+```
+
+### 4.3 Kikötők, kötődömök, terminálok, zsilipek
+
+```sql
+CREATE TABLE port (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code         text NOT NULL UNIQUE,          -- 'PT-0147'
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    unlocode     char(5) UNIQUE,                -- UN/LOCODE, nullable
+    port_type    text NOT NULL
+                 CHECK (port_type IN
+                   ('public_port','terminal','lock','anchorage',
+                    'shipyard','fuel','bunkering','marina')),
+    waterway_id  bigint NOT NULL REFERENCES waterway(id),
+    country_code char(2) NOT NULL REFERENCES country(code),
+    river_km     numeric(8,3),
+    geom         geometry(Point,4326),
+    is_active    boolean NOT NULL DEFAULT true,
+    CHECK (unlocode IS NULL OR unlocode ~ '^[A-Z]{2}[A-Z0-9]{3}$')
+);
+CREATE INDEX port_geom_gix ON port USING GIST (geom);
+CREATE INDEX port_waterway_km_idx ON port (waterway_id, river_km);
+CREATE INDEX port_type_idx ON port (port_type) WHERE is_active;
+
+CREATE TABLE port_i18n (
+    port_id    bigint NOT NULL REFERENCES port(id) ON DELETE CASCADE,
+    lang       char(2) NOT NULL REFERENCES language(code),
+    name       text NOT NULL,
+    address    text,
+    description text,
+    PRIMARY KEY (port_id, lang)
+);
+-- A F-CAT-09 a kikötőnév keresését is kéri (a UN/LOCODE mellett)
+CREATE INDEX port_i18n_name_trgm ON port_i18n
+    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+
+CREATE TABLE operator (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    legal_name   text NOT NULL,
+    country_code char(2) NOT NULL REFERENCES country(code),
+    website      text,
+    founded      smallint
+);
+CREATE INDEX operator_legal_name_trgm ON operator
+    USING GIN (lower(unaccent(legal_name)) gin_trgm_ops);
+
+CREATE TABLE operator_i18n (
+    operator_id bigint NOT NULL REFERENCES operator(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    display_name text,
+    description text,
+    PRIMARY KEY (operator_id, lang)
+);
+
+CREATE TABLE berth (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    port_id       bigint NOT NULL REFERENCES port(id) ON DELETE CASCADE,
+    code          text NOT NULL,
+    length_m      numeric(6,2),
+    depth_m       numeric(5,2),
+    max_draft_m   numeric(4,2),
+    unload_rate_t_h numeric(8,2),
+    UNIQUE (port_id, code)
+);
+
+CREATE TABLE terminal (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    port_id             bigint NOT NULL REFERENCES port(id) ON DELETE CASCADE,
+    operator_id         bigint REFERENCES operator(id),
+    annual_capacity_t   numeric(12,2),
+    storage_capacity_t  numeric(12,2),
+    rail_access         boolean NOT NULL DEFAULT false,
+    gear_types          text[]
+);
+
+CREATE TABLE lock (
+    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    port_id            bigint NOT NULL REFERENCES port(id) ON DELETE CASCADE,
+    code               text NOT NULL UNIQUE,
+    chamber_count      smallint,
+    chamber_length_m   numeric(6,2),
+    chamber_width_m    numeric(6,2),
+    max_draft_m        numeric(4,2),
+    operator_id        bigint REFERENCES operator(id),
+    avg_transit_min    smallint,
+    river_km           numeric(8,3),
+    geom               geometry(Point,4326)
+);
+CREATE INDEX lock_geom_gix ON lock USING GIST (geom);
+
+-- A zsilip neve fordul (C-3): a Gabcikovo, Zezelj, Iron Gate
+-- a katalogus "legyogu valaszai".
+CREATE TABLE lock_i18n (
+    lock_id     bigint NOT NULL REFERENCES lock(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    name        text NOT NULL,
+    description text,
+    PRIMARY KEY (lock_id, lang)
+);
+```
+
+### 4.4 Balaton
+
+```sql
+-- A hajótípus: a README szerint a 'code' a PK (nem az 'id')
+CREATE TABLE vessel_type (
+    code              text PRIMARY KEY,      -- 'INLAND_CARGO_TANKER'
+    un_code_28        text,                  -- UN/CEFACT kód
+    ais_type_code     smallint,              -- az AIS típuskód
+    cargo_category    text,
+    is_self_propelled boolean NOT NULL DEFAULT true,
+    operating_area    text NOT NULL DEFAULT 'duna'
+                      CHECK (operating_area IN ('duna','balaton'))
+);
+
+CREATE TABLE vessel_type_i18n (
+    vessel_type_code text NOT NULL REFERENCES vessel_type(code) ON DELETE CASCADE,
+    lang             char(2) NOT NULL REFERENCES language(code),
+    name             text NOT NULL,
+    description      text,
+    PRIMARY KEY (vessel_type_code, lang)
+);
+
+-- Az útvonalak (R1 a 01-es terv §8.1 szerint)
+CREATE TABLE route (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code                text NOT NULL UNIQUE,          -- 'RTM-BUD'
+    origin_port_id      bigint NOT NULL REFERENCES port(id),
+    dest_port_id        bigint NOT NULL REFERENCES port(id),
+    distance_km         numeric(8,2),
+    typical_duration_h  numeric(6,2),
+    cargo_types         text[]                          -- a cargo_type.code értékei
+);
+CREATE INDEX route_origin_idx ON route (origin_port_id);
+CREATE INDEX route_dest_idx ON route (dest_port_id);
+
+CREATE TABLE route_stop (
+    route_id         bigint NOT NULL REFERENCES route(id) ON DELETE CASCADE,
+    seq              smallint NOT NULL,
+    port_id          bigint NOT NULL REFERENCES port(id),
+    typical_offset_h numeric(6,2),
+    PRIMARY KEY (route_id, seq)
+);
+
+CREATE TABLE route_i18n (
+    route_id    bigint NOT NULL REFERENCES route(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    name        text NOT NULL,
+    description text,
+    PRIMARY KEY (route_id, lang)
+);
+
+-- A rakománytípus (a README szerint a 'code' a PK)
+CREATE TABLE cargo_type (
+    code          text PRIMARY KEY,
+    nst_code      text,
+    adn_code      text,
+    imdg_code     text,
+    is_bulk       boolean NOT NULL DEFAULT false,
+    is_container  boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE cargo_type_i18n (
+    cargo_type_code text NOT NULL REFERENCES cargo_type(code) ON DELETE CASCADE,
+    lang            char(2) NOT NULL REFERENCES language(code),
+    name            text NOT NULL,
+    description     text,
+    PRIMARY KEY (cargo_type_code, lang)
+);
+
+CREATE TABLE basin (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    waterway_id  bigint NOT NULL REFERENCES waterway(id) ON DELETE CASCADE,
+    code         text NOT NULL UNIQUE,          -- 'nyugati', 'kozepso', 'keleti'
+    name_key     text NOT NULL REFERENCES content_key(key),  -- i18n kulcs
+    geo_extent   geometry(Polygon,4326),
+    UNIQUE (waterway_id, code)
+);
+
+CREATE TABLE basin_i18n (
+    basin_id bigint NOT NULL REFERENCES basin(id) ON DELETE CASCADE,
+    lang     char(2) NOT NULL REFERENCES language(code),
+    name     text NOT NULL,
+    PRIMARY KEY (basin_id, lang)
+);
+
+CREATE TABLE marina (
+    id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    port_id               bigint NOT NULL REFERENCES port(id) ON DELETE CASCADE,
+    operator_id           bigint REFERENCES operator(id),
+    anchoring_allowed     boolean NOT NULL DEFAULT false,
+    protected_shore       boolean NOT NULL DEFAULT false,
+    berth_count           smallint,
+    notice_ref            bigint,               -- a kikötőrend hivatkozása
+    UNIQUE (port_id)
+);
+-- A `notice_ref` FK-ja a `notice` táblához — a `notice` a
+-- `0009_content_tables.sql`-ban jon, ezert a constraint is ott
+-- all (a `ALTER TABLE ... ADD CONSTRAINT` a `0009` vegein).
+```
+
+**A `marina.notice_ref` FK-ja a `notice` táblára** — a README 3.3 szerint
+„kikötőrend hivatkozás". Mivel a `notice` később jön a DDL-ben, a
+constraint a migrációk végén áll.
+
+---
+
+## 5. A flotta
+
+### 5.1 A `vessel` — az MMSI az elsődleges azonosító
+
+```sql
+CREATE TABLE vessel (
+    id                      bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Az MMSI a kulcs (AIS-ből mindig jön), az ENI enrichment
+    -- Az azonositok NULL-elhetoek (a Balatoni hajoknak nincs ENI),
+    -- ezert NEM `UNIQUE` constraint, hanem partial unique index
+    -- (lásd §5.2) — a `UNIQUE` a NULL-okon nem mukodne.
+    mmsi                    integer,
+    eni                     char(8),
+    imo                     char(7),
+    callsign                text,
+    -- A URL-bari azonosito (F-CAT-07: /{lang}/hajos/{slug}).
+    -- A nevbol generalodik, nem tobbpeletes unikalitassal: a
+    -- "TESZTHAJO" es a "TESZTHÁJÓ" ugyanaz a hajo, ezert a slug
+    -- a nev normalizalt (ascii, kis-nagybetu-ekeze-elhagyo) alakja.
+    slug                    text NOT NULL UNIQUE,
+    -- A rendezesi nevet denormalizalva (H-4): a hajonev NEM fordul
+    -- (a 01-es terv §5.8.4), ezért a latin hivatalos nevet itt is
+    -- taroljuk, hogy a kataloguslista ne JOIN-oljon a vessel_i18n-re.
+    sort_name               text NOT NULL DEFAULT '',
+    vessel_type_code        text NOT NULL REFERENCES vessel_type(code),
+    operating_area          text NOT NULL DEFAULT 'duna'
+                            CHECK (operating_area IN ('duna','balaton')),
+    flag_country_code       char(2) NOT NULL REFERENCES country(code),
+    operator_id             bigint REFERENCES operator(id),
+    home_port_id            bigint REFERENCES port(id),
+    build_year              smallint,
+    length_m                numeric(6,2),
+    beam_m                  numeric(5,2),
+    draught_max_m           numeric(4,2),
+    draught_reference       text,        -- mire vonatkozik a merülés
+                            -- 'RNW' (a Duna szabályos alacsony vízállása),
+                            -- 'lake_operator' (a Balaton: az üzemeltető adata),
+                            -- 'unknown' (a forras nem ad meg referenciat)
+    draught_reference_text  text,       -- a referencia szovegesen (a UI-hoz)
+    gross_tonnage           numeric(10,2),
+    deadweight_t            numeric(10,2),
+    teu                     integer,
+    power_kw                integer,
+    ais_class               char(1) CHECK (ais_class IN ('A','B','C')),
+    status                  text NOT NULL DEFAULT 'active'
+                            CHECK (status IN
+                              ('active','excluded','inactive','scrapped')),
+    -- A bizonyossági badge (F-DET-14, F-CAT-14). **A F-NF-12
+    -- "jogi: minden adathoz a forrás" miatt ez NEM szabadon
+    -- beirható ertek legyen** (H-10) — a `vessel_verification`
+    -- nezet SZAMOLJA ki a `vessel_identifier` es a
+    -- `vessel_data_origin` alapjan. A DB-szintu CHECK a gyakorlatban
+    -- nem tamogathato (cross-table), ezert a nezeten keresztul
+    -- ellenorizhető (a CI egy minta-adat ellenoriz).
+    verification_level      text NOT NULL DEFAULT 'name_only'
+                            CHECK (verification_level IN
+                              ('ais_identified','ais_partial',
+                               'operator_claimed','name_only')),
+    is_passenger_certified  boolean NOT NULL DEFAULT false,
+    passenger_capacity      integer,
+    source_id               bigint REFERENCES data_source(id),
+    valid_from              date,
+    valid_to                date,
+    created_at              timestamptz NOT NULL DEFAULT now(),
+    updated_at              timestamptz NOT NULL DEFAULT now(),
+    CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from),
+    -- A F-NF-20 a Dunara vonatkozik (RNW); a Balatoni hajonak nincs
+    -- RNW-je, ezert a 'lake_operator' es az 'unknown' is ertekes
+    -- (H-8) — a UI a `draught_reference_text`-bol olvassa a jelolest.
+    CHECK (draught_reference IS NULL OR draught_reference IN
+           ('RNW','lake_operator','unknown'))
+);
+```
+
+**A `CHECK (draught_reference IS NULL OR draught_reference = 'RNW')`**
+a F-NF-20-at kényszeríti ki a sémában: a Duna merülési értékei csak az
+RNW-re vonatkozhatnak (a README 2.2: „a merülés mindenhol az RNW-re
+vonatkozó jelöléssel jelenik meg").
+
+### 5.2 A partial unique index-ek
+
+A README 3.3 B) szerint az `mmsi` és az `eni` **részleges egyediségű**
+(`WHERE ... IS NOT NULL`). Postgresben a `UNIQUE` constraint nem
+feltételes, ezért **partial unique index** kell:
+
+```sql
+CREATE UNIQUE INDEX vessel_mmsi_uniq ON vessel (mmsi) WHERE mmsi IS NOT NULL;
+CREATE UNIQUE INDEX vessel_eni_uniq  ON vessel (eni)  WHERE eni  IS NOT NULL;
+CREATE UNIQUE INDEX vessel_imo_uniq  ON vessel (imo)  WHERE imo  IS NOT NULL;
+
+-- **A katalóguslista indexei** (H-4: a F-CAT-02 rendezhető lista,
+-- a F-CAT-08 szűrők, a F-CAT-14 a bizonyossági szint). A tipikus
+-- R1-es lekérdezés:
+--   WHERE operating_area='duna' AND status='active'
+--   ORDER BY <név> LIMIT 50 OFFSET n
+CREATE INDEX vessel_area_status_verification_idx
+    ON vessel (operating_area, status, verification_level);
+CREATE INDEX vessel_area_operator_idx
+    ON vessel (operating_area, operator_id);
+CREATE INDEX vessel_area_type_idx
+    ON vessel (operating_area, vessel_type_code);
+
+```
+
+**A `vessel` táblához tehát NEM kell `UNIQUE` constraint** — a fenti
+indexek adják. (A §5.1 DDL-jében a `mmsi`, az `eni` és az `imo`
+`UNIQUE` constraintje **törölve** — a `NULL` maradhat, hiszen a
+Balatoni hajóknak nincs ENI-jük, és a `UNIQUE` constraint a NULL-okon
+nem ad egyediséget. A partial unique index egyértelműen kifejezi a
+szándékot: *a nem-NULL értékek egyediek*.)
+
+**A `vessel` PK-ja az `id`** — a `mmsi` a **keresési** kulcs (a README
+3.3/B „elsődleges kulcs"-a a gyakorlatban), nem a DB-szintű PK.
+
+### 5.3 A többi flotta-tábla
+
+```sql
+CREATE TABLE vessel_i18n (
+    vessel_id   bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    name        text NOT NULL,      -- a hivatalos latin név (nem fordul, §5.8.4)
+    description text,               -- ez fordul
+    PRIMARY KEY (vessel_id, lang)
+);
+-- **H-6: a F-SRCH-03 szerint a kereses ekezet- es kis-nagybetu-
+-- fuggetlen.** A pg_trgm trigram operatorok alaperttelmezetten
+-- ERZEKET-ERZEKENYEK, ezért a `unaccent` + `lower()` kifejezes-index
+-- kell — es a LEKERDEZES oldalan is ugyanez a kifejezes (külonben az
+-- index nem hasznalodik). A 03-as API-terv ezt orokli.
+CREATE INDEX vessel_i18n_name_trgm ON vessel_i18n
+    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+
+-- **A rendezés** (H-4): a katalóguslista a névre rendez (a F-CAT-02
+-- alapértelmezés: hajónév szerinti ábécé). A `vessel_i18n` PK-ja
+-- `(vessel_id, lang)` — ez NEM szolgálja a rendezést, kell egy
+-- `(lang, name, vessel_id)` index.
+CREATE INDEX vessel_i18n_lang_name_idx
+    ON vessel_i18n (lang, name, vessel_id);
+
+CREATE TABLE vessel_alias (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id  bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    name       text NOT NULL,
+    name_type  text NOT NULL CHECK (name_type IN ('former','official','shipyard')),
+    valid_from date,
+    valid_to   date
+);
+CREATE INDEX vessel_alias_name_trgm ON vessel_alias
+    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+
+-- A területenként eltérő azonosítók (README 2.10 b)
+CREATE TABLE vessel_identifier (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id    bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    identifier_type text NOT NULL
+                 CHECK (identifier_type IN
+                   ('eni','imo','mmsi','callsign','national_reg_no','internal_code')),
+    value        text NOT NULL,
+    is_primary   boolean NOT NULL DEFAULT false,
+    origin       text NOT NULL
+                 CHECK (origin IN ('ais','official','operator_claimed')),
+    valid_from   date,
+    valid_to     date,
+    source_id    bigint REFERENCES data_source(id)
+);
+CREATE INDEX vessel_identifier_vessel_idx ON vessel_identifier (vessel_id);
+CREATE INDEX vessel_identifier_value_trgm ON vessel_identifier
+    USING GIN (lower(unaccent(value)) gin_trgm_ops);
+
+-- **M-4: az egyediség IDŐBELI.** A `UNIQUE (identifier_type, value)`
+-- a TORTENETI sorokat is betiltana — egy elront ENI javitasa lehetetlen
+-- lenne (a regi sor lezarasa utan sem lehetne ugyanaz az ertek).
+-- Az egyediseg csak az AKTIV (valid_to IS NULL) ertekekre vonatkozik.
+CREATE UNIQUE INDEX vessel_identifier_active_uniq
+    ON vessel_identifier (identifier_type, value) WHERE valid_to IS NULL;
+
+-- "Egy tipusra egy aktiv ertek" (a README 3.3/B)
+CREATE UNIQUE INDEX vessel_identifier_primary_uniq
+    ON vessel_identifier (vessel_id, identifier_type)
+    WHERE is_primary AND valid_to IS NULL;
+
+-- Mezőnkénti eredet (F-DET-15, R1 DoD)
+CREATE TABLE vessel_data_origin (
+    id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id      bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    field_name     text NOT NULL,      -- 'length_m', 'operator_id', …
+    origin         text NOT NULL
+                   CHECK (origin IN ('ais','operator_claimed','official','editorial')),
+    value_snapshot text,
+    source_id      bigint REFERENCES data_source(id),
+    observed_at    timestamptz NOT NULL DEFAULT now(),
+    confidence     numeric(3,2) CHECK (confidence BETWEEN 0 AND 1),
+    is_current     boolean NOT NULL DEFAULT true
+);
+CREATE INDEX vessel_data_origin_vessel_field_idx
+    ON vessel_data_origin (vessel_id, field_name, observed_at DESC);
+
+-- **A konfliktus TÁROLHATÓ** (a README 3.3/B: "Egy mezőnek több
+-- eredete lehet (AIS + üzemeltetői állítás); a konfliktus a felületen
+-- látható"). Az egyediség a FORRÁSRA vonatkozik, nem az értékre:
+-- egy mezőnél egy forrás csak egyszer lehet aktív.
+CREATE UNIQUE INDEX vessel_data_origin_active_uniq
+    ON vessel_data_origin (vessel_id, field_name, origin)
+    WHERE is_current;
+
+-- Az "aktuális érték" nézete: a legfrissebb, legbizalmasabb eredet.
+CREATE VIEW vessel_data_origin_current AS
+SELECT DISTINCT ON (vessel_id, field_name)
+       vessel_id, field_name, origin, value_snapshot,
+       source_id, observed_at, confidence
+FROM vessel_data_origin
+WHERE is_current
+ORDER BY vessel_id, field_name, confidence DESC NULLS LAST, observed_at DESC;
+
+-- A KONFLIKTUS nézete: azok a mezők, ahol egynél több forrás van
+CREATE VIEW vessel_data_origin_conflicts AS
+SELECT vessel_id, field_name, count(*) AS origin_count,
+       array_agg(DISTINCT origin) AS origins
+FROM vessel_data_origin
+WHERE is_current
+GROUP BY vessel_id, field_name
+HAVING count(*) > 1;
+
+-- A **tulajdonosvaltasok** (H-7: a F-DET-05 "hajotortenet blokk"
+-- a tulajdonosvaltasokat is keri, datumtartomannyal).
+-- A `vessel.operator_id` az AKTUALIS ertek (gyors olvasas),
+-- ez a tabla a PREDMENET.
+CREATE TABLE vessel_ownership (
+    vessel_id   bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    operator_id bigint NOT NULL REFERENCES operator(id),
+    valid_from  date NOT NULL,
+    valid_to    date,
+    source_id   bigint REFERENCES data_source(id),
+    PRIMARY KEY (vessel_id, valid_from),
+    CHECK (valid_to IS NULL OR valid_to >= valid_from)
+);
+CREATE INDEX vessel_ownership_operator_idx ON vessel_ownership (operator_id);
+
+CREATE TABLE vessel_cert (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id   bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    cert_type   text NOT NULL,
+    authority   text,
+    issued_at   date,
+    expires_at  date,
+    document_ref text
+);
+CREATE INDEX vessel_cert_vessel_idx ON vessel_cert (vessel_id);
+CREATE INDEX vessel_cert_expiry_idx ON vessel_cert (expires_at)
+    WHERE expires_at IS NOT NULL;
+
+-- A Balatoni szezon (R1-ben a Balaton-katalógushoz kell)
+CREATE TABLE vessel_service_period (
+    id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id      bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    season_start   date,
+    season_end     date,
+    service_status text NOT NULL DEFAULT 'year_round'
+                   CHECK (service_status IN ('seasonal','year_round','suspended')),
+    source_id      bigint REFERENCES data_source(id)
+);
+CREATE INDEX vessel_service_period_vessel_idx ON vessel_service_period (vessel_id);
+```
+
+### 5.4 A konvoj (a séma R1-ben, a felbontás R2-ben)
+
+```sql
+CREATE TABLE convoy (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lead_vessel_id bigint NOT NULL REFERENCES vessel(id),
+    convoy_type   text,
+    formed_at     timestamptz,
+    dissolved_at  timestamptz,
+    status        text NOT NULL DEFAULT 'active'
+                  CHECK (status IN ('active','dissolved')),
+    -- Az R1-ben nincs voyage_id (az a voyage R2, §7)
+    CHECK (dissolved_at IS NULL OR formed_at IS NULL OR dissolved_at >= formed_at)
+);
+
+CREATE TABLE convoy_member (
+    convoy_id        bigint NOT NULL REFERENCES convoy(id) ON DELETE CASCADE,
+    vessel_id        bigint NOT NULL REFERENCES vessel(id),
+    role             text NOT NULL
+                     CHECK (role IN ('lead','push','barge','towed')),
+    position_in_unit smallint,
+    PRIMARY KEY (convoy_id, vessel_id)
+);
+CREATE INDEX convoy_member_vessel_idx ON convoy_member (vessel_id);
+```
+
+---
+
+## 6. Időbeli, tartalmi és rendszer-táblák
+
+### 6.1 A `position` — R1-ben sima buffer
+
+```sql
+CREATE TABLE position (
+    vessel_id       bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    ts              timestamptz NOT NULL,
+    geom            geometry(Point,4326),
+    sog_mps         numeric(5,2),
+    cog_deg         numeric(5,2),
+    heading_deg     numeric(5,2),
+    nav_status      text,
+    rot_deg         numeric(5,2),
+    ais_accuracy_m  numeric(6,1),
+    lat_e7          integer,
+    lon_e7          integer,
+    river_km        numeric(8,3),        -- a FI 10 fairway hectometreből
+    river_section_id bigint REFERENCES river_section(id),
+    basin_id        bigint REFERENCES basin(id),
+    shoreline_km    numeric(8,3),        -- a Balaton partkm-je
+    source_id       bigint REFERENCES data_source(id),
+    source_kind     text NOT NULL DEFAULT 'ais'
+                    CHECK (source_kind IN ('ais','derived','manual')),
+    ingested_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (vessel_id, ts)
+) PARTITION BY RANGE (ts);
+```
+
+**A `position` R1-ben IS particionált** (C-4) — havonta, **90 napos
+TTL-lel**. Két ok:
+
+1. **a README 5.3:** „*Partíció eldobása (`DROP PARTITION`) a TTL
+   betartásához – **nem** `DELETE`-szel*". A particionálatlan buffer
+   ezt sértené.
+2. **a fantom-szűrő 90 napos frissességi szabályt használ** (a 01-es
+   terv §5.5 4. pontja) — a szűrőnek 90 napnyi pozíció kell.
+
+**A 90 nap a README 5.4 „30 s pozíció — 60 nap" értékének konzervatív
+értéke** — a szűrő 90 napja miatt.
+
+**A `position` R1-ben az ingest buffer** — a fantom-szűrő olvassa,
+a UI **nem** (nincs térkép R1-ben). Az **5 perces / 1 órás aggregáció**
+(`position_archive`, `position_hourly`) és a havi/éves partíciók R2
+(ez a tábla R1-ben a `position_archive`-ot nem tartalmazza).
+
+```sql
+-- a havi particiok (a 0008_partitions.sql migracio)
+CREATE TABLE position_p20261101 PARTITION OF position
+    FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+-- ... a további honapok, a belepo fuggveny generálja
+
+-- a DEFAULT particio: ha a heti drop_expired_partitions utan egy
+-- ujonnan beallt honapnak meg nincs particioja, az INSERT ne bukjon el
+CREATE TABLE position_default PARTITION OF position DEFAULT;
+```
+
+**A `position_default`Partition eldobása** a TTL-eljárásban: ha egy
+partíció 90 napnál régebbi, eldobódik — de a `default` partíciót
+**nem** szabad eldobni, hanem **kiszűrni** (`DELETE` a `default`-ból
+a 90 napnál régebbi sorokra), különben az INSERT-ek elbuknak.
+
+```sql
+-- a default particio szuresen belul
+DELETE FROM position_default
+WHERE ts < now() - interval '90 days';
+```
+
+### 6.2 A nyers AIS-üzenetek
+
+```sql
+CREATE TABLE ais_message_raw (
+    id           bigint GENERATED ALWAYS AS IDENTITY,
+    vessel_id    bigint REFERENCES vessel(id) ON DELETE SET NULL,
+    received_at  timestamptz NOT NULL,
+    msg_type     smallint,
+    raw_nmea     text NOT NULL,
+    -- **A dedup-kulcs** (V-N-5): az `id` mindig uj
+    -- (`GENERATED ALWAYS AS IDENTITY`), ezert a nyers uzenetek
+    -- deduplicacioja nem arra epulhet. A README 6.2 dedup-kulcsa
+    -- `(mmsi, ts, msg_type, sog, cog, lat, lon)` **nyers uzenetnel
+    -- nem elerheto** (a parser meg nem bontotta) — a nyers NMEA
+    -- tartalma alapjan szamitunk egy hash-t.
+    --
+    -- **A hash-t az INGEST szamitja** (a service retegen,
+    -- Python `hashlib.sha256`), nem a DB. A DB-beli generalt
+    -- oszlop nem mukodne: a `timestamptz::text` a session
+    -- timezone-tol fugg (nem immutable), a `digest()`-hoz pedig a
+    -- `pgcrypto` extension kellene. A hash a `raw_nmea` +
+    -- `received_at` (epoch) + `source_id` elemeiből jon.
+    msg_hash     bytea NOT NULL,
+    source_id    bigint REFERENCES data_source(id),
+    PRIMARY KEY (id, received_at)
+) PARTITION BY RANGE (received_at);
+
+-- A dedup egyedisegi indexe. **A particios kulcsot is tartalmaznia
+-- kell** (a Postgres egy particionalt tablan a unique indexet csak
+-- a particios kulccsal egyutt engedi).
+CREATE UNIQUE INDEX ais_message_raw_hash_uniq
+    ON ais_message_raw (msg_hash, received_at);
+
+-- **A DEFAULT partíció KÖTELEZŐ** (V-C-1): a havi partíciókat a
+-- `pg_cron` hozza létre, de az első INSERT előtt (vagy a partíciók
+-- eldobása után) a tába üres partíció nélkül marad -> az ingest
+-- "no partition of relation found for row" hibával elbukik.
+-- A DEFAULT partíció ezt megelezi.
+CREATE TABLE ais_message_raw_default PARTITION OF ais_message_raw DEFAULT;
+```
+
+**A partíció a 14 napos TTL-hez kell már R1-ben** (a README 3.3 C): a
+`DROP PARTITION` a TTL, nem a `DELETE` (a README 5.3: „Partíció eldobása
+(`DROP PARTITION`) a TTL betartásához – **nem** `DELETE`-szel").
+
+### 6.2a A további időbeli és operatív táblák
+
+```sql
+-- A vízállás-mérések (R1: a kikötő-adatlapokhoz kell a szinttörténet)
+CREATE TABLE water_level (
+    gauge_id  bigint NOT NULL REFERENCES gauge(id) ON DELETE CASCADE,
+    ts        timestamptz NOT NULL,
+    level_cm  numeric(8,2) NOT NULL,
+    PRIMARY KEY (gauge_id, ts)
+) PARTITION BY RANGE (ts);
+CREATE INDEX water_level_brin ON water_level USING BRIN (ts);
+
+-- A DEFAULT particio (V-C-1) — lásd az ais_message_raw-nál
+CREATE TABLE water_level_default PARTITION OF water_level DEFAULT;
+
+-- A zsilip karbantartási / zárási idősor (R1: a kikötőrendhez tartozik)
+CREATE TABLE lock_status (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lock_id    bigint NOT NULL REFERENCES lock(id) ON DELETE CASCADE,
+    status     text NOT NULL
+               CHECK (status IN ('open','closed','maintenance','restricted')),
+    valid_from timestamptz NOT NULL,
+    valid_to   timestamptz,
+    note       text,
+    source     text NOT NULL DEFAULT 'notice'
+               CHECK (source IN ('notice','operator','manual'))
+);
+CREATE INDEX lock_status_lock_idx ON lock_status (lock_id, valid_from DESC);
+
+-- A Balatoni heti menetrend (a README szerint R3)
+CREATE TABLE vessel_schedule (
+    id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id      bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    route_id       bigint NOT NULL REFERENCES route(id),
+    weekday        smallint NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+    departure_time time NOT NULL,
+    valid_from     date,
+    valid_to       date
+);
+CREATE INDEX vessel_schedule_vessel_idx ON vessel_schedule (vessel_id, weekday);
+
+-- A közösségi pozíció-jelentés (R2: a figyelőlistával együtt)
+CREATE TABLE position_report (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     bigint NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    vessel_id   bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    observed_ts timestamptz NOT NULL,
+    geom        geometry(Point,4326),
+    note        text,
+    status      text NOT NULL DEFAULT 'new'
+                CHECK (status IN ('new','accepted','rejected'))
+);
+CREATE INDEX position_report_status_idx ON position_report (status, observed_ts DESC);
+```
+
+> **A `lock_passage` NEM az R1-be való** — a `voyage_id` FK-ja a
+> `voyage` táblára mutat, ami **R2** (lásd §7 és a 01-es terv §8.2).
+> Az R1-es migráció a `lock_passage`-t nem hozza létre; a tábla a
+> `voyage`-val együtt, az R2-es migrációban jelenik meg.
+
+### 6.2b A bizonyossági szint nézete (H-10)
+
+> **A `bori` reviewer H-10 findingje után.** A `verification_level`
+> szabadon beírható mező volt → a badge **hazudhatott** (pl.
+> `ais_identified`, de nincs `origin='ais'` azonosító). A szint
+> most **származtatott**: a nézet az azonosítók és a mezőnkénti
+> eredetek alapján számolja.
+
+```sql
+CREATE VIEW vessel_verification AS
+SELECT
+    v.id AS vessel_id,
+    CASE
+        -- AIS-azonosított: van ENI/MMSI/IMO, AIS-eredetű
+        WHEN EXISTS (
+            SELECT 1 FROM vessel_identifier i
+            WHERE i.vessel_id = v.id
+              AND i.valid_to IS NULL
+              AND i.identifier_type IN ('eni','imo','mmsi')
+              AND i.origin = 'ais'
+        ) THEN 'ais_identified'
+        -- Csak AIS-részadat: van MMSI, de nincs ENI
+        WHEN EXISTS (
+            SELECT 1 FROM vessel_identifier i
+            WHERE i.vessel_id = v.id
+              AND i.valid_to IS NULL
+              AND i.identifier_type = 'mmsi'
+              AND i.origin = 'ais'
+        ) THEN 'ais_partial'
+        -- Üzemeltető igazolta: van operator_claimed eredet
+        WHEN EXISTS (
+            SELECT 1 FROM vessel_data_origin o
+            WHERE o.vessel_id = v.id
+              AND o.is_current
+              AND o.origin = 'operator_claimed'
+        ) THEN 'operator_claimed'
+        ELSE 'name_only'
+    END::text AS computed_verification_level,
+    -- az eltérés, ha a beirt ertek nem egyezik a szamitottal
+    (v.verification_level <>
+     CASE
+        WHEN EXISTS (SELECT 1 FROM vessel_identifier i
+                     WHERE i.vessel_id = v.id AND i.valid_to IS NULL
+                       AND i.identifier_type IN ('eni','imo','mmsi')
+                       AND i.origin = 'ais') THEN 'ais_identified'
+        WHEN EXISTS (SELECT 1 FROM vessel_identifier i
+                     WHERE i.vessel_id = v.id AND i.valid_to IS NULL
+                       AND i.identifier_type = 'mmsi'
+                       AND i.origin = 'ais') THEN 'ais_partial'
+        WHEN EXISTS (SELECT 1 FROM vessel_data_origin o
+                     WHERE o.vessel_id = v.id AND o.is_current
+                       AND o.origin = 'operator_claimed') THEN 'operator_claimed'
+        ELSE 'name_only'
+     END) AS is_stale
+FROM vessel v;
+```
+
+**A `vessel.verification_level` a tárolt érték** (gyors olvasás),
+a `vessel_verification.computed_verification_level` a **számított**.
+A kettő eltérése a `is_stale` — ez a **szerkesztői felület
+figyelmeztetése** (a 06-os terv), és a CI teszt is ellenőrzi.
+
+**A területenkénti szabály** (a README 2.10/b): a Duna-katalógusban
+az ENI kötelező, a Balatonon a hívójel vagy a nemzeti hajószám.
+Ez **nem** DB-szinten kényszeríthető ki (a terület a `vessel`-en van,
+a kötelező azonosító a terület függvénye) — a **szerkesztői felület**
+validálja, és a `01`–`03` terv szerinti API is.
+
+### 6.3a A legfrissebb pozíció nézete (a F-DET-06 szöveges helye)
+
+> **A `bori` reviewer C-5 findingje után.** A README 3.3/C a
+> `vessel_last_position`-t előírja: „*Anyagolt nézet: legfrissebb
+> pozíció + kor + sebesség — A térkép és a lista ezt olvassa*".
+> Az R1-ben **nincs térkép**, de a F-DET-06 (M, R1) szövegesen kéri
+> a „hol van / hol közlekedik" információt: „*pl. „Duna, 1642–1635 km,
+> Szob–Budapest szakasz"*". **Ehhez kell nézet.**
+
+```sql
+-- A legfrissebb pozíció hajonkent (a README 3.3/C szerint)
+CREATE VIEW vessel_last_position AS
+SELECT DISTINCT ON (vessel_id)
+       vessel_id,
+       ts,
+       geom,
+       sog_mps,
+       river_km,
+       river_section_id,
+       basin_id,
+       shoreline_km,
+       source_kind,          -- 'derived' a barkaknál (a 01-es terv §5.5)
+       now() - ts AS age
+FROM position
+ORDER BY vessel_id, ts DESC;
+```
+
+**A szöveges hely összeállítása** (a `03` – API terv végpontja):
+a `vessel_last_position.river_km` + a `river_section_i18n.name` +
+a `waterway_i18n.name` → „Duna, 1642–1635 km, Szob–Budapest szakasz".
+
+**A denormalizált mezők a `vessel`-en** — a `last_position_ts` és a
+`last_river_km` az adatlap gyors olvasásához (a nézet a teljes
+`position`-t scaneli, ami a `DISTINCT ON`-hoz 90 napnyi sort jelent):
+
+```sql
+ALTER TABLE vessel ADD COLUMN last_position_ts timestamptz;
+ALTER TABLE vessel ADD COLUMN last_river_km numeric(8,3);
+```
+
+**Ezeket az ingest réteg tartja karban** (nem trigger) — az ingest
+minden pozíció írásakor frissíti a hajó sorát. A triggeres megoldás
+túl sok írást okozna (minden pozíció egy `vessel` UPDATE).
+
+### 6.4 A tartalom- és i18n-táblák
+
+```sql
+-- A kulcs nyelvenkenti szovege + a publikalasi munkafolyamat
+CREATE TABLE content_text (
+    content_key  text NOT NULL REFERENCES content_key(key) ON DELETE CASCADE,
+    lang         char(2) NOT NULL REFERENCES language(code),
+    text         text NOT NULL,
+    status       text NOT NULL DEFAULT 'draft'
+                 CHECK (status IN ('draft','review','published')),
+    author_id    bigint REFERENCES app_user(id),
+    reviewed_by  bigint REFERENCES app_user(id),
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (content_key, lang)
+);
+CREATE INDEX content_text_status_idx ON content_text (status);
+
+-- A forditoi feladatlista
+CREATE TABLE translation_task (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    content_key  text NOT NULL REFERENCES content_key(key) ON DELETE CASCADE,
+    lang         char(2) NOT NULL REFERENCES language(code),
+    status       text NOT NULL DEFAULT 'open'
+                 CHECK (status IN ('open','in_progress','done','rejected')),
+    assignee_id  bigint REFERENCES app_user(id),
+    due_at       timestamptz
+);
+CREATE INDEX translation_task_open_idx
+    ON translation_task (status, due_at) WHERE status IN ('open','in_progress');
+
+-- A kódkatalógusok (a README FK-val hivatkozik nekik)
+CREATE TABLE notice_type (
+    code       text PRIMARY KEY,
+    name_key   text NOT NULL REFERENCES content_key(key),
+    severity_default text NOT NULL DEFAULT 'info'
+               CHECK (severity_default IN ('info','warning','error','critical'))
+);
+
+CREATE TABLE event_type (
+    code       text PRIMARY KEY,
+    name_key   text NOT NULL REFERENCES content_key(key),
+    severity_default text NOT NULL DEFAULT 'info'
+               CHECK (severity_default IN ('info','warning','error','critical'))
+);
+
+CREATE TABLE article_category (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code       text NOT NULL UNIQUE,
+    name_key   text NOT NULL REFERENCES content_key(key)
+);
+
+-- A hivatalos ertesites (kikotorend, vizallasi hirdemeny)
+CREATE TABLE notice (
+    id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    notice_type     text NOT NULL REFERENCES notice_type(code),
+    source_authority text,
+    source_url      text,
+    reference_no    text,
+    valid_from      timestamptz,
+    valid_to        timestamptz,
+    river_km_from   numeric(8,3),
+    river_km_to     numeric(8,3),
+    geom            geometry(Point,4326),
+    severity        text NOT NULL DEFAULT 'info'
+                    CHECK (severity IN ('info','warning','error','critical')),
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX notice_valid_idx ON notice (valid_from, valid_to);
+CREATE INDEX notice_geom_gix ON notice USING GIST (geom);
+
+CREATE TABLE notice_i18n (
+    notice_id bigint NOT NULL REFERENCES notice(id) ON DELETE CASCADE,
+    lang      char(2) NOT NULL REFERENCES language(code),
+    title     text NOT NULL,
+    body      text,
+    PRIMARY KEY (notice_id, lang)
+);
+
+-- Az esemeny (fajlagos esemeny: kozlekedesi, vizallasi, karbantartas)
+CREATE TABLE event (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_type text NOT NULL REFERENCES event_type(code),
+    severity   text NOT NULL DEFAULT 'info'
+               CHECK (severity IN ('info','warning','error','critical')),
+    geom       geometry(Point,4326),
+    river_km   numeric(8,3),
+    starts_at  timestamptz NOT NULL,
+    ends_at    timestamptz,
+    port_id    bigint REFERENCES port(id),
+    vessel_id  bigint REFERENCES vessel(id),
+    source     text NOT NULL DEFAULT 'notice'
+               CHECK (source IN ('notice','operator','manual','ais_derived')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (ends_at IS NULL OR ends_at >= starts_at)
+);
+CREATE INDEX event_starts_idx ON event (starts_at DESC);
+CREATE INDEX event_geom_gix ON event USING GIST (geom);
+
+CREATE TABLE event_i18n (
+    event_id    bigint NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+    lang        char(2) NOT NULL REFERENCES language(code),
+    title       text NOT NULL,
+    description text,
+    PRIMARY KEY (event_id, lang)
+);
+
+-- A blog / cikk
+CREATE TABLE article (
+    id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    slug              text NOT NULL UNIQUE,
+    category_id       bigint NOT NULL REFERENCES article_category(id),
+    author_id         bigint REFERENCES app_user(id),
+    published_at      timestamptz,
+    hero_image_url    text,
+    status            text NOT NULL DEFAULT 'draft'
+                      CHECK (status IN ('draft','review','published','archived')),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX article_status_idx ON article (status, published_at DESC);
+
+CREATE TABLE article_i18n (
+    article_id       bigint NOT NULL REFERENCES article(id) ON DELETE CASCADE,
+    lang             char(2) NOT NULL REFERENCES language(code),
+    title            text NOT NULL,
+    summary          text,
+    body_md          text,
+    meta_title       text,
+    meta_description text,
+    PRIMARY KEY (article_id, lang)
+);
+CREATE INDEX article_i18n_title_trgm ON article_i18n USING GIN (title gin_trgm_ops);
+```
+
+**A `content_text` az a kulcs, ami a DB-ben a felhasználói szövegeket
+tartja** — az Astro `i18n` csak a routingot adja (a 01-es terv §3.2.1
+szerint a cikkek a DB-ben vannak, és a `status='published'` a publish
+gating).
+
+### 6.4b A mértékegység-, pénznem- és referencia-táblák
+
+> **A `bori` reviewer M-1 findingje után.** A README 3.3/G felsorolja
+> a `unit`, a `currency` és a `fx_rate` táblákat — a terv §3-as
+> listájában szerepeltek, de **DDL-jük nem volt**.
+
+```sql
+-- A mértékegységek (a hajóméretek SI-alapúak, de a formázás
+-- kliensoldali — a README 4.6; ez a tábla a formázás
+-- referencia-halmaza, nem a konverzió motorja)
+CREATE TABLE unit (
+    code         text PRIMARY KEY,        -- 'm', 'km', 't', 'kw', 'TEU'
+    name_key     text NOT NULL,
+    quantity_kind text NOT NULL
+                 CHECK (quantity_kind IN
+                   ('length','mass','volume','power','capacity','speed')),
+    to_base      numeric(12,6) NOT NULL DEFAULT 1,
+    decimals     smallint NOT NULL DEFAULT 2
+);
+
+-- A pénznem (az R1-ben nincs pénznem-alapú adat — a README 2.8
+-- a devizaárfolyamot említi, de a hajóadatok nem pénzügyiek;
+-- a tábla a jövőbeli B2B API (R5) számára van, nem R1-kötelező)
+CREATE TABLE currency (
+    code          char(3) PRIMARY KEY,     -- ISO 4217
+    name_key      text NOT NULL,
+    decimals      smallint NOT NULL DEFAULT 2
+);
+
+CREATE TABLE fx_rate (
+    base_currency  char(3) NOT NULL REFERENCES currency(code),
+    quote_currency char(3) NOT NULL REFERENCES currency(code),
+    rate_date      date NOT NULL,
+    rate           numeric(18,8) NOT NULL,
+    source_id      bigint REFERENCES data_source(id),
+    PRIMARY KEY (base_currency, quote_currency, rate_date)
+);
+```
+
+### 6.4c A `ais_gap` — a hajó „néma" periódusa
+
+> **A `bori` reviewer M-1 findingje után.** A README 2.3 szerint az
+> `ais_gap` a **diagnosztika**: „*Mikor volt egy hajó „néma", és
+> miért*". Az R1-ben a fantom-szűrő 90 napos frissességi szabályt
+> használ — a `ais_gap` megmondja, **miért** nincs pozíciója egy
+> hajónak (a vevő kiesése, a hajó kikötőben van, a hiba).
+
+```sql
+CREATE TABLE ais_gap (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id   bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
+    from_ts     timestamptz NOT NULL,
+    to_ts       timestamptz,
+    reason      text NOT NULL
+                CHECK (reason IN
+                  ('no_signal','in_port','out_of_coverage',
+                   'receiver_failure','parser_error','unknown')),
+    detected_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (to_ts IS NULL OR to_ts >= from_ts)
+);
+CREATE INDEX ais_gap_vessel_idx ON ais_gap (vessel_id, from_ts DESC);
+CREATE INDEX ais_gap_open_idx ON ais_gap (detected_at DESC)
+    WHERE to_ts IS NULL;
+```
+
+### 6.4a A rendszer- és üzemeltetési táblák
+
+```sql
+-- A saját AIS vevőhálózat telephelyei
+CREATE TABLE ais_receiver_site (
+    id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code              text NOT NULL UNIQUE,     -- 'BUD-TETO'
+    name              text NOT NULL,
+    waterway_id       bigint NOT NULL REFERENCES waterway(id),
+    river_km          numeric(8,3),
+    geom              geometry(Point,4326),
+    antenna_height_m  numeric(5,1),
+    installed_at      date,
+    operator_name     text,
+    status            text NOT NULL DEFAULT 'planned'
+                      CHECK (status IN ('planned','active','maintenance','retired')),
+    last_seen_at      timestamptz,               -- a heartbeatből
+    coverage_note     text,
+    source_id         bigint REFERENCES data_source(id)
+);
+CREATE INDEX ais_receiver_site_geom_gix ON ais_receiver_site USING GIST (geom);
+CREATE INDEX ais_receiver_site_status_idx ON ais_receiver_site (status);
+
+-- A hibák nem esnek el csendben (README 6.2): a dead-letter
+CREATE TABLE data_quality_event (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source_id   bigint REFERENCES data_source(id),
+    entity_type text,
+    entity_id   bigint,
+    severity    text NOT NULL DEFAULT 'warning'
+                CHECK (severity IN ('info','warning','error','critical')),
+    detected_at timestamptz NOT NULL DEFAULT now(),
+    detail      text,
+    resolved_at timestamptz
+);
+CREATE INDEX data_quality_event_open_idx
+    ON data_quality_event (severity, detected_at DESC) WHERE resolved_at IS NULL;
+
+-- A feldolgozasi futasok naploja
+CREATE TABLE job_run (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_name   text NOT NULL,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    ended_at   timestamptz,
+    status     text NOT NULL DEFAULT 'running'
+               CHECK (status IN ('running','success','failed','partial')),
+    rows_in    integer,
+    rows_out   integer,
+    error_text text
+);
+CREATE INDEX job_run_name_idx ON job_run (job_name, started_at DESC);
+CREATE INDEX job_run_failed_idx ON job_run (started_at DESC)
+    WHERE status IN ('failed','partial');
+
+-- A feature flag-ek (a keszitesi fokozatokhoz)
+CREATE TABLE feature_flag (
+    key         text PRIMARY KEY,
+    enabled     boolean NOT NULL DEFAULT false,
+    rollout_pct smallint NOT NULL DEFAULT 100
+               CHECK (rollout_pct BETWEEN 0 AND 100),
+    variants    jsonb
+);
+```
+
+### 6.3 Az audit
+
+```sql
+-- A visszajelzes (F-DET-11): az anonim kozossegi jelzes is ide fut
+CREATE TABLE feedback (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id    bigint REFERENCES app_user(id) ON DELETE SET NULL,
+    category   text NOT NULL
+               CHECK (category IN
+                 ('data_correction','translation','map','source',
+                  'feature','other')),
+    body       text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    handled_by bigint REFERENCES app_user(id),
+    handled_at timestamptz
+);
+CREATE INDEX feedback_open_idx ON feedback (created_at DESC)
+    WHERE handled_at IS NULL;
+
+CREATE TABLE audit_log (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    actor_id   bigint REFERENCES app_user(id),
+    action     text NOT NULL,        -- 'INSERT' | 'UPDATE' | 'DELETE' | 'IMPORT'
+    entity_type text NOT NULL,
+    entity_id   bigint,
+    before      jsonb,
+    after       jsonb,
+    at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX audit_log_entity_idx ON audit_log (entity_type, entity_id, at DESC);
+CREATE INDEX audit_log_actor_idx ON audit_log (actor_id, at DESC);
+```
+
+---
+
+## 7. A partícionálás és a TTL — R1 és R2
+
+| Tábla | R1 | R2 |
+|---|---|---|
+| `ais_message_raw` | **havi partíció, 14 nap TTL** | változatlan |
+| `position` | **sima tábla** (buffer) | havi partíció + BRIN + GiST az aktuális partíciókon; `position_archive` (5 perc, 3 év) és `position_hourly` (1 óra, 10 év) |
+
+**A TTL mechanizmusa (mindkét esetben):**
+
+**A `pg_cron` jobok definíciója a §8.4-ben van** (a `pg_cron`
+extension a custom image-ben fut — a stock `postgis/postgis:16-3.4`
+image-ben nincs).
+
+**A `drop_expired_partitions` egy `PL/pgSQL` függvény**, amit a
+`db/migrations/versions/` telepít — a `DROP PARTITION` soha nem `DELETE`.
+
+---
+
+## 8. A trigger-ek és a DB-függvények
+
+| Trigger | Tábla | Mit csinál |
+|---|---|---|
+| `set_updated_at` | `vessel`, `port`, `notice`, `article`, `app_user` | `updated_at = now()` minden UPDATE-nél |
+| `audit_row_change` | `vessel`, `vessel_i18n`, `port`, `port_i18n`, `vessel_cert`, `vessel_service_period` | a before/after értéket az `audit_log`-ba írja |
+
+**Az audit-trigger `actor_id`-je** a sessionből jön (`current_setting('app.user_id',
+true)`) — a FastAPI middleware állítja be tranzakciónként.
+
+### 8.1 A `set_updated_at` trigger
+
+```sql
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_vessel_updated_at
+    BEFORE UPDATE ON vessel
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+```
+
+### 8.1b A `role` oszlop védelme (V-N-7)
+
+> **A `verifier` V-N-7 findingje után.** A `role` oszlop a
+> `app_user` **saját** sorában van → a szerkesztő adminná emelhette
+> magát. A trigger csak akkor engedi a változást, ha az aktuális
+> szerep `admin`.
+
+```sql
+CREATE OR REPLACE FUNCTION guard_role_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.role IS DISTINCT FROM OLD.role THEN
+        -- az admin szerep allitja be a sessionben
+        IF current_setting('app.user_role', true) IS DISTINCT FROM 'admin' THEN
+            RAISE EXCEPTION
+                'A szerepváltas csak az admin szamara engedélyezett '
+                '(a beallitott szerep: %)',
+                COALESCE(current_setting('app.user_role', true), '<nincs>');
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_app_user_guard_role
+    BEFORE UPDATE OF role ON app_user
+    FOR EACH ROW EXECUTE FUNCTION guard_role_change();
+```
+
+**A `app.user_role` session-változó** a FastAPI middleware-től jön
+(`SET LOCAL app.user_role = 'admin'`) — a `SET ROLE` DB-szerepkör
+mellett ez a második védvonal.
+
+-- A slugot NEM a DB generalja: a hajonev ekezetes es unicode
+-- normalizalasara a PostgreSQL `unaccent` extension kellene, es a
+-- slug-ot igyis az alkalmazas oldalon kell generalni (a service
+-- retegen, a `vessel_service`). A DB a `NOT NULL` + `UNIQUE`
+-- constraintet enforces — ez a garancia, hogy a mély link (F-CAT-07)
+-- mindig egyértelmű.
+-- A **backfill** migracio (`0015_backfill_slugs.sql`) a meglevo
+-- hajok slug-jat feltolti az alkalmazas generalojaval.
+
+CREATE TRIGGER trg_port_updated_at
+    BEFORE UPDATE ON port
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_notice_updated_at
+    BEFORE UPDATE ON notice
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_article_updated_at
+    BEFORE UPDATE ON article
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_app_user_updated_at
+    BEFORE UPDATE ON app_user
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+
+### 8.1a A `sort_name` karbantartása (H-4)
+
+> **A `bori` reviewer H-4 findingje után.** A katalóguslista a
+> `vessel.sort_name` szerint rendez (a hajónév **nem fordul**, ezért
+> a latin hivatalos név a rendezési kulcs) — de a név a
+> `vessel_i18n`-ben van. A `sort_name`-t az **ingest** tölti be
+> (nem trigger): a név a `vessel_i18n` upsertjakor frissul, a
+> `sort_name` pedig a `vessel`-en ugyanabban a tranzakcióban.
+
+```sql
+-- A vessel_i18n -> vessel.sort_name szinkron (a hajonev nem fordul,
+-- ezért a 'hu' nyelv hivatalos neve az rendezesi kulcs)
+CREATE OR REPLACE FUNCTION sync_vessel_sort_name() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.lang = 'hu' THEN
+        UPDATE vessel
+        SET sort_name = lower(unaccent(NEW.name))
+        WHERE id = NEW.vessel_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_vessel_i18n_sort_name
+    AFTER INSERT OR UPDATE OF name ON vessel_i18n
+    FOR EACH ROW EXECUTE FUNCTION sync_vessel_sort_name();
+```
+
+### 8.2 Az `audit_row_change` trigger
+
+```sql
+CREATE OR REPLACE FUNCTION audit_row_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_actor  bigint;
+    v_entity bigint;
+    v_old    jsonb;
+    v_new    jsonb;
+BEGIN
+    -- A sessionben beallitott felhasznalo (a FastAPI middleware allitja be).
+    --
+    -- **V-N-6: ha nincs beallitva, a `v_actor` NULL marad** -> az
+    -- audit-nyomvonalban nem lenne ki, ki valtozott. Az ingest
+    -- (etl) nem a FastAPI-n keresztul jön, ezert a **rendszer
+    --aktor** a megoldas: az `app_user` tablaban van egy dedikalt
+    -- 'system' felhasznalo (a seed hozza letre), es az ingest
+    -- sessionje azt allitja be (`SET app.user_id = <system id>`).
+    --
+    -- A **kezi szerkesztes** (a szerkesztoi felulet) mindig a
+    -- tenyleges felhasznalo id-jet allitja be -> a NULL nem
+    -- fordulhat elo.
+    v_actor := NULLIF(current_setting('app.user_id', true), '')::bigint;
+
+    -- A biztonsagi háló: ha a session nem allitotta be, a
+    -- dedikalt 'system' aktorhoz esunk (nem NULL).
+    IF v_actor IS NULL THEN
+        SELECT id INTO v_actor FROM app_user WHERE email = 'system@vessel-tracker.local';
+    END IF;
+
+    IF TG_OP = 'INSERT' THEN
+        v_old := NULL;
+        v_new := to_jsonb(NEW);
+    ELSIF TG_OP = 'UPDATE' THEN
+        v_old := to_jsonb(OLD);
+        v_new := to_jsonb(NEW);
+        -- csak akkor logolunk, ha valtozott
+        IF v_old = v_new THEN
+            RETURN NEW;
+        END IF;
+    ELSE
+        v_old := to_jsonb(OLD);
+        v_new := NULL;
+    END IF;
+
+    -- Az entity_id a **PK oszlopokbol** jon, nem egy fix 'id'
+    -- mezobol (H-9): a `vessel_i18n`/`port_i18n` nincs `id` oszlopuk
+    -- (a PK: (vessel_id, lang) / (port_id, lang)) → a korabbi
+    -- megoldas NULL entity_id-t irt minden forditas-modositásra.
+    v_entity := COALESCE(
+        (to_jsonb(NEW)->>'vessel_id')::bigint,
+        (to_jsonb(OLD)->>'vessel_id')::bigint,
+        (to_jsonb(NEW)->>'port_id')::bigint,
+        (to_jsonb(OLD)->>'port_id')::bigint,
+        (to_jsonb(NEW)->>'id')::bigint,
+        (to_jsonb(OLD)->>'id')::bigint
+    );
+
+    INSERT INTO audit_log (actor_id, action, entity_type, entity_id, before, after)
+    VALUES (v_actor, TG_OP, TG_TABLE_NAME, v_entity, v_old, v_new);
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE TRIGGER trg_vessel_audit
+    AFTER INSERT OR UPDATE OR DELETE ON vessel
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_vessel_i18n_audit
+    AFTER INSERT OR UPDATE OR DELETE ON vessel_i18n
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_port_audit
+    AFTER INSERT OR UPDATE OR DELETE ON port
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_port_i18n_audit
+    AFTER INSERT OR UPDATE OR DELETE ON port_i18n
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_vessel_cert_audit
+    AFTER INSERT OR UPDATE OR DELETE ON vessel_cert
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+
+CREATE TRIGGER trg_vessel_service_period_audit
+    AFTER INSERT OR UPDATE OR DELETE ON vessel_service_period
+    FOR EACH ROW EXECUTE FUNCTION audit_row_change();
+```
+
+### 8.2a Az azonosító-szinkron (M-5)
+
+> **A `bori` reviewer M-5 findingje után.** A `vessel.mmsi/eni/imo` és
+> a `vessel_identifier` ugyanaz az adat két helyen — trigger/constraint
+> nélkül. **A kanonikus tároló a `vessel_identifier`** (az idősorral),
+> a `vessel` oszlopai a **triggerrel fenntartott gyorsolítás**.
+
+
+
+```sql
+CREATE OR REPLACE FUNCTION drop_expired_partitions(
+    p_table     text,
+    p_keep_days integer
+) RETURNS integer
+LANGUAGE plpgsql AS $$
+DECLARE
+    r          record;
+    v_dropped  integer := 0;
+    v_boundary date := (now() - (p_keep_days || ' days')::interval)::date;
+BEGIN
+    FOR r IN
+        SELECT c.relname AS partition_name,
+               -- a particio TARTOMANYANAK VEGE (a pg_get_expr-bol nem
+               -- olvasunk, hanem a nevebol szamolunk — a konvencio:
+               -- <tabla>_pYYYYMMDD, a hataridot a NEV eleje jelzi)
+               to_date(substring(c.relname FROM '_p(\d{8})$'), 'YYYYMMDD')
+                   + interval '1 day' AS range_end
+        FROM pg_class c
+        JOIN pg_inherits i ON i.inhrelid = c.oid
+        JOIN pg_class p ON p.oid = i.inhparent
+        JOIN pg_namespace n ON n.oid = p.relnamespace
+        WHERE n.nspname = 'public'
+          AND p.relname = p_table
+          AND c.relname ~ ('^' || p_table || '_p\d{8}$')
+          -- A DEFAULT particiot SOHA nem dobjuk el (V-C-1): az
+          -- ingest ne bukjon el egy hataridot el nem er
+          -- particio hianyaban
+          AND c.relname NOT LIKE '%_default'
+    LOOP
+        -- **A hatar a particio TARTOMANYANAK VEGE, nem a kezdete**
+        -- (V-C-6): a havi particio p20261101 a 2026-11-01 datumot
+        -- jelzi, ami egy 14 napos TTL hatarral egyutt mar REGEN
+        -- eldobhatna a 2 napos, aktualis adatot is.
+        -- A napi particiokkal (<tabla>_p20261118) a TTL pontos:
+        -- a hatarido = a particio kezdete + 1 nap.
+        BEGIN
+            IF r.range_end::date < v_boundary THEN
+                EXECUTE format('DROP TABLE %I', r.partition_name);
+                v_dropped := v_dropped + 1;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            -- a nev nem illeszkedik a mintara: kihagyjuk, nem allunk meg
+            CONTINUE;
+        END;
+    END LOOP;
+
+    RETURN v_dropped;
+END;
+$$;
+
+```
+
+```sql
+
+-- **A `sync_vessel_identifiers`** (a `vessel_identifier` AFTER trigger
+-- hívja): UPDATE-el a `vessel` sort — a `vessel` azonosító oszlopait
+-- az aktív primer azonosítókra állítva.
+CREATE OR REPLACE FUNCTION sync_vessel_identifiers() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_vessel_id bigint;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_vessel_id := OLD.vessel_id;
+    ELSE
+        v_vessel_id := NEW.vessel_id;
+    END IF;
+
+    UPDATE vessel v
+    SET mmsi = src.mmsi, eni = src.eni, imo = src.imo
+    FROM (
+        SELECT
+            max(value) FILTER (WHERE identifier_type = 'mmsi')::int AS mmsi,
+            max(value) FILTER (WHERE identifier_type = 'eni')    AS eni,
+            max(value) FILTER (WHERE identifier_type = 'imo')    AS imo
+        FROM vessel_identifier
+        WHERE vessel_id = v_vessel_id
+          AND valid_to IS NULL
+          AND is_primary
+    ) src
+    WHERE v.id = v_vessel_id;
+
+    RETURN NULL;   -- AFTER trigger
+END;
+$$;
+
+-- **A `sync_vessel_from_identifiers`** (a `vessel` BEFORE UPDATE
+-- trigger hívja): a NEW-be betölti az aktuális értékeket — így a
+-- `vessel` UPDATE no-op, és a lánc nem rekursál.
+CREATE OR REPLACE FUNCTION sync_vessel_from_identifiers() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    SELECT
+        max(value) FILTER (WHERE identifier_type = 'mmsi')::int,
+        max(value) FILTER (WHERE identifier_type = 'eni'),
+        max(value) FILTER (WHERE identifier_type = 'imo')
+    INTO NEW.mmsi, NEW.eni, NEW.imo
+    FROM vessel_identifier
+    WHERE vessel_id = NEW.id
+      AND valid_to IS NULL
+      AND is_primary;
+
+    RETURN NEW;
+END;
+$$;
+```
+
+```sql
+
+-- **Két trigger, egy irány, NEM rekurzál.**
+--
+-- A `vessel_identifier` a **kanonikus** tároló (az idősorral),
+-- a `vessel` oszlopai a **gyors olvasás**.
+--
+-- 1. `vessel_identifier` **AFTER** UPDATE/DELETE -> UPDATE-el a
+--    `vessel` soron (a `vessel` oszlopai frissulnek)
+-- 2. `vessel` **BEFORE** UPDATE -> a NEW-be betolti a
+--    `vessel_identifier` aktualis ertekeit
+--
+-- **Miért nem rekurál?** A 2. trigger a NEW-be irja az aktualis
+-- `vessel_identifier` erteket — igy a `vessel` UPDATE **no-op**
+-- (az ertek mar ugyanaz), es a PostgreSQL nem indit ujabb
+-- `vessel_identifier` triggert. A lan: vessel_identifier UPDATE ->
+-- vessel UPDATE (a BEFORE trigger beallitja a NEW-et) -> VEGE.
+--
+-- **A korábbi ketiranyu megoldas rekuralt**: a `vessel` BEFORE
+-- trigger UPDATE-elte a `vessel_identifier`-t, ami ujra meghivta
+-- az AFTER triggert. A fenti megoldasban a `vessel` OLDALON nincs
+-- ilyen trigger.
+--
+-- **A `vessel` INSERT** (a hajo letrehozasa) nem futtatja a BEFORE
+-- UPDATE triggert -> **az ingest a `vessel_identifier`-be ir**
+-- (a service retegen, egy tranzakcioban), es a `vessel` oszlopokat
+-- a kod ugyancsak feltolti.
+
+-- (1) a vessel_identifier -> vessel irany
+CREATE TRIGGER trg_vessel_sync_identifiers
+    AFTER INSERT OR UPDATE OF value, is_primary, valid_to
+        ON vessel_identifier
+    FOR EACH ROW EXECUTE FUNCTION sync_vessel_identifiers();
+
+CREATE TRIGGER trg_vessel_sync_identifiers_del
+    AFTER DELETE ON vessel_identifier
+    FOR EACH ROW EXECUTE FUNCTION sync_vessel_identifiers();
+
+-- (2) a vessel BEFORE trigger: a NEW-be betolti az aktualis ertekeket
+CREATE TRIGGER trg_vessel_from_identifiers
+    BEFORE UPDATE ON vessel
+    FOR EACH ROW EXECUTE FUNCTION sync_vessel_from_identifiers();
+```
+
+**A `sync_vessel_identifiers` függvény** (a `vessel_identifier`
+AFTER trigger hívja) UPDATE-el a `vessel` sort — a `vessel`
+azonosító oszlopait az aktív primer azonosítókra állítva:
+
+
+
+
+> **A trigger az `AFTER`-ben ír a `vessel`-re → ez egy újabb
+> `vessel` UPDATE-et vált ki, de az NEM vált ki újabb
+> `vessel_identifier` UPDATE-et** (a trigger csak a
+> `vessel_identifier`-en figyel), így nincs rekurzió.
+
+**A fordítások külön mezőszintű diffet kapnak** (a README 6.4: „a
+fordításoknál külön mezőszintű diff, mert a fordítás hibája a
+legegyszerűbb észlelhető hiba") — ez a `content_text` táblára
+érvényes, a fenti trigger a `content_text`-hez nem kerül (az a
+`translation_task` munkafolyamat része, a 06 – Szerkesztői felület
+terv dolga).
+
+### 8.3 A `drop_expired_partitions` függvény
+
+IF to_date(substring(r.partition_name FROM '_p(\d{8})$'), 'YYYYMMDD') < v_boundary THEN
+                EXECUTE format('DROP TABLE %I', r.partition_name);
+                v_dropped := v_dropped + 1;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            -- a nev nem illeszkedik a mintara: kihagyjuk, nem allunk meg
+            CONTINUE;
+        END;
+    END LOOP;
+
+    RETURN v_dropped;
+END;
+$$;
+```
+
+**A partíció-elnevezési konvenció:** `<tabla>_pYYYYMMDD` — a
+`drop_expired_partitions` erre a mintára illeszkedik, és a `pg_cron`
+hívás hetente egyszer hívja.
+
+**A partíciók NAPIak, nem haviak** (V-C-6): a 14 napos TTL és a
+havi partíció matematikailag üres partíciót hagyhat — a havi
+partíció a hónap elejét jelöli, ami 14 napos TTL mellett már
+„lejárt". A napi partíciók (`_p20261118`) pontosak: a TTL a
+partíció **tartományának vége** alapján dönt (a függvény így
+módosult), és a heti eldobás 7 napos granularitással működik.
+
+> **A havi partíció és a heti eldobás elvben megfelelő** a
+> README 5.3-nak, **de a 14 napos TTL-lel nem** — ezért a
+> partíciók napiak. A `position` (90 napos TTL) is napi partíciókat
+> kap; a 90 napos abban is pontos (a napi partíció + a 90 napos határ).
+
+### 8.4 A `pg_cron` job (a custom image-ben)
+
+```sql
+-- A pg_cron extension a custom Docker image-ben van (a 01-es terv §3.2)
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- a nyers AIS-üzenetek 14 napos TTL-je
+SELECT cron.schedule('drop-raw-partitions', '17 3 * * 1',
+  $$SELECT drop_expired_partitions('ais_message_raw', 14)$$);
+
+-- a vízállás-mérések 90 napos TTL-je
+SELECT cron.schedule('drop-water-level-partitions', '23 3 * * 1',
+  $$SELECT drop_expired_partitions('water_level', 90)$$);
+```
+
+> **A `pg_cron` extension a stock `postgis/postgis:16-3.4` image-ben
+> nincs** — a `infra/docker/postgres/Dockerfile` telepíti
+> (`postgresql-16-cron` apt csomag) és a
+> `shared_preload_libraries = 'pg_cron'` beállítással indít. A
+> `cron.schedule` **nem futtatható** stock image-ben; a CI a
+> `db/ddl/schema-v1.1.sql`-t a custom image-ben generálja.
+
+---
+
+## 9. A DB-szerepkörök (a README 7.3 hat szerepe)
+
+```sql
+-- a szerepek (a README 7.3)
+DO $$
+DECLARE r text;
+BEGIN
+    FOREACH r IN ARRAY ARRAY['anon','public_api','app_user_role','editor','admin','etl','api_client']
+    LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+            EXECUTE format('CREATE ROLE %I NOLOGIN', r);
+        END IF;
+    END LOOP;
+END;
+$$;
+
+-- a publikus API csak az olvasást és a anonim írást látja
+-- **Először mindent visszavonunk** — a `GRANT ... ON ALL TABLES`
+-- öröklődne a későbbi migrációkból (a klasszikus hiba).
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+    LOOP
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM anon', r.tablename);
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM public_api', r.tablename);
+    END LOOP;
+END;
+$$;
+
+-- A **`public_api`** szerep: a weboldal DB-kapcsolata.
+-- Az `anon` a *felhasználó* (a feedback) — külön szerep, külön jogosultság.
+--
+-- A publikus olvasás **explicit lista** — NEM `ON ALL TABLES`
+-- (az `app_user` password_hash-e és session-hash-e, az
+-- `ais_message_raw`, az `audit_log` és a `job_run` így nem publikus).
+GRANT SELECT ON vessel, vessel_i18n, vessel_alias, vessel_identifier,
+    vessel_type, vessel_type_i18n, vessel_data_origin,
+    port, port_i18n, berth, terminal, lock, lock_i18n,
+    basin, basin_i18n, marina, route, route_i18n, route_stop,
+    cargo_type, cargo_type_i18n, notice, notice_i18n, notice_type,
+    event, event_i18n, event_type, article, article_i18n, article_category,
+    country, waterway, waterway_i18n, river_section, river_section_i18n,
+    gauge, gauge_i18n, water_level, data_source
+    TO public_api;
+
+-- Az `anon` **csak** a visszajelzést írhatja (F-DET-11)
+GRANT INSERT ON feedback TO anon;
+
+-- A **`editor`** és az **`admin`**: minden referencia- és fordítási adat.
+-- Az `editor` NEM módosíthatja az `app_user`-t (a jelszó-hash) és
+-- az `audit_log`-ot (a naplót).
+GRANT SELECT, INSERT, UPDATE, DELETE ON vessel, vessel_i18n, vessel_alias,
+    vessel_identifier, vessel_data_origin, vessel_cert, vessel_service_period,
+    vessel_ownership, vessel_type, vessel_type_i18n,
+    port, port_i18n, berth, terminal, lock, lock_i18n,
+    basin, basin_i18n, marina, route, route_i18n, route_stop,
+    cargo_type, cargo_type_i18n, waterway, waterway_i18n,
+    river_section, river_section_i18n, gauge, gauge_i18n,
+    content_key, content_text, translation_task,
+    notice, notice_i18n, notice_type, event, event_i18n, event_type,
+    article, article_i18n, article_category,
+    data_source, ais_receiver_site, lock_status, feedback
+    TO editor;
+
+-- Az **`admin`**: minden, DE az `audit_log`-ot NEM törölheti
+-- (V-C-5) — az audit-nyomvonalat meg kell őrizni. Az `admin`
+-- az `audit_log`-ot olvashatja és INSERT-elhet (a trigger miatt),
+-- de a DELETE-RE nincs jogosultsága.
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO admin;
+REVOKE DELETE ON audit_log FROM admin;
+
+-- Az **`etl`**: csak az ingest és az aggregáció (a README 7.3).
+-- **Az `audit_log`-ba is írhat** (V-C-3): az `audit_row_change`
+-- trigger a `vessel`/`vessel_i18n`/`port`/… módosításakor az
+-- `audit_log`-ba ír — ha az `etl` nem tud oda írni, az ingest
+-- MINDEN írása elbukik (a trigger hibája megszakítja a statementet).
+GRANT SELECT, INSERT, UPDATE ON ais_message_raw, position, vessel,
+    vessel_data_origin, vessel_identifier, job_run, data_quality_event,
+    ais_gap, water_level TO etl;
+GRANT INSERT ON audit_log TO etl;
+
+-- Az **`app_user`** (a bejelentkezett felhasználó): a saját adatai
+GRANT SELECT, UPDATE ON app_user TO app_user_role;
+
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO editor, admin, etl;
+
+-- **A jövőbeli táblák** alapértelmezett jogosultsága — enélkül egy
+-- új migrációban hozzáadott tábla automatikusan jogosítatlan marad
+-- (a `GRANT ON ALL TABLES` csak egyszer futtatva fedi le).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT ON TABLES TO public_api;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO editor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO admin;
+```
+
+**A `public` API-kliens (R5) külön szerep** — az R1-ben nincs B2B API.
+
+---
+
+## 10. A migrációk
+
+| # | Fájl | Tartalom | Megjegyzés |
+|---|---|---|---|
+| `0001_extensions.sql` | `postgis`, `pg_trgm`, **`unaccent`** extension | a `postgis` a stock image-ben megvan; a `pg_trgm` és az `unaccent` a kereséshez (H-6). **A `pgcrypto` nem kell** — a nyers AIS dedup-kulcsát az ingest számítja (V-N-5) |
+| `0002_lookup_tables.sql` | `language`, `data_source`, `country`, `app_user` | **a legkorábbiak** — sok tábla FK-val hivatkozik rájuk |
+| `0003_geo_tables.sql` | `waterway`, `waterway_i18n`, `river_section`, `river_section_i18n`, `waterway_corridor`, `gauge`, `gauge_i18n` | a folyó-korridor geometriája itt döntődik (Q1) |
+| `0004_port_tables.sql` | `port`, `port_i18n`, `berth`, `operator`, `operator_i18n`, `terminal`, `lock`, `lock_i18n` | |
+| `0005_type_tables.sql` | `vessel_type`, `vessel_type_i18n`, `cargo_type`, `cargo_type_i18n`, `route`, `route_stop`, `route_i18n`, `basin`, `basin_i18n`, `marina` | a `vessel_type.code` a PK (nem `id`) |
+| `0006_fleet_tables.sql` | `vessel`, `vessel_i18n`, `vessel_alias`, `vessel_identifier`, `vessel_data_origin`, `vessel_cert`, `vessel_service_period`, `convoy`, `convoy_member` | |
+| `0007_time_series.sql` | `position` (sima), `ais_message_raw` (particionált), `water_level` (particionált) | a partíciók a `0008`-ban jönnek |
+| `0008_partitions.sql` | a `ais_message_raw_pYYYYMMDD` és `water_level_pYYYYMMDD` partíciók létrehozása + a `partition_default` | |
+| `0009_content_tables.sql` | `content_key`, `content_text`, `translation_task`, `notice_type`, `event_type`, `article_category`, `notice`, `notice_i18n`, `event`, `event_i18n`, `article`, `article_i18n`, `feedback` | |
+| `00010_system_tables.sql` | `ais_receiver_site`, `lock_status`, `vessel_schedule`, `position_report`, `data_quality_event`, `job_run`, `feature_flag`, `audit_log` | |
+| `00011_triggers_and_functions.sql` | `set_updated_at`, `audit_row_change`, `drop_expired_partitions` + a 23 trigger | |
+| `00012_roles_and_grants.sql` | a hat szerepkör és a grantek | idempotens (`DO $$ … $$`) |
+| `00013_pg_cron.sql` | a `pg_cron` extension és a heti TTL-jobok | **csak a custom image-ben futtatható** |
+| `00014_seed_reference.sql` | a `language`, `country`, `vessel_type`, `cargo_type`, `notice_type`, `event_type` referencia-seed | |
+| `0015_backfill_slugs.sql` | a `vessel.slug` feltöltése az alkalmazás generálójával (a mély linkhez, F-CAT-07) | a DB nem generálja — a `unaccent` a DB-ben nem elérhető |
+
+**Alembic wrapper:** a `db/migrations/versions/` az Alembic formátumban
+(`revision` / `down_revision`), és a fenti SQL-ek a `upgrade()` függvényben
+`op.execute()`-tel futnak — a `downgrade()` a fordítottja.
+
+**A `downgrade` kötelező** — a README 8. „Minden séma-változás migrációs
+fájlban (számozott, **visszafordítható**)".
+
+---
+
+## 11. A generált `db/ddl/`
+
+```bash
+# a séma kiírása az aktuális DB-ből
+alembic upgrade head
+pg_dump --schema-only --no-owner --no-privileges \
+    "$DATABASE_URL" > db/ddl/schema-v1.1.sql
+```
+
+**A CI diff-ellenőrzés** (a 01-es terv §4.3 szerint): a CI-ben a
+`db/ddl/schema-v1.1.sql`-t újragenerálja és `git diff --exit-code`-tel
+ellenőrzi — ha eltérés van, a build elbukik.
+
+---
+
+## 12. A séma validálása (futtatva, 2026-11-15)
+
+A terv DDL-je **valódi PostgreSQL 17-en futott le** — nem csak szintaktikailag
+ellenőrzött, hanem **funkcionálisan tesztelve**.
+
+### 12.1 A validációs környezet
+
+| Elem | Érték |
+|---|---|
+| PostgreSQL | **17** (a `pgserver` embedded példány — a konténerben nincs apt/root) |
+| GIS preprocesszor | a `geometry(Point,4326)` → `text`, a GIST → btree, a GIN-trgm → btree |
+| `pg_cron` preprocesszor | a `cron.schedule(...)` hívások kimaradnak (a stock PG-ben nincs `cron` schema) |
+| A validáló script | `db/tools/validate_ddl.py` — a terv markdown-ból kicsomagolja a DDL-t és lefuttatja |
+
+> **A `--no-gis` preprocesszor nem gyengíti a validációt:** a
+> geometriás oszlopok típusa változik csak, a `NOT NULL`, a FK, a
+> `CHECK` és az indexek **változatlanul** futnak. A PostGIS-t a CI
+> a custom image-ben ellenőrzi (a `pg_cron`-nal együtt).
+
+### 12.2 A futtatott eredmények
+
+```
+--- a tervbol kinyert DDL ---
+  tabla: 69 | index: 55 | FK: 109 | CHECK: 51
+=== A DDL SIKERESEN LEFUTOTT ===
+  tabla (information_schema):      71
+  index (pg_indexes):             149
+  FK constraint:                  117
+  CHECK constraint:                332
+  particionált tabla:               3
+  trigger:                          29
+```
+
+### 12.3 A funkcionális füst (mind zöld)
+
+| Teszt | Eredmény |
+|---|---|
+| A referencia-seed (nyelv, forrás, ország, vízút, hajótípus, kikötő, hajó) | **OK** |
+| A **partial unique index** elutasítja a duplikált ENI-t | **OK** — `Key (eni)=(11111111) already exists` |
+| A `slug` egyediség (a mély link, F-CAT-07) | **OK** |
+| A `draught_reference` CHECK elutasítja a nem-`RNW` értéket | **OK** |
+| A `position` upsert (`ON CONFLICT (vessel_id, ts) DO UPDATE`) | **OK** — az utolsó írás nyer |
+| A partíció létrejön és a `drop_expired_partitions` eldobja | **OK** — a régi partíció eldobódott |
+| Az `audit_row_change` trigger a before/after értéket rögzíti | **OK** — `UPDATE \| 110.00 \| 111.00` |
+| A **mezőnkénti konfliktus** tárolható (C-1) | **OK** — 2 forrás, 2 konfliktus |
+| A `vessel_verification` nézet kiszámolja a bizonyossági szintet (H-10) | **OK** — `ais_identified` |
+| Az **azonosító-szinkron** mindkét irányban (M-5) | **OK** — a trigger átírja a `vessel.eni`-t |
+| A hat DB-függvény létrejön | **OK** — `set_updated_at`, `audit_row_change`, `drop_expired_partitions`, `sync_vessel_sort_name`, `sync_vessel_identifiers`, `sync_vessel_from_identifiers` |
+| A **downgrade** minden objektumot eldob (nincs maradó függőség) | **OK** — 0 maradó tábla |
+
+### 12.4 A validáció során talált és javított hibák
+
+A validáció **6 valódi hibát** talált a terv első verziójában — mind
+javasítva:
+
+| # | Hiba | Javítás |
+|---|---|---|
+| 1 | A `data_source` tábla **egyáltalán nem volt** a DDL-ben, pedig 7 tábla FK-val hivatkozik rá | új §4.1 — a legkorábbi migrációba kerül |
+| 2 | A `app_user` a `audit_log`/`feedback`/`content_text` **után** jött → FK-hiba | új §4.1a — a referenciatáblák közé |
+| 3 | A `country`, `waterway`, `waterway_i18n`, `river_section` DDL-je **nem kódblokkban** volt → a generátor kihagyta | a blokkok egységesítve |
+| 4 | A `lock_passage` a `voyage`-ra FK-zik (R2) → R1-ben nem létezhet | kivéve az R1-es DDL-ből, R4-re halasztva |
+| 5 | A `notice`, `event`, `article`, `content_key`, `content_text`, `translation_task`, `feedback` **nincs DDL-jük**, pedig a trigger-ek rájuk hivatkoznak | új §6.4 — a teljes tartalom-séma |
+| 6 | A `CREATE ROLE` **nem idempotens** → a migráció újrafuttatása elbukik | `DO $$ … IF NOT EXISTS … $$` blokk |
+
+### 12.5 A validáció reprodukálhatósága
+
+```bash
+# a repo-ban (a db/tools/ könyvtárban)
+python db/tools/validate_ddl.py --no-gis --keep
+
+# a CI-ben (a custom image-ben, PostGIS-sel)
+python db/tools/validate_ddl.py
+```
+
+---
+
+## 13. A séma ellenőrzőlistája (a release-terv 3.5 alapján)
+
+| # | Feltétel | Hol ellenőrizhető |
+|---|---|---|
+| 1 | A Duna-katalógusban ≥ 60% ENI-vel azonosítható | `SELECT count(*) FILTER (WHERE eni IS NOT NULL)::numeric / count(*) FROM vessel WHERE operating_area='duna'` |
+| 2 | A Balaton-katalógusban ≥ 90% hajószámmal vagy IMO-val azonosítható | a `vessel_identifier` alapján |
+| 3 | Nincs fantom hajó | `status <> 'excluded'` a katalógus-lekérdezésben |
+| 4 | Minden hajóoldalon forrás és frissítési dátum | a `vessel_data_origin` + `source_id` nem NULL |
+| 5 | Duplikált hajószám rekord: 0 | a partial unique index-ek garantálják |
+| 6 | Minden hajótípus lefordítva három nyelvre | a `vessel_type_i18n` hiánylista-lekérdezés |
+| 7 | Minden kikötő és zsilip lefordítva három nyelvre | a `port_i18n` / `lock_i18n` hiánylista-lekérdezés |
+| 8 | A séma visszafordítható | `alembic downgrade base` a CI-ben |
+
+---
+
+## 14. Nyitott kérdések (a 01-es terv §12 nyitott pontjaihoz)
+
+| # | Kérdés | Alapértelmezés |
+|---|---|---|
+| Q1 | A `river_section` kapjon `geom geometry(LineString)` oszlopot, vagy külön `waterway_corridor` tábla? | **külön tábla** — a README 3.3 oszloplistájában nincs `geom` (§4.2) |
+| Q2 | Az `app_user` kapjon `watchlist`-et a `app_user` táblába, vagy külön táblát? | **külön tábla** (R2) — az R1-ben nincs figyelőlista |
+| Q3 | A `position` R1-ben valóban particionálatlan maradjon? | **igen** — a fantom-szűrő bufferként használja; a particionálás R2 (§7) |
+| Q4 | A `notice_type` / `event_type` / `article_category` kódkatalógus legyen, vagy `CHECK` constraint? | **kódkatalógus-tábla** — a README FK-val hivatkozik nekik |
+| Q5 | A `feedback` státusz-készlete | `new` / `accepted` / `rejected` (a README 3.3 F) — a `status` oszlop `CHECK`-kel |
+
+---
+
+*Ez a terv a `docs/megvalósulas/` sorozat második darabja. Következik: 03 –
+API-specifikáció, 04 – AIS-parser specifikáció.*

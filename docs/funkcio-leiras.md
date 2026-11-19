@@ -1,4 +1,4 @@
-# Funkcióleírás – Dunai hajókövető és Balatoni hajókatalógus
+# Funkcióleírás – Vessel Tracker (Duna és Balaton)
 
 **Verzió:** 1.0 (2026-11-14)
 **Kapcsolódó dokumentumok:** [`../README.md`](../README.md) (adatbázis terv) · [`release-terv.md`](release-terv.md) (release terv) · [`r1-adat-terv.md`](r1-adat-terv.md) (R1 adat-terv) · [`ais-vevo-terv.md`](ais-vevo-terv.md) (saját AIS vevőhálózat) · [`sema-core.mmd`](sema-core.mmd) · [`sema-irodalom.mmd`](sema-irodalom.mmd)

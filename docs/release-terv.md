@@ -1,4 +1,4 @@
-# Release terv – Dunai hajókövető és Balatoni hajókatalógus
+# Release terv – Vessel Tracker (Duna és Balaton)
 
 **Verzió:** 1.0 (2026-11-14)
 **Kapcsolódó dokumentumok:** [`funkcio-leiras.md`](funkcio-leiras.md) · [`../README.md`](../README.md) (adatbázis terv)
