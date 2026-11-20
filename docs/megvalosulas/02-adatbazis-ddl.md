@@ -643,6 +643,22 @@ CREATE INDEX vessel_area_operator_idx
 CREATE INDEX vessel_area_type_idx
     ON vessel (operating_area, vessel_type_code);
 
+-- **A rendezés indexe** (a `preshaz` reviewer H-4 findingje után):
+-- a F-CAT-02 szerint az alapertelmezett rendezes a hajonev szerinti
+-- abc — a `vessel.sort_name` oszlopon (a hajonev NEM fordul, ezert
+-- denormalizalva). **Ennelkul a rendezes filesort**, minden lapozott
+-- keresre.
+CREATE INDEX vessel_area_sort_name_idx
+    ON vessel (operating_area, sort_name);
+
+-- A mas rendezesek (a `sort=length|updated_at|operator|type`) —
+-- a F-CAT-02 szerint a hajonev az alapertelmezett, ezek S-os
+-- prioritásuak.
+CREATE INDEX vessel_area_length_idx
+    ON vessel (operating_area, length_m) WHERE length_m IS NOT NULL;
+CREATE INDEX vessel_area_updated_idx
+    ON vessel (operating_area, updated_at DESC);
+
 ```
 
 **A `vessel` táblához tehát NEM kell `UNIQUE` constraint** — a fenti
@@ -1420,7 +1436,19 @@ CREATE TABLE feature_flag (
 CREATE TABLE feedback (
     id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id    bigint REFERENCES app_user(id) ON DELETE SET NULL,
-    category   text NOT NULL
+    -- **A hivatkozott hajo** (a 06-os terv Q1): a F-DET-11 a
+    -- felhasznalo egy KONKRET hajo hibajara vonatkozik — a
+    -- visszajelzesnek meg kell neveznie, melyik hajorol van szo.
+    -- A publikus API a `slug` alapjan tolti be (a slug a
+    -- megfelelo hajot adja meg).
+    vessel_id  bigint REFERENCES vessel(id) ON DELETE SET NULL,
+    -- A `subject` a VISSZAJELZES targya (a `category` a tipusa) —
+    -- a ketto kulonboztes a 06-os terv Q2-je szerint.
+    subject    text NOT NULL DEFAULT 'other'
+               CHECK (subject IN
+                 ('data_correction','translation','map','source',
+                  'feature','other')),
+    category   text NOT NULL DEFAULT 'other'
                CHECK (category IN
                  ('data_correction','translation','map','source',
                   'feature','other')),
@@ -1436,6 +1464,10 @@ CREATE TABLE feedback (
 );
 CREATE INDEX feedback_open_idx ON feedback (created_at DESC)
     WHERE handled_at IS NULL;
+CREATE INDEX feedback_vessel_idx ON feedback (vessel_id)
+    WHERE vessel_id IS NOT NULL;
+CREATE INDEX feedback_claims_idx ON feedback (created_at DESC)
+    WHERE category = 'data_correction' AND status = 'new';
 
 CREATE TABLE audit_log (
     id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -2080,16 +2112,36 @@ $$;
 -- `ais_message_raw`, az `audit_log` és a `job_run` így nem publikus).
 GRANT SELECT ON vessel, vessel_i18n, vessel_alias, vessel_identifier,
     vessel_type, vessel_type_i18n, vessel_data_origin,
-    port, port_i18n, berth, terminal, lock, lock_i18n,
+    vessel_ownership, vessel_cert, vessel_service_period,
+    port, port_i18n, berth, terminal, lock, lock_i18n, lock_status,
+    operator, operator_i18n,
     basin, basin_i18n, marina, route, route_i18n, route_stop,
     cargo_type, cargo_type_i18n, notice, notice_i18n, notice_type,
     event, event_i18n, event_type, article, article_i18n, article_category,
+    content_key, content_text,
     country, waterway, waterway_i18n, river_section, river_section_i18n,
     gauge, gauge_i18n, water_level, data_source
     TO public_api;
 
--- Az `anon` **csak** a visszajelzést írhatja (F-DET-11)
+-- **A NÉZETEKRE** a gronzás **külön kell** — a `GRANT SELECT ON
+-- <table>` nem terjed ki a nézetekre (a PostgreSQL a nézetet a
+-- definiáló táblák jogosultságait követi, de a `SELECT` közvetlenül
+-- a nézetre külön kell).
+GRANT SELECT ON vessel_verification, vessel_last_position,
+    vessel_data_origin_current, vessel_data_origin_conflicts
+    TO public_api;
+
+-- A `position` a `vessel_last_position` nézet alaptáblája — a nézet
+-- olvasása a `position` SELECT-jogát is igényli.
+GRANT SELECT ON position TO public_api;
+
+-- Az `anon` **csak** a visszajelzést írhatja (F-DET-11).
+-- **A sequence-jogosultság is kell!** — a `feedback.id` GENERATED
+-- ALWAYS AS IDENTITY, így az INSERT a `feedback_id_seq` USAGE-ét
+-- igényli. Enélkül a `POST /api/v1/feedback` "permission denied"
+-- hibával elbukna (a preshaz reviewer C-2 findingje).
 GRANT INSERT ON feedback TO anon;
+GRANT USAGE ON SEQUENCE feedback_id_seq TO anon;
 
 -- A **`editor`** és az **`admin`**: minden referencia- és fordítási adat.
 -- Az `editor` NEM módosíthatja az `app_user`-t (a jelszó-hash) és
