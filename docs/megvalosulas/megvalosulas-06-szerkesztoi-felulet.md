@@ -13,7 +13,7 @@
 
 **Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
 
-> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-06-szerkesztoi-felulet.md`
+> A dokumentum a repóban a `docs/megvalosulas/06-szerkesztoi-felulet.md`
 > útvonalon van — a relatív linkek ehhez képest számolnak.
 
 ---

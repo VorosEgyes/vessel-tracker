@@ -14,7 +14,7 @@
 
 **Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
 
-> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-04-ais-parser.md` útvonalon
+> A dokumentum a repóban a `docs/megvalosulas/04-ais-parser.md` útvonalon
 > van — a relatív linkek ehhez képest számolnak.
 
 ---

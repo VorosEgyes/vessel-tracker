@@ -1,9 +1,12 @@
 # Implementációs terv – 03: API-specifikáció (OpenAPI v1)
 
-**Verzió:** 0.2 (az 1. körű swarm review után — 58 finding, 8 blokkoló javítva)
-**Dátum:** 2026-11-19
-**A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.2** (71 tábla, 150 index,
-121 FK, 28 trigger) — **a `03` ezen áll**
+**Verzió:** 0.3 (a 3 reviewer 1. körű swarm review-jának **96 findingje**
+javítva: `bori` 34, `preshaz` 24, `prof` 27 + a szintézis — a 8 blokkoló
+a `bori` review-ból, a maradék a `preshaz` és a `prof` review-ból)
+**Dátum:** 2026-11-22
+**A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.3** (71 tábla,
+150 index, 121 FK, 28 trigger — **a `home_river_section_id` +
+`home_basin_id` oszlopokkal**) — **a `03` ezen áll**
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
 [`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra) ·
@@ -81,11 +84,37 @@ legyen.
 objektumon. Ez a séma egyformú, és a kliens (Astro + React-szigetek)
 egy generikus hookkal kezeli.
 
+**A `meta.total` definíciója** (a `prof` reviewer H-1 findingje után):
+
+- a `total` a **szűrés UTÁNI teljes darabszám** (a lapozás nélkül) — ezt
+  használja a kliens lapozója;
+- a számítás **ugyanazzal a `WHERE`-tel** történik, mint a lekérdezés
+  (`SELECT COUNT(*) FROM ... WHERE <ugyanaz>`);
+- **kivétel: a `q` (trigram) keresés** → a `vessel_i18n`-re join-öl →
+  a `COUNT(*)` **nem indexelhető** (a teljes szűkített halmazt kell
+  megszámolni) → ilyenkor a `meta.total` **`null`**, és a kliens
+  lapozója „lapozás nem elérhető" jelzést ad (a `has_more` viszont
+  megmarad — a `per_page + 1` lekérdezésből jön);
+- a `vessel` mérete a README 5.1 szerint ~3 300–3 500 (Duna) + ~250
+  (Balaton) → a `vessel`-en a számlálás triviális; a `q` nélküli
+  szűrők mind **indexelt** oszlopokra épülnek → a `COUNT(*)` az
+  `EXPLAIN`-ban **index-only scan**.
+
+**A `meta` két variánsa** (a `prof` reviewer L-4 findingje):
+
+| A válasz | A `data` típusa | A `meta` modellje |
+|---|---|---|
+| lista | `list[T]` | `PageMeta` (`total`, `page`, `per_page`, `has_more`) |
+| objektum | `T` | `ObjectMeta` (`total`) |
+
+A két burkoló: `Page[T]` és `Data[T]` — a `response_model` a generikus
+paraméterrel (`Page[VesselListItem]`, `Data[VesselDetail]`) — lásd §5.5.
+
 ### 2.2 A hibák — RFC 9457 (`application/problem+json`)
 
 ```json
 {
-  "type": "https://vessel-tracker.example/probs/not-found",
+  "type": "urn:vessel-tracker:problem:not-found",
   "title": "Hajó nem található",
   "status": 404,
   "detail": "A 'xyz' keresésre nincs hajó a duna katalógusban.",
@@ -97,8 +126,27 @@ egy generikus hookkal kezeli.
 }
 ```
 
-**A `type` URI-privát** (nem a domainre mutat), hogy a példadomain
-változása ne törje el a kliensoldali logikát.
+**A `type` egy domainfüggetlen URN** (`urn:vessel-tracker:problem:<kód>`)
+— a `prof` reviewer **H-6** és **L-1** findingje szerint. A korábbi
+`https://vessel-tracker.example/probs/not-found` forma **ellentmondott a
+saját magyarázatának**: a domainre mutató URI-t a domain megváltoztatása
+**megváltoztatja**, tehát a kliensoldali kulcs (az RFC 9457 szerint a
+`type` a gépi fogyasztás kulcsa) **törne**.
+
+A URN forma előnye:
+- **domainfüggetlen** — a telepítési domain (a `01` – stack-terv szerint
+  `vessel-tracker.example.hu`) **soha nem** kerül a `type`-ba;
+- **stabil** — a F-NF-15 („a hibakódok stabilak") a `type` URI-re is
+  érvényes: a kódok nem változnak, tehát a URN sem;
+- a kliens a `type` **utolsó szegmense** utáni kódot használja kulcsként
+  (`not-found`, `validation-error`, …) — ez a §7 katalógusának kulcsa is.
+
+**A `title` és a `detail` lokalizációja** (a `prof` reviewer M-6
+findingje): a `title` a **`content_key`-ből** jön (egy kulcs a hibakódra,
+pl. `error.vessel.not_found.title`) **a kiválasztott nyelven** (a
+`content_key` + `content_text` mechanizmus, a README 4.2), a `detail`
+pedig **paraméterezett szöveg** (a README 4.7: ICU MessageFormat) → a
+publikálatlan fordításnál a §6.3 fallback-lánca szerint.
 
 ### 2.2a A kivétel-kezelés (a `preshaz` reviewer C-3 findingje után)
 
@@ -113,7 +161,9 @@ from fastapi.responses import JSONResponse
 from psycopg import errors as pg_errors
 
 
-PROBLEM_BASE = "https://vessel-tracker.example/probs/"
+# A domainfuggetlen URN (a H-6/L-1 finding) — a "type" stabil kulcs,
+# a telepitesi domain nem kerul bele.
+PROBLEM_BASE = "urn:vessel-tracker:problem:"
 
 
 def problem(status: int, slug: str, detail: str,
@@ -279,11 +329,22 @@ jön).
 |---|---|---|---|
 | GET | `/api/v1/vessels` | a katalógus listája, szűréssel és lapozással | F-CAT-02, F-CAT-08, F-CAT-10, F-CAT-14 |
 | GET | `/api/v1/vessels/{id}` | egy hajó adatlapja | F-CAT-06, F-DET-01…16 |
-| GET | `/api/v1/vessels/{id}/aliases` | a hajó történeti nevei | F-DET-05 |
+| GET | `/api/v1/vessels/{id}/aliases` | a hajó **történeti** nevei (a jelenlegi a `vessel`-ből jön) | F-DET-05 |
 | GET | `/api/v1/vessels/{id}/ownership` | a **tulajdonosváltások** (a dátumtartománnyal) | F-DET-05 |
 | GET | `/api/v1/vessels/{id}/certificates` | a hajó engedélyei | F-DET-02 |
 | GET | `/api/v1/vessels/{id}/identifiers` | az összes azonosító + eredet | F-DET-02, F-DET-15 |
 | GET | `/api/v1/vessels/{id}/data-origin` | a mezőnkénti eredet | F-DET-15 |
+
+> **Az `/aliases` szűrője** (a `prof` reviewer M-8 findingje után): a
+> végpont a **történeti** neveket adja → a szűrő
+> **`valid_to IS NOT NULL`** (a lezárt időtartomány = a történet).
+> A `name_type='official'` **és** `valid_to IS NULL` sor a **jelenlegi**
+> név — az a `vessel`/`vessel_i18n`-ből jön, **nem** duplikálódik itt.
+> A `name_type` (`former`/`official`/`shipyard`) a szemantika, a
+> `valid_to` az idő — **mindkettő** megvan a `vessel_alias`-ban.
+>
+> A `/certificates` és az `/identifiers` viszont **szűrés nélkül**
+> mindent adnak (az aktív + a lezárt azonosítók egyaránt).
 
 **A `GET /api/v1/vessels` szűrői (mind a query stringben):**
 
@@ -294,14 +355,46 @@ jön).
 | `type` | string (a `vessel_type.code`) | F-CAT-08 | `INLAND_CARGO` |
 | `operator` | integer (a `operator.id`) | F-CAT-08, F-CAT-11 | `7` |
 | `status` | `active` \| `excluded` \| `inactive` \| `scrapped` | F-CAT-08 | `active` |
-| `verification` | `ais_identified` \| `ais_partial` \| `operator_claimed` \| `name_only` — a **SZÁMÍTT** érték | F-CAT-14 | `ais_identified` |
+| `moving` | boolean — a **számított** mozgás (lásd a blokquote-ot) | F-CAT-04 | `true` |
+| `verification` | `ais_identified` \| `ais_partial` \| `operator_claimed` \| `name_only` — a **TÁROLT** érték (a `vessel.verification_level`) | F-CAT-14 | `ais_identified` |
 | `section` | integer (a `river_section.id`) | F-CAT-08 | `3` |
 | `basin` | integer (a `basin.id`) | F-CAT-08 | `1` |
+| `home_section` | integer (a `river_section.id`) — a hajó **Hazai szakasz**-a | F-CAT-08 | `3` |
+| `home_basin` | integer (a `basin.id`) — a hajó **medence**-je | F-CAT-08 | `1` |
 | `season` | `in_season` \| `out_of_season` | F-CAT-05 (Balaton) | `in_season` |
 | `sort` | `name` \| `type` \| `operator` \| `length` \| `updated_at` | F-CAT-02 | `name` |
 | `order` | `asc` \| `desc` | F-CAT-02 | `asc` |
-| `page` | integer ≥ 1 | F-CAT-02 | `1` |
-| `per_page` | integer 1…200 | F-CAT-02 | `50` |
+| `page` | integer ≥ 1, **default 1** | F-CAT-02 | `1` |
+| `per_page` | integer 1…200, **default 50** | F-CAT-02 | `50` |
+
+> **A `verification` szűrő a TÁROLT értékre épül** (a `vessel.verification_level`),
+> **nem** a számítottra (a `vessel_verification.computed_verification_level`
+> nézetből) — és ez **szándékos** (a `prof` reviewer H-8 findingje):
+>
+> - a tárolt érték **indexelt** (`vessel_area_status_verification_idx`),
+>   a nézetből való szűrés **nem**;
+> - a `02` – DDL-terv szerint a tárolt és a számított érték eltérését az
+>   `is_stale` jelzi, és **a CI ellenőrzi** a konzisztenciát egy
+>   minta-adaton → az elavultság a gyakorlatban 0;
+> - az **adatlap** a `verification_level` mezőben a **SZÁMÍTT** értéket
+>   adja, plusz a `verification_source` mező (`computed` | `stored_stale`)
+>   jelzi, ha a tárolt érték elavult → **a kliens nem tud hamis
+>   bizonyossági szintet mutatni** (a F-DET-14).
+>
+> **A szűrő és az adatlap különböző forrást használ** — ez a szándékos
+> döntés: a szűrő gyors és indexelt, az adatlap pontos és számított.
+
+> **A `sort=operator` a `vessel.operator_id`-re megy** (a `prof` reviewer
+> M-3 findingje után) — **nem** az `operator.legal_name`-ra. A név szerinti
+> rendezés JOIN-t igényelne → a `vessel`-en nem indexelhető → `filesort`
+> a JOIN-olt halmazon. Az `operator_id` a **stabil, indexelt** út, és
+> a rendezési sorrend a hajók listájában értelmezhető (a kezelő azonosítója
+> szerint). A trigram-index az `operator_legal_name`-re **rendezésre nem
+> használható**.
+>
+> **Ha később névre kell rendezni**, a `02`-be egy denormalizált
+> `vessel.operator_sort_name` kell (a `vessel.sort_name` mintájára) — ez
+> **egy 02-es terv-módosítás**, nem a 03-as API-kerdés.
 
 > **Az `area` KÖTELEZŐ** (a `bori` reviewer C-7 findingje után). A
 > funkcióleírás 7.1 **kategorikusan tiltja** az egységes listát: „*Nincs
@@ -310,10 +403,52 @@ jön).
 > hiányzik; a 400 a *malformed* kérésre, a 422 a *szemantikailag
 > hibás* értékre vonatkozik). A `/search`-nél ugyanígy.
 >
-> **A `moving` szűrő NINCS az R1-es szerződésben** (a `bori`
-> reviewer C-3 findingje után). A „közlekedő / nem közlekedő"
-> megkülönböztetés (a F-CAT-04) R1-ben a **`vessel.status` értékével**
-> történik:
+> **A `section` és a `basin` szűrő adatforrása** (a `prof` reviewer
+> **C-1** findingje után) — ez volt a legkomolyabb hiányosság:
+>
+> **A korábbi terv a `position` táblára hivatkozott** (`position.river_section_id`)
+> — de a `position` **90 napos TTL-lel partícionált** (a `02` – DDL-terv
+> §6.2), és a `?section=` szűrő a **katalógust** szűri, nem a pozíciót.
+> A `vessel`-en pedig **nem volt** szakasz-hivatkozás → a szűrő **R1-ben
+> nem volt implementálható**.
+>
+> **A megoldás: két új denormalizált oszlop a `vessel`-en** (a
+> `last_river_km` mintájára) — a `02` – DDL-terv **v1.3**-ban:
+>
+> | Az oszlop | A jelentése | A null érték |
+> |---|---|---|
+> | `vessel.home_river_section_id` | a hajó **Hazai szakasz**-a (a `river_section.id`) | nincs meghatározva |
+> | `vessel.home_basin_id` | a hajó **medence**-je (a `basin.id`) | nincs meghatározva |
+>
+> Ezek az **ingest** során töltődnek (a pozícióból kiszámított
+> folyó-kilométerből → a `river_section` és a `basin` lookup) → **a
+> szűrő indexelhető** (a `vessel_home_idx` composite index a
+> `home_river_section_id`-re).
+>
+> **A `section` és a `basin` szűrő mostantól a `home_*` oszlopokra
+> épül** — a `position`-ön alapuló szűrés helyett. (A `position`
+> TTL-je miatt a katalógus-szűrés nem épülhetett volna a pozíciókra.)
+>
+> A `home_*` oszlopok a **`02` v1.3** részei → a `03` fejlécének
+> séma-pinje a `02` **v1.3**-ra mutat (a §2.0a szerint).
+
+> **A `moving` szűrő az R1-es szerződésben VAN** — a `bori` reviewer
+> C-3 findingje kivette, de a **`prof` reviewer C-5 findingje szerint
+> R1-ben is megadható**, mert a `vessel.status` **és** a
+> `vessel.last_position_ts` **együtt** elegendő.
+>
+> **A definíció (két érték):**
+>
+> ```
+> moving=true  ⇔  status = 'active'
+>              ∧  last_position_ts IS NOT NULL
+>              ∧  last_position_ts > now() - interval '24 hours'
+>              ∧  sog_mps > 0        (a vessel_last_position nézetből)
+>
+> moving=false ⇔  a fenti feltételek bármelyike nem teljesül
+> ```
+>
+> **A `status` értékei és a jelentésük:**
 >
 > | A `status` | A jelentése a katalógusban |
 > |---|---|
@@ -322,15 +457,28 @@ jön).
 > | `excluded` | **kizárva** — a fantom-szűrő vagy a kézi kizárás miatt (a `status` nem jelenik meg a katalógusban) |
 > | `scrapped` | **kivezetve** |
 >
+> **A 24 órás frissességi küszöb** egy **dokumentált konstans**
+> (`MOVING_FRESHNESS_HOURS = 24`) — a 90 nap a pozíciók **TTL-e**
+> (a `02` – DDL-terv §6.3a), a mozgás frissessége ennél sokkal
+> szigorúbb; **két külön konstans, nem ugyanaz**.
+>
+> **Miért kell a `status` ÉS a pozíció is?** (a F-CAT-04 két oldala)
+> A `status='active'` önmagában a *rendszerben való jelenlétet* jelenti —
+> egy hónapja nem látott hajó is `active` marad. Az „éppen mozog"
+> jelentéshez **friss pozíció kell**; a `status` pedig kizárja a
+> fantom-szűrő által `excluded`-dé tett hajókat.
+>
 > **A `status=excluded` a szűrőeredménye, nem egy mozgásjelző.** A
 > `04` – AIS-parser terv a fantom-szűrő négy szabályát rögzíti (a
 > pozíció, a sebesség, az 5+ napos állóhelyzet, a kézi kizáró lista) —
 > ezek **a `vessel.status`-ba** írnak, nem külön flagbe.
 >
-> **A `moving` név félreérthető lenne:** a hajó éppen kikötőben lehet, de
-> közlekedő — a mozgás nem a `status` tulajdonsága. Az R2-ben, az élő
-> pozícióval, lesz valódi mozgásszűrő (a `vessel_last_position` alapján,
-> `sog_mps > 0.5`).
+> **Az indexelhetőség:** a `moving` a `vessel.last_position_ts`-re
+> épül (a `02` §6.3a denormalizált mező) → **indexelhető**; a
+> `sog_mps` a `vessel_last_position` nézetből jön (a nézet a
+> `vessel`-re néz → a `sog_mps` szűrés **nem** indexelhető, de a
+> 24 órás `last_position_ts` szűrés igen → a `sog_mps` csak a már
+> szűkített halmazon fut).
 >
 > **A `season` szűrő** a `vessel_service_period` táblából számít: a
 > `season_start`/`season_end` és a `service_status` alapján a
@@ -342,6 +490,16 @@ jön).
 |---|---|---|---|
 | GET | `/api/v1/search` | a globális kereső | F-SRCH-01…07 |
 | GET | `/api/v1/search/suggest` | a gyorskereső javaslatai (R3) | F-SRCH-08 |
+
+> **Az `area` a `/search`-nél is KÖTELEZŐ** (a `prof` reviewer M-5
+> findingje után). A `not-found-in-area` (404) hibakód **csak
+> területhez kötött kérésnél értelmes** — különben a „másik területen
+> lenne" diagnózis nem állítható. A funkcióleírás F-SRCH-07 („a
+> keresés a kiválasztott területen belül korlátozódik, a területváltóval
+> együtt") és 7.1 (a két katalógus külön navigáció) ezt kikötelezi.
+>
+> **A hiányzó `area` → 400 `invalid-query`** (ugyanaz, mint a
+> `/vessels`-nél).
 
 **A `GET /api/v1/search` viselkedése:**
 
@@ -374,6 +532,44 @@ GET /api/v1/search?q=12345678&area=duna
 | GET | `/api/v1/routes` | az útvonalak (a `route_stop`-okkal) |
 | GET | `/api/v1/cargo-types` | a rakománytípusok |
 
+> **Az R3-as végpontok az R1-es fejezetben** (a `prof` reviewer H-7
+> findingje után) — a fejezetcím „R1", de a felsorolt végpontok között
+> van, ami a funkcióleírás/release-terv szerint **R3**:
+>
+> | A végpont | A funkció | A prioritás / release |
+> |---|---|---|
+> | `/api/v1/search/suggest` | F-SRCH-08 | **S, R3** |
+> | `/api/v1/notices` | F-CNT-03 | **S, R3** |
+> | `/api/v1/events` | F-CNT-04 | **S, R3** |
+> | `/api/v1/gauges` | a mérőpontok | nem az R1-es funkciólista része |
+> | `/api/v1/operators` — a „saját flotta-ajánló" | F-DET-04 | **R3-től** |
+>
+> **A `/api/v1/operators` R1-es része MARAD** (a F-CAT-11 „a katalógus
+> üzemeltető szerinti aggregált nézetben is megjeleníthető" — S, R1) —
+> csak a „saját flotta-ajánló" funkció R3-es.
+>
+> **Az `/api/v1/articles` R1-ben van** (a F-CNT-05, a release-terv §3.2
+> 11. sora: „Statikus cikkek/blog (három nyelven)") — ez rendben.
+>
+> **A `release-terv` §3.2 R1-es listája:** kikötők (Duna + Balaton),
+> zsilip, folyószakaszok, hajótípusok, statikus cikkek/blog.
+
+> **A `/notices` és az `/events` időszűrése** (a `prof` reviewer M-2
+> findingje után) — a séma alapján:
+>
+> | A végpont | A szűrő | Az index |
+> |---|---|---|
+> | `/api/v1/notices` | `valid_from <= now() AND (valid_to IS NULL OR valid_to > now())` | `notice_valid_idx` |
+> | `/api/v1/events` | `starts_at >= now() - interval '30 days'` (a közelmúlt + a jövő) | `event_starts_idx` |
+>
+> **A `notice`-nek NINCS `status` oszlopa** (a `notice_i18n`/`notice_type`
+> igen, a `notice` maga nem) → a szűrő **kizárólag az időablak**;
+> a `/articles`-nél van a `status='published'` szűrő (az `article`-nek van
+> `status` oszlopa: `draft`/`review`/`published`/`archived`).
+>
+> **A jövőbeli események** a `/events`-nél benne vannak (a `starts_at`
+> a szűrő alsó határa) → a kliens a `starts_at` alapján rendez.
+
 ### 3.4 A tartalom
 
 | Method | Path | Leírás | Funkció |
@@ -381,11 +577,24 @@ GET /api/v1/search?q=12345678&area=duna
 | GET | `/api/v1/content/{key}` | egy tartalmi kulcs fordítása — **csak `status='published'`** | F-NF-01…15 |
 | GET | `/api/v1/articles` | a blog cikkei (lapozva, `status=published` csak) | F-H-01… |
 | GET | `/api/v1/articles/{slug}` | egy cikk | |
-| GET | `/api/v1/notices` | a hivatalos ertesitések | |
-| GET | `/api/v1/events` | az események | |
-| GET | `/api/v1/gauges` | a vízállás-mérő pontok | |
+| GET | `/api/v1/notices` | a hivatalos ertesitések — **R3** (a F-CNT-03 prioritása S) | |
+| GET | `/api/v1/events` | az események — **R3** (a F-CNT-04 prioritása S) | |
+| GET | `/api/v1/gauges` | a vízállás-mérő pontok — **R3** (a mérőpontok nem az R1-es funkciólista része) | |
 
 ### 3.5 A visszajelzés (F-DET-11)
+
+> **A `POST /feedback` teljes szerződése** (a `prof` reviewer M-7
+> findingje után):
+>
+> | A szempont | A döntés |
+> |---|---|
+> | A válasz | **`201 Created`**, a `Location: /api/v1/feedback/{id}` headerrel, a body: `{"id": <uuid>, "status": "new"}` |
+> | A `body` méretkorlátja | **2 000 karakter** (a FastAPI `Field(max_length=2000)`) + az `nginx` `client_max_body_size 16k` a `/api/v1/feedback` útvonalon |
+> | A `category` | a `feedback.category` CHECK tükröze: `data_correction` \| `translation` \| `map` \| `source` \| `feature` \| `other` (a `schemas/enums.py` a CHECK-ből generálva) |
+> | A `status` | az alapérték **`new`** (a `02` §6.3 alapértéke) → a F-ADM-04 szerkesztői listája erre szűr |
+> | Az `user_id` | `NULL` (a bejelentkezés nélküli `POST`-nál) → a `user_id` oszlop nullable |
+> | A kvóta | a 5/óra rate limit (a `01` – stack-terv §4.5) — a `POST /feedback` mellett, a `403`/`429` a §7 szerint |
+
 
 | Method | Path | Leírás | Auth |
 |---|---|---|---|
@@ -806,6 +1015,14 @@ class FieldOrigin(BaseModel):
     lathato: ket forras, ket kulonbozo ertek.
     """
 
+    # A FastAPI a `response_model`-t a handler **visszatérési értékéből**
+    # építi (§5.1) — ez a service/repo rétegből jön, tehát egy
+    # SQLAlchemy ORM-objektum. A Pydantic v2-ben ezért KÖTELEZŐ a
+    # `from_attributes=True`, különben a validáció
+    # "model_type"-attribute-hibával elhasal.
+    # (A `prof` reviewer C-4 findingje.)
+    model_config = ConfigDict(from_attributes=True)
+
     field_name: str
     origin: Literal["ais", "operator_claimed", "official", "editorial"]
     value_snapshot: str | None = Field(
@@ -830,6 +1047,11 @@ class OwnershipPeriod(BaseModel):
 
 
 class VesselDetail(BaseModel):
+    # lásd a FieldOrigin kommentjét (a C-4 finding): a FastAPI a
+    # handler visszatérési értékéből (ORM-objektum) építi a
+    # response_model-t → a from_attributes=True kötelező.
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     slug: str
@@ -869,6 +1091,93 @@ class VesselDetail(BaseModel):
         description="a tulajdonosváltások (a dátumtartománnyal)",
     )
 ```
+
+### 5.5 A burkoló modellek (`schemas/common.py`)
+
+**A `data` mezőnek két típusa van** — lista-válaszon `list[T]`,
+objektum-válaszon `T` → **egyetlen `Page[T]` nem elég** (a `prof`
+reviewer L-4 findingje). A generikus burkoló:
+
+```python
+# schemas/common.py
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
+
+
+class PageMeta(BaseModel):
+    """A lapozás metaadatai."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int | None = Field(
+        default=None,
+        description="a szűrés UTÁNI teljes darabszám (a lapozás nélkül); "
+                    "a trigram-alapú q-keresésnél null (nem indexelhető)",
+    )
+    page: int = Field(default=1, description="az oldalszám (1-alapú)")
+    per_page: int = Field(default=50, description="az oldal elemszáma")
+    has_more: bool = Field(
+        default=False, description="van-e a következő oldal")
+
+
+class ObjectMeta(BaseModel):
+    """Az objektum-válasz metaadatai (a lapozás nélkül)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int | None = Field(default=None)
+
+
+class Page(BaseModel, Generic[T]):
+    """A lista-válasz burkolója."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    data: list[T]
+    meta: PageMeta
+
+
+class Data(BaseModel, Generic[T]):
+    """Az objektum-válasz burkolója."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    data: T
+    meta: ObjectMeta
+```
+
+**A `response_model` a generikus paraméterrel** (`Page[VesselListItem]`,
+`Data[VesselDetail]`) — a FastAPI támogatja a generikus
+`response_model`-t, és a `data`/`meta` burkoló **nem generálható a
+`response_model`-ből, ha nincs két modell** (a C-4 finding).
+
+**A `Decimal` → JSON típus (a M-4 finding döntése):**
+
+A `numeric(6,2)` / `numeric(10,2)` mezők a válaszban **`string`**
+(`Decimal` helyett), **nem** `number`:
+
+- a `jsonable_encoder` a `Decimal`-t `float`-ra alakítaná → a
+  `deadweight_t` (a `numeric(10,2)`) 100 tonna felett **két tizedespontot
+  veszít**;
+- a README 4.6 szerint a formázás **kliensoldali**
+  (`Intl.NumberFormat`) → a generált TS kliens `string`-et kap, és a
+  `packages/shared` formázója formázza;
+- a `snake_case` oszlopnevek „gépi leképezés" elve is ezt sugallja
+  (a séma `decimal` → a kliens formázza).
+
+A Pydantic modellben ezért:
+
+```python
+length_m: str | None = Field(
+    default=None, description="a hajó hossza méterben (2 tizedes)")
+deadweight_t: str | None = Field(
+    default=None, description="a holteher tonnában (2 tizedes)")
+```
+
+*(a `db/models.py`-ban a `Decimal` marad — a **DB rétegben** pontos
+ kell; a **JSON rétegben** a `str` a formázásra kész érték)*
 
 **A `location_text` összeállítása** (a `02` – DDL-terv §6.3a
 előírása szerint — **ez az API-terv feladata**):
@@ -1190,7 +1499,7 @@ alapján, 1 s felett.
 |---|---|---|
 | Q1 | A `vessel` lista a `vessel`-táblából olvas, vagy anyagolt nézetből (a `vessel_i18n` join)? | **a `vessel`-táblából** + egy `LEFT JOIN` a `vessel_i18n`-re; az anyagolt nézet R2 |
 | Q2 | A `/api/v1/vessels` támogasson mezőválasztást (`?fields=`)? | **nem R1-ben** — a kliens (Astro) szerveroldali renderel, nem kell |
-| Q3 | A `moving` szűrő pontosan mi alapján működik R1-ben? | a fantom-szűrő kimenete (a `04` – AIS-parser terv); **a `04`-ig nyitott** |
+| Q3 | A `moving` szűrő pontosan mi alapján működik R1-ben? | **lezárva** (a `prof` reviewer C-5 findingje után): `status='active'` ∧ `last_position_ts > now() - 24 h` ∧ `sog_mps > 0` — a konstans: `MOVING_FRESHNESS_HOURS = 24` (lásd §3.1) |
 | Q4 | A `GET /content/{key}` 404-ot ad, ha a kulcs nincs lefordítva a kért nyelvre, vagy a fallback-metaival 200-at? | **200 + fallback-meta** (a F-DET-13 szerint) |
 | Q5 | A B2B API a `/api/v1/`-en osztozik a belsővel, vagy külön `/api/public/v1/`? | ** külön `/api/public/v1/`** (R5) — a belső útvonalak nem kerülnek a publikus szerződésbe |
 

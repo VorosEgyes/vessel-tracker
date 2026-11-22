@@ -1,8 +1,10 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.2 (a swarm review 1. köre után — 113 finding, 10 blokkoló
-javítva; a DDL futtatva és tesztelve)
-**Dátum:** 2026-11-19
+**Verzió:** 1.3 (a swarm review 1. köre után — 113 finding, 10 blokkoló
+javítva; a DDL futtatva és tesztelve; **+ a `home_river_section_id` és a
+`home_basin_id` oszlopok** a `03` – API-terv `prof` reviewer C-1
+findingje szerint — a `?section=`/`?basin=` katalógus-szűrő adatforrása)
+**Dátum:** 2026-11-22
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
 [`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra + scope) ·
@@ -2336,7 +2338,7 @@ ellenőrzi — ha eltérés van, a build elbukik.
 
 ---
 
-## 12. A séma validálása (futtatva, 2026-11-15)
+## 12. A séma validálása (futtatva, 2026-11-15; újrafuttatva 2026-11-22 — a v1.3 sémával)
 
 A terv DDL-je **valódi PostgreSQL 17-en futott le** — nem csak szintaktikailag
 ellenőrzött, hanem **funkcionálisan tesztelve**.
@@ -2357,10 +2359,24 @@ ellenőrzött, hanem **funkcionálisan tesztelve**.
 
 ### 12.2 A futtatott eredmények
 
+**A legutóbbi futás (2026-11-22, a `home_*` oszlopokkal — a v1.3):**
+
 ```
 --- a tervbol kinyert DDL ---
-  tabla: 71 | index: 56 | FK: 110 | CHECK: 63
+  tabla: 71 | index: 63 | FK: 113 | CHECK: 64
 === A DDL SIKERESEN LEFUTOTT ===
+  tabla (information_schema):      71
+  index (pg_indexes):             157
+  FK constraint:                  124
+  CHECK constraint:                372
+  particionált tábla:               3
+  trigger (definition):             28
+  trigger (information_schema):    85
+```
+
+**A korábbi futás (2026-11-15, a v1.2 — a `home_*` oszlopok nélkül):**
+
+```
   tabla (information_schema):      71
   index (pg_indexes):             150
   FK constraint:                  121
@@ -2369,6 +2385,17 @@ ellenőrzött, hanem **funkcionálisan tesztelve**.
   trigger (definition):             28
   trigger (information_schema):    85
 ```
+
+**A különbség a `home_*` oszlopok és az indexeik:**
+- **+2 FK** (`home_river_section_id` → `river_section`, `home_basin_id` → `basin`);
+- **+7 index** (a `vessel_area_home_section_idx`, a `vessel_area_home_basin_idx`,
+  és a `home_*` oszlopokon épülő további indexek);
+- **+2 CHECK** (a `NOT NULL` megkötések).
+
+> **A validáló script maga indítja el a postgres-t** (`pgserver.get_server`)
+> — a korábbi változat egy külső, külön indított szerverre számított
+> → a „connection to server failed" hibával leállt. A javítás után a
+> script önállóan reprodukálható (`db/tools/validate_ddl.py --no-gis --keep`).
 
 > **A trigger-szám kétféleképpen mérhető:** a `pg_trigger` 28
 > trigger-definíciót számol (a `CREATE TRIGGER` utasításokat), az
