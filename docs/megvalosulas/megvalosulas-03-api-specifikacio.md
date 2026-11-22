@@ -2,19 +2,19 @@
 
 **Verzió:** 0.2 (az 1. körű swarm review után — 58 finding, 8 blokkoló javítva)
 **Dátum:** 2026-11-19
-**A pinnelt séma:** `02-adatbazis-ddl.md` **v1.2** (71 tábla, 150 index,
+**A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.2** (71 tábla, 150 index,
 121 FK, 28 trigger) — **a `03` ezen áll**
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
-[`01-stack-es-struktura.md`](01-stack-es-struktura.md) (stack + struktúra) ·
-[`02-adatbazis-ddl.md`](02-adatbazis-ddl.md) (a séma — ez a szerződés alapja) ·
+[`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra) ·
+[`megvalosulas-02-adatbazis-ddl.md`](megvalosulas-02-adatbazis-ddl.md) (a séma — ez a szerződés alapja) ·
 [`../../docs/funkcio-leiras.md`](../../docs/funkcio-leiras.md) ·
 [`../../docs/release-terv.md`](../../docs/release-terv.md) ·
 [`README.md`](README.md) (a terv-sorozat tagjai)
 
 **Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
 
-> A dokumentum a repóban a `docs/megvalosulas/03-api-specifikacio.md`
+> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-03-api-specifikacio.md`
 > útvonalon van — a relatív linkek ehhez képest számolnak.
 
 ---
@@ -233,10 +233,31 @@ a gépen, de a restart után a connection elavulhat).
 | **Cursor** | `?cursor=<opaque>` | a nagy, gyorsan változó listák (R2+ élő pozíció) |
 
 **Az offset alapértelmezett, 50 elem/page, maximum 200.** A
-`per_page` nagyobb értékre hívás → **400**, nem csendes levágás.
+`per_page` nagyobb értékre hívás → **422** (`validation-error`), nem
+csendes levágás — a `Query(le=200)` ezt adja (a prof reviewer H-3
+findingje után: a korábbi `400` a terven belül három helyen ellentmondott
+magának).
 
 **A rendezés:** `?sort=name&order=asc` — a rendezési mezők **whitelistelt**
 (több rendezési mező kombinációja R1-ben nem kell).
+
+**A lapozás DETERMINISZTIKUS** (a prof reviewer C-6 findingje után):
+a `sort=name` **önmagában nem elég** — azonos nevű hajók közti sorrend
+ingadozna, és a lapozáskor egy hajó kimaradna vagy megduplázódna.
+**A rendezési kulcs mindig `(<mező>, <id>)`** — az `id` a másodlagos
+kulcs, így a sorrend teljesen determinisztikus:
+
+```sql
+ORDER BY vessel.sort_name ASC, vessel.id ASC
+```
+
+**Minden rendezési módra** a másodlagos kulcs a `vessel.id` — a
+`sort=length`, a `sort=updated_at` és a `sort=operator` esetén is.
+
+**A `sort_name` index** (`vessel_area_sort_name_idx` a 02-es terv
+§5.2) a `(operating_area, sort_name)` sorrendet fedi — az `id`-val
+kiegészítve a PostgreSQL az indexet használja (az `id` a heap-ből
+jön).
 
 ### 2.5 A nem-funkcionális garanciák (a F-NF-11, F-NF-15 alapján)
 
@@ -450,6 +471,25 @@ próbálhatja újra.
 `POST /api/v1/feedback`, és azt az **`anon`** szerepkör írja (a
 `02`-es terv §9: `GRANT INSERT ON feedback TO anon` + a
 `feedback_id_seq` USAGE).
+
+**A prof reviewer C-7 findingje után — minden végpont a gronzáson
+belül van:** a `public_api` a teljes listát megkapja, **de** a
+`content_key`/`content_text` és a `vessel_data_origin` **írás** a
+`public_api` útján **nem** történhet (az a szerkesztői réteg):
+
+| A végpont | A `public_api` jog | Megjegyzés |
+|---|---|---|
+| `GET /api/v1/*` | `SELECT` | a teljes olvasó lista |
+| `POST /api/v1/feedback` | `INSERT` (az `anon`role) | az egyetlen író |
+| `GET /api/admin/v1/*` | **`nincs`** | a `editor`/`admin` szerepkör |
+
+**A `content_text` írása** (a fordítások szerkesztése) a
+`/api/admin/v1/` alatt van — a `02`-es terv §9 szerint az `editor`
+szerepkör `INSERT, UPDATE, DELETE` jogot kap a `content_text`-re.
+**A `public_api` nem.**
+
+**Az `ais_message_raw` és a `job_run`** — sem a `public_api`, sem az
+`anon` nem éri el (a 02-es terv §9).
 
 **A `public_api` NEM éri el:** az `ais_message_raw`-ot, az `audit_log`-ot,
 a `job_run`-t, a `data_quality_event`-et, az `app_user`-t (a
@@ -759,11 +799,26 @@ oszlop — a `vessel_data_origin` táblából jön.
 
 ```python
 class FieldOrigin(BaseModel):
+    """A mezőnkénti eredet (a F-DET-15 mezőnkénti eredete).
+
+    A `value_snapshot` az aktualis ertek **ebben az eredetben** — a
+    konfliktus (a `prof` reviewer C-3 findingje szerint) csak ezzel
+    lathato: ket forras, ket kulonbozo ertek.
+    """
+
     field_name: str
     origin: Literal["ais", "operator_claimed", "official", "editorial"]
+    value_snapshot: str | None = Field(
+        default=None,
+        description="az adott forrastol szarmazo ertek (a konfliktus latatasahoz)")
     observed_at: datetime
     confidence: float | None = None
     source_name: str | None = None
+    is_current: bool = Field(
+        default=True,
+        description="False, ha a forras mar nem aktualis (a tortenet)")
+
+    model_config = ConfigDict(from_attributes=True)
 
 class OwnershipPeriod(BaseModel):
     """Egy tulajdonos periódus (a F-DET-05 hajtörténet blokkja)."""
@@ -924,6 +979,10 @@ jelenik meg, üres mező nincs*").
 }
 ```
 
+**A lánc a README 4.4 szerint: `kérés → en → hu → a kód`** — a német
+hiányzik, ezért az **angol** (`en`) jön, **nem** a magyar. (A `hu` csak
+akkor következik, ha az `en` is hiányzik.)
+
 **A `translation_fallback` a `meta`-ban van**, nem a `data`-ban — így a
 kliens nem keveri a „nincs adat" és a „nincs fordítás" esetet. A
 `data.description` a **fallback-szöveg**, a `meta` jelzi, hogy **nem a
@@ -945,11 +1004,24 @@ akkor a `meta.translation_fallback` **külön jelölést** kap:
 }
 ```
 
+**Ez az utolsó eset:** sem a kért nyelven, sem `en`-en, sem `hu`-n
+nincs fordítás → a `null` a helyes (a F-DET-16 „adat nélkül" jelölése).
+
 **A `missing: true` a F-DET-16 „adat nélkül" jelölése** — a UI üres
 helyett ezt mutatja.
 
 **A megvalósítás** a `content_service.py`-ben — a `content_text`
-táblából a kért nyelven, majd az `en`, majd a `hu` sorrendben:
+táblából a kért nyelven, majd az `en`, majd a `hu` sorrendben
+(a README 4.4 lánca — az `en` a nemzetközi visszaesés, **a `hu` előtt**):
+
+> **Az `en` a `hu` ELŐTT jön** — a prof reviewer C-2 findingje után
+> pontosítva. A korábbi példa a `hu`-t mutatta, ami a README 4.4
+> láncát sérti.
+
+**A `*_i18n` tábláknál ugyanígy** — a `vessel_i18n.name` stb. a
+`content_text`-hez hasonlóan fut a láncon (a `status='published'`
+gating a `content_text`-re vonatkozik, az `*_i18n` tábláknál nincs
+publikálási állapot):
 
 ```python
 FALLBACK_CHAIN = ("en", "hu")
@@ -983,8 +1055,8 @@ publikált fordítás **nem** szolgálhat fallbacknek.
 |---|---|---|
 | `not-found` | 404 | a hajó/kikötő nem létezik |
 | `validation-error` | 422 | a query paraméter hibás |
-| `invalid-query` | 400 | a `per_page` > 200, a `sort` nem whitelistelt |
-| `too-short-query` | 422 | a `q` 1 karakter |
+| `invalid-query` | 400 | **csak** a FastAPI-val nem validálható paraméterek (a kézzel ellenőrzött, nem whitelistelt `sort`/`order`) |
+| ~~`too-short-query`~~ | — | **a katalógusból kikerült** (a H-2 finding) — a `Query(min_length=2)` a `validation-error` (422) formátumot adja |
 | ~~`not-found-in-area`~~ | — | **a katalógusból kikerült** (a H-2 finding) |
 | `unauthorized` | 401 | a `/api/admin/v1/`-en nincs session |
 | `forbidden` | 403 | a szerep nem jogosult |

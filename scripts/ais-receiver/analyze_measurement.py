@@ -86,12 +86,11 @@ def analyze(path: str) -> dict:
                                   "GROUP BY msg_type ORDER BY 2 DESC"):
                 type_counts[str(t)] = n
     # a nyers NMEA-ből a tipus kinyerése (ha van ais_nmea tabla)
-    if "ais_nmea" in tables:
-        ncols = {r[1] for r in db.execute("PRAGMA table_info(ais_nmea)")}
-        raw_col = next((c for c in ("raw", "nmea", "sentence", "data")
-                        if c in ncols), None)
+    if "ais_message" in tables:
+        ncols = {r[1] for r in db.execute("PRAGMA table_info(ais_message)")}
+        raw_col = next((c for c in ("nmea", "raw", "sentence") if c in ncols), None)
         if raw_col:
-            for (raw,) in _rows(db, f"SELECT {raw_col} FROM ais_nmea LIMIT 500000"):
+            for (raw,) in _rows(db, f"SELECT {raw_col} FROM ais_message LIMIT 500000"):
                 if not raw:
                     continue
                 m = re.match(r"^![A-Z]{2}VDM,(\d),(\d),", raw)
@@ -122,16 +121,16 @@ def analyze(path: str) -> dict:
     with_eni = 0
     with_name = 0
     with_dims = 0
-    if "ais_vessel" in tables:
-        cols = {r[1] for r in db.execute("PRAGMA table_info(ais_vessel)")}
-        vessels = _rows(db, "SELECT count(*) FROM ais_vessel")[0][0]
+    if "ais_state" in tables:
+        cols = {r[1] for r in db.execute("PRAGMA table_info(ais_state)")}
+        vessels = _rows(db, "SELECT count(*) FROM ais_state")[0][0]
         if "imo" in cols:
-            with_eni = _rows(db, "SELECT count(*) FROM ais_vessel "
+            with_eni = _rows(db, "SELECT count(*) FROM ais_state "
                                  "WHERE imo IS NOT NULL AND imo != 0")[0][0]
-        # a nev es a meretek oszlopnevai a v0.71-ben
+        # A nev es a meretek oszlopnevai a v0.71-ben
         for name_col in ("name", "shipname", "vessel_name"):
             if name_col in cols:
-                with_name = _rows(db, f"SELECT count(*) FROM ais_vessel "
+                with_name = _rows(db, f"SELECT count(*) FROM ais_state "
                                      f"WHERE {name_col} IS NOT NULL "
                                      f"AND {name_col} != ''")[0][0]
                 break
@@ -139,7 +138,7 @@ def analyze(path: str) -> dict:
                     if c in cols]
         if dim_cols:
             cond = " OR ".join(f"{c} IS NOT NULL AND {c} != 0" for c in dim_cols)
-            with_dims = _rows(db, f"SELECT count(*) FROM ais_vessel "
+            with_dims = _rows(db, f"SELECT count(*) FROM ais_state "
                                  f"WHERE {cond}")[0][0]
 
     result["vessels"] = vessels
@@ -156,19 +155,23 @@ def analyze(path: str) -> dict:
     positions = 0
     in_corridor = 0
     with_km = 0
-    if "ais_vessel_pos" in tables:
-        cols = {r[1] for r in db.execute("PRAGMA table_info(ais_vessel_pos)")}
-        positions = _rows(db, "SELECT count(*) FROM ais_vessel_pos")[0][0]
+    if "ais_position" in tables:
+        cols = {r[1] for r in db.execute("PRAGMA table_info(ais_position)")}
+        positions = _rows(db, "SELECT count(*) FROM ais_position")[0][0]
         # a folyo-km oszlop neve a v0.71-ben
-        km_col = next((c for c in ("river_km", "fairway_distance", "shiptype")
-                       if c in cols and c != "shiptype"), None)
+        # A v0.71-es AIS-catcher NEM dekodolja a fairway-mezot
+        # (a river_km) — azt a SAJAT parserunk (a 04-es terv)
+        #cad ki a nyers NMEA-bol. A korridor-ellenorzes ezert a
+        # 30 napos meres UTAN, a sajt parserrel tortenik.
+        km_col = next((c for c in ("river_km", "fairway_distance")
+                       if c in cols), None)
         lat_col = next((c for c in ("lat", "latitude") if c in cols), None)
         lon_col = next((c for c in ("lon", "longitude") if c in cols), None)
         if km_col:
-            with_km = _rows(db, f"SELECT count(*) FROM ais_vessel_pos "
+            with_km = _rows(db, f"SELECT count(*) FROM ais_position "
                                 f"WHERE {km_col} IS NOT NULL")[0][0]
             in_corridor = _rows(
-                db, f"SELECT count(*) FROM ais_vessel_pos "
+                db, f"SELECT count(*) FROM ais_position "
                    f"WHERE {km_col} BETWEEN ? AND ?",
                 (INLAND_MIN_KM, INLAND_MAX_KM))[0][0]
     result["positions"] = positions
@@ -178,18 +181,28 @@ def analyze(path: str) -> dict:
                                 if with_km else None)
 
     # --- 6. a ghost hajok ---
-    # a pozicioadatbol: a hajok, amelyeknek nincs poziciojuk, vagy a
-    # sebességuk 0, es a korábbi 5 napban is ugyanott voltak
+    # A v0.71-es semaban az `ais_position` a `msg_id`-vel hivatkozik
+    # az `ais_message`-re (nincs benne mmsi) — a sebességszures
+    # ezert a JOIN-on keresztul megy.
     ghost_candidates = 0
-    if "ais_vessel" in tables and "ais_vessel_pos" in tables:
-        cols = {r[1] for r in db.execute("PRAGMA table_info(ais_vessel)")}
-        pcols = {r[1] for r in db.execute("PRAGMA table_info(ais_vessel_pos)")}
+    still_count = 0
+    if "ais_state" in tables and "ais_position" in tables:
+        pcols = {r[1] for r in db.execute("PRAGMA table_info(ais_position)")}
         speed_col = next((c for c in ("speed", "sog") if c in pcols), None)
         if speed_col:
-            ghost_candidates = _rows(
-                db, f"SELECT count(DISTINCT mmsi) FROM ais_vessel_pos "
-                   f"WHERE {speed_col} > ?", (MAX_SOG_KNOTS,))[0][0]
+            r = _rows(
+                db, "SELECT count(DISTINCT m.mmsi) FROM ais_position p "
+                   "JOIN ais_message m ON m.id = p.msg_id "
+                   f"WHERE p.{speed_col} > ?", (MAX_SOG_KNOTS,))
+            ghost_candidates = r[0][0] if r else 0
+            # az "allandoan allo" hajok: a legutolso poziciojuk
+            # speedje 0 es a gyakorisaguk magas
+            r2 = _rows(
+                db, "SELECT count(*) FROM ais_state "
+                   "WHERE speed IS NOT NULL AND speed < 0.5")
+            still_count = r2[0][0] if r2 else 0
     result["ghost_candidates_over_speed"] = ghost_candidates
+    result["vessels_standing_still"] = still_count
 
     # --- a belvizi FI 10 jelenlete (a legfontosabb!) ---
     inland = 0

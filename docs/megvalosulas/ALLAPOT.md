@@ -114,16 +114,71 @@ folyólefedettség ~15–20 km**).
 az antenna → a horizont 14,3 km-ről ~17 km-re nő (**+2–3 km mindkét
 irányban**).
 
-### 4.1a A megépítés állapota (2026-11-20)
+### 4.1a A megépítés állapota (2026-11-22)
 
 | A hardver | Állapot |
 |---|---|
-| Raspberry Pi | ✅ van |
-| SD-kártya | ✅ van |
+| **Raspberry Pi 4** | ✅ van (a 3B+ helyett — a gyorsabb processzor, a 2× USB 3.0 és az **5 GHz-es Wi-Fi** miatt) |
+| SD-kártya (32 GB) | ✅ van |
 | RTL2832U USB dongle | ✅ van |
 | Antenna | ✅ van |
 | **162 MHz SAW szűrő** | ⬜ **később** — a mérés szűrő nélkül is indulhat |
-| **5V/2,5A táp** | ⬜ **ellenőrizendő** — a Pi 3B+ 1A-val nem elég |
+| **5V/3A táp** | ✅ van (a Pi 4 hivatalos tápegysége) |
+
+**Az OS telepítve** (2026-11-22): a Raspberry Pi OS Lite (64-bit),
+Debian trixie, a **2026-10-06** build. A kártyára a `cloud-init` írta be
+a beállításokat:
+- a hostname: **`bud01`**
+- a felhasználó: **`miklos`** (a `sudo` csoportban, jelszó nélkül)
+- az **SSH-kulcs** (a Mac kulcsa) → ssh-val belépek
+- a **Wi-Fi**: `Pres-iot` (a hálózat a `network-config`-ban)
+- a tűzfal: a 22 (SSH), a 8080 (a helyi web-térkép) és a 8100 (a helyi
+  NMEA) nyitva a LAN-on
+
+**A telepítő scriptek** a repóban (`scripts/ais-receiver/`):
+`install_pi_os.sh` (az OS-telepítés), `make_cloudinit.sh` (a
+cloud-init fájlok), `install_ais_receiver.sh` (az SDR), a mérés- és
+elemzőscriptek.
+
+**A tanulságok a telepítésből (a teljes lista a
+`scripts/ais-receiver/PI-TELEPITES.md`-ben):**
+- a hivatalos `.sha256` a **tömörített** képre vonatkozik (a `.img.xz`),
+  nem a kitömörített `.img`-re
+- a `sudo` a Macen **megoldja a macOS „removable volumes"
+  engedélykérdését** is (az Imager CLI `sudo` alatt közvetlenül nyitja
+  a lemezt)
+- a cloud-init `network-config`-nek a **`network:`** gyökéren kell lennie,
+  `renderer: NetworkManager`-rel és `regulatory-domain`-nel
+- az **`ssh` fájl a boot partíción** kötelező (különben az `sshd` nem
+  indul el)
+- az SSH-kulcs a felhasználó **`users:` blokkjában** kell (nem top-level)
+- a dongle a **kék USB 3.0 portban** (a fekete 2.0-ban `error -71`)
+- az AIS-catcher v0.71-ben a `-D` paraméterei megváltoztak:
+  `V ON MSGS ON` → **`state ON position ON static ON nmea ON`**,
+  és a DB-sémát a **`create_sqlite.sql`** betöltéssel kell létrehozni
+
+### 4.1b A mérés állapota (2026-11-22 19:23)
+
+**A 30 napos mérés ELINDULT** a `bud01` telephelyen:
+
+| | |
+|---|---|
+| A vevő | `ais-receiver.service` — **active**, boot után auto-indul |
+| A nyers adat | `/var/lib/ais/ais.db` (SQLite), `RETENTION 35` nap |
+| Az üzenetek | ~300 az első percekben (Msg 1/2/5/20/23) |
+| A hajók | 91 különböző MMSI az első 10 percben |
+| A PPM | **8** (a kalibráció 25 percet futott; a 13–15 az átmeneti szakasz volt) |
+| A heti lehúzás | hétfő 04:17-kor → **a NAS közvetlenül** (`/opt/data/martin/work/ais-data/`) — **a Mac kimarad a láncból** (nem mindig van bekapcsolva; a NAS a Pi-ról 4,5 ms alatt elérhető) |
+| A web-térkép | `http://192.168.0.2:8080` |
+
+**A döntő teszt még hátra van:** a **belvízi FI 10** üzenetek (ezen múlik az
+ENI, azaz a katalógus) — a lakástól 2 km-re nem várható. **A tetőn vagy a
+Duna-parton kell megmérni** (a `ais-vevo-terv.md` 10.1: a tető 3–5 m-rel
+magasabban +2–3 km rádióhorizont).
+
+**A szűrő nélkül a mérés használható**, de a jel/zaj arány gyengébb —
+a szűrő megvásárlása a mérés után dönthető el (a `docs/ais-vevo-terv.md`
+szerint a szűrő a túlterhelést és a LO-szivárgást csökkenti).
 
 **Az elkészült telepítő- és mérőscriptek** (`scripts/ais-receiver/`):
 

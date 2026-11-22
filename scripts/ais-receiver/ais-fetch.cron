@@ -1,0 +1,10 @@
+# a nyers AIS-adat heti lehuzasa a meres idejere (Pi -> NAS direkt)
+#
+# A lanc: Pi --> NAS (192.168.0.207) — a Mac NEM kell kozben, mert
+# nem mindig van bekapcsolva, es a NAS a Pirol kozvetlenul elerheto.
+#
+# A "miklos" user futtatja, mert a lehuzas kulcsa
+# (/home/miklos/.ssh/ais_pull_key) a sajat home-jaban van.
+# A NAS-on a kulcs "command=" korlatozassal fut: csak a
+# /usr/local/bin/nas-receive-ais.sh hajtható.
+17 4 * * 1 miklos DB_FILE=/var/lib/ais/ais.db /usr/local/bin/ais-fetch-weekly.sh

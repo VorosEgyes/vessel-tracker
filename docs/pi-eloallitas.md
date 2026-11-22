@@ -13,7 +13,9 @@
 
 **A korlát:** az RTL2832U (és minden általános SDR-dongle) **egyetlen hangolható tunerrel** rendelkezik – egyszerre **egy frekvenciát** tud figyelni. Az AIS 161,975 / 162,025 MHz-en, az ADS-B 1090 MHz-en működik. **Két külön vevő kell, külön antennával.**
 
-A Pi 3B+ 4 USB portja elég a kettőhöz, de a **portok egy USB 2.0 buszon osztoznak** (a Pi 3B+ mindegyike a VL805-ös vezérlőn). Az AIS forgalom szűk sávsávos módban könnyű (~0,2 Mbit/s), az ADS-B a nehéz (~16 Mbit/s USB-n, 2,048 MS/s mintarate). **Együtt épp belefér, de szűk – lásd 3. fejezet (a Pi 4/5 ajánlása).**
+**A Pi 4-en a két lánc kényelmesen elfér:** a 2 USB 3.0 port **külön buszon** van (nem a 2.0-as buszon), így az AIS forgalom (~0,2 Mbit/s) és az ADS-B (~16 Mbit/s USB-n, 2,048 MS/s mintarate) **nem verseng a sávszélességért**. A processzor is gyorsabb (4× Cortex-A72 @ 1,5 GHz a 3B+ 4× Cortex-A53 @ 1,2 GHz helyett), így az AIS-catcher build és a 30 napos mérés is gyorsabb.
+
+> **A Pi 3B+ megjegyzés:** azon a 4 port egy USB 2.0 buszon osztozik (a VL805-ös vezérlőn) — *„együtt épp belefér, de szűk"*. A **Pi 4 ezt a korlátot megszünteti**, és a **5 GHz-es Wi-Fi** miatt a 2,4 GHz-es hálózatok korlátozása sem érvényesül.
 
 ---
 

@@ -4,16 +4,16 @@
 **Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
-[`01-stack-es-struktura.md`](01-stack-es-struktura.md) (stack + struktúra) ·
-[`02-adatbazis-ddl.md`](02-adatbazis-ddl.md) (a séma) ·
-[`03-api-specifikacio.md`](03-api-specifikacio.md) (a `/api/admin/v1/` határ) ·
-[`05-frontend-arkitektura.md`](05-frontend-arkitektura.md) (a frontend alapok) ·
+[`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra) ·
+[`megvalosulas-02-adatbazis-ddl.md`](megvalosulas-02-adatbazis-ddl.md) (a séma) ·
+[`megvalosulas-03-api-specifikacio.md`](megvalosulas-03-api-specifikacio.md) (a `/api/admin/v1/` határ) ·
+[`megvalosulas-05-frontend-arkitektura.md`](megvalosulas-05-frontend-arkitektura.md) (a frontend alapok) ·
 [`../../docs/funkcio-leiras.md`](../../docs/funkcio-leiras.md) (a F-ADM igények) ·
 [`README.md`](README.md) (a terv-sorozat tagjai)
 
 **Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
 
-> A dokumentum a repóban a `docs/megvalosulas/06-szerkesztoi-felulet.md`
+> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-06-szerkesztoi-felulet.md`
 > útvonalon van — a relatív linkek ehhez képest számolnak.
 
 ---

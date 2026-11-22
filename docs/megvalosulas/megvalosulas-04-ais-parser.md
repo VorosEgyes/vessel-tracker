@@ -4,9 +4,9 @@
 **Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
-[`01-stack-es-struktura.md`](01-stack-es-struktura.md) (stack + struktúra) ·
-[`02-adatbazis-ddl.md`](02-adatbazis-ddl.md) (a séma — a parser ide ír) ·
-[`03-api-specifikacio.md`](03-api-specifikacio.md) (a normalizált rekord a kimenete) ·
+[`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra) ·
+[`megvalosulas-02-adatbazis-ddl.md`](megvalosulas-02-adatbazis-ddl.md) (a séma — a parser ide ír) ·
+[`megvalosulas-03-api-specifikacio.md`](megvalosulas-03-api-specifikacio.md) (a normalizált rekord a kimenete) ·
 [`../../docs/ais-vevo-terv.md`](../../docs/ais-vevo-terv.md) (a vevőhálózat) ·
 [`../../docs/ingest-terv.md`](../../docs/ingest-terv.md) (az adatút) ·
 [`../../docs/r1-adat-terv.md`](../../docs/r1-adat-terv.md) ·
@@ -14,7 +14,7 @@
 
 **Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
 
-> A dokumentum a repóban a `docs/megvalosulas/04-ais-parser.md` útvonalon
+> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-04-ais-parser.md` útvonalon
 > van — a relatív linkek ehhez képest számolnak.
 
 ---

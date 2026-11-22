@@ -12,7 +12,7 @@ a review eredménye a §12-ben
 [`../../docs/ais-vevo-terv.md`](../../docs/ais-vevo-terv.md) ·
 [`../../docs/ingest-terv.md`](../../docs/ingest-terv.md)
 
-> A dokumentum a repóban a `docs/megvalosulas/01-stack-es-struktura.md`
+> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-01-stack-es-struktura.md`
 > útvonalon van — a relatív linkek ehhez képest számolnak.
 
 **Ez a dokumentum** a hiányzó implementációs terv első darabja: a
@@ -427,8 +427,8 @@ teendő."
 │   └── megvalosulas/            ← ÚJ: a részletes implementációs tervek
 │       ├── README.md            ← a 9 terv státusszal és olvasási sorrenddel
 │       ├── 01-stack-es-struktura.md      ← ez a dokumentum
-│       ├── 02-adatbazis-ddl.md
-│       ├── 03-api-specifikacio.md
+│       ├── megvalosulas-02-adatbazis-ddl.md
+│       ├── megvalosulas-03-api-specifikacio.md
 │       ├── 04-ais-parser.md
 │       ├── 05-frontend-architektura.md
 │       ├── 06-szerkesztoi-felulet.md

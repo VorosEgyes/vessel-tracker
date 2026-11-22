@@ -1,250 +1,173 @@
-# A Budapesti AIS-vevő — az első lépések
+# A Budapesti AIS-vevő — telepítési útmutató (a gyakorlatból)
 
-> A `vessel-tracker` projekt R1-0 előkészítő fázisának **első lépése**.
-> A háttér: a [`docs/ais-vevo-terv.md`](../docs/ais-vevo-terv.md)
-> (a vevőhálózat terve) és a
-> [`docs/pi-eloallitas.md`](../docs/pi-eloallitas.md) (a Pi előállítása).
-
----
-
-## Mi a helyzet
-
-| Van | Nincs (még) |
-|---|---|
-| ✅ Raspberry Pi | ⬜ 162 MHz-es **SAW szűrő** (a jel/zaj arányt javítja — később) |
-| ✅ SD-kártya | ⬜ **5V/2,5A** táp (a Pi 3B+ ezt igényli) |
-| ✅ RTL2832U USB dongle | ⬜ a Pi hálózati elérése (a statikus IP) |
-| ✅ antenna | ⬜ a hosszú távú hálózati út (a NAS-ig) |
-
-**A szűrő nélkül is mérhetünk** — csak gyengébb jel/zaj aránnyal. A
-szűrő **a mérés minőségét** javítja, nem a működőképességet.
+> A `vessel-tracker` projekt R1-0 előkészítő fázisának első lépése.
+> **Ez a dokumentum a 2026-11-22-i tényleges telepítésből származik** —
+> a benne lévő tanulságok mind valós hibák voltak.
 
 ---
 
-## A sorrend
+## A hardver
 
-```
-[1] OS + hálózat a Pi-n        ← 20 perc
-[2] rtl-sdr telepítés         ← 5 perc
-[3] DVB-T driver letiltása    ← 5 perc (+ reboot)
-[4] a dongle felismerése      ← 2 perc  ← ELDÖNTŐ PONT
-[5] PPM-kalibráció             ← 10 perc ← ELDÖNTŐ PONT
-[6] a helyi AIS-teszt          ← 5 perc  ← ELDÖNTŐ PONT
-[7] a mérés indítása (30 nap)  ← 2 perc
-[8] a tetőn/vízparton a döntő teszt (a FI 10) ← ELDÖNTŐ PONT
-```
+| Elem | Specifikáció | Állapot |
+|---|---|---|
+| **Raspberry Pi** | **Pi 4** (a 3B+ helyett: gyorsabb processzor, 2× USB 3.0 külön buszon, 5 GHz-es Wi-Fi) | ✅ |
+| **Táp** | **USB-C, 5V/3A** (a Pi 4 hivatalos tápegysége) — 2,5A **brownoutot** okoz | ✅ |
+| **SD-kártya** | 32 GB | ✅ |
+| **RTL2832U dongle** | `0bda:2838` Realtek RTL2838UHIDIR + R820T tuner | ✅ |
+| **Antenna** | AIS-re hangolt, 162 MHz | ✅ |
+| **162 MHz SAW szűrő** | a túlterhelés és a LO-szivárgás ellen | ⬜ később |
+| **Hálózat** | Wi-Fi `Pres-iot` | ✅ |
 
-**A [4], [5], [6] és [8] pontok döntőek** — ha ezek nem működnek,
-a mérés nem ad használható adatot.
+**A telephely:** Budapest, 3. emelet, a parttól ~2 km-re.
 
 ---
 
-## [1] Az OS és a hálózat
+## Az öt döntő tanulság
 
-Ha az SD-kártyán **már van** Raspberry Pi OS, ugorjunk a [2]-re.
+### 1. Az `ssh` fájl a boot partíción KÖTELEZŐ
 
-Ha nincs:
-1. a **Raspberry Pi Imager** letöltése (a számítógépedre)
-2. az OS kiválasztása: **Raspberry Pi OS Lite (64-bit)** — a Full
-   feleslegesen fogyaszt RAM-ot, és mi nem kell grafikus felület
-3. a **beállítások az Imagerben** (ez a legfontosabb lépés):
-   - hostname: `bud01`
-   - felhasználó + jelszó (a **sudo**-hoz)
-   - **SSH bekapcsolva** (a "Services" fülön)
-   - időzóna: `Europe/Budapest`
-   - hálózat: a Wi-Fi vagy az Ethernet
-4. a beállítás a MicroSD-re
+**A cloud-init a `users:` modult csak a `ssh` service elindítása UTÁN futja.**
+Ha nincs `ssh` fájl a boot partíció gyökerében, akkor:
+- a hálózati beállítás működik (a `bud01` hostname, a Wi-Fi rendben),
+- **de az `sshd` soha nem indul el** → `Connection refused` a 22. porton.
 
-**Utána, a Pi-on:**
+**A megoldás (a kártya írása után):**
 ```bash
-sudo apt update && sudo apt full-upgrade -y
-timedatectl          # az NTP-nek működnie kell
+diskutil unmountDisk /dev/disk6
+diskutil mount /dev/disk6s1
+touch /Volumes/bootfs/ssh
+diskutil unmountDisk /dev/disk6
 ```
 
-**A statikus IP:** a routeren foglalj le egy DHCP-foglalást a Pi
-MAC-címére (a `ip link show` kiírja). A Pi IP-jét **neked kell
-megadnod** — innen nem látom.
+### 2. A cloud-init `network-config` a `network:` gyökéren kell
+
+A Raspberry Pi OS Trixie a cloud-init-et használja. **A hivatalos példa:**
+
+```yaml
+network:                    # ← NEM "version: 2" a legfelső szinten!
+  version: 2
+  wifis:
+    renderer: NetworkManager    # ← KÖTELEZŐ (a cloud-init alapértelmezése a networkd)
+    wlan0:
+      dhcp4: true
+      regulatory-domain: "HU"  # ← KÖTELEZŐ, enélkül a Wi-Fi NEM csatlakozik
+      access-points:
+        "Pres-iot":
+          password: "..."
+```
+
+**A három elhagyott kulcs együtt: „a Wi-Fi nem csatlakozott".**
+A `regulatory-domain` nélkül a kernel nem tudja, mely csatornát
+használhatja a 5 GHz-es sávban.
+
+### 3. Az SSH-kulcs a felhasználó blokkjában van
+
+```yaml
+users:
+  - name: miklos
+    groups: users,adm,dialout,...,sudo
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: AIS01     # a cloud-init a boot után maga hasheli
+    ssh_authorized_keys:          # ← a felhasználó BLOKKJÁBAN, nem top-level!
+      - ssh-ed25519 AAAA...
+    sudo: ALL=(ALL) NOPASSWD:ALL
+```
+
+**A top-level `ssh_authorized_keys` a Trixie-ben NEM működött** — a
+kulcs nem került a felhasználó `~/.ssh/authorized_keys`-be. A javítás:
+`mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys` a felhasználóval.
+
+### 4. A dongle a KÉK (USB 3.0) portba
+
+A `usb 1-1-port2: Cannot enable. Maybe the USB cable is bad?` hiba
+(`error -71`, EPROTO) a **fehér/fekete USB 2.0 portban** jelentkezett.
+
+**A kék USB 3.0 portba dugva azonnal felismerte:**
+```
+Bus 001 Device 024: ID 0bda:2838 Realtek Semiconductor Corp. RTL2838 DVB-T
+Found Rafael Micro R820T tuner
+```
+
+*(A Pi 4-en a kék portok a belső USB hub mögött vannak — nagyobb
+áramot adnak, és a külső SDR-dongle-ok itt működnek megbízhatóan.)*
+
+### 5. A PPM-kalibráció kötelező
+
+A kalibrálatlan dongle-nél: `[R82XX] PLL not locked!` — **a dekódolás
+rossz lesz**. A `rtl_test -p` 10 percig fut (a melegedés miatt a ppm
+driftel), és a végeredményt a `config.json` `ppm_error` mezőjébe kell
+írni.
+
+**A kalibrációt háttérben érdemes futtatni**, hogy az SSH-kapcsolat
+megszakadása ne számítson:
+```bash
+sudo rtl_test -p > /tmp/ppm.txt 2>&1
+```
 
 ---
 
-## [2]–[3] Az SDR telepítése és a driver letiltása
+## A telepítés lépései (a jelenlegi, működő sorrend)
+
+### A) Az SD-kártya előkészítése (a Macen)
+
+```bash
+# a cloud-init fájlok (a Wi-Fi + a felhasználó + a kulcs)
+bash ~/dev/make_cloudinit.sh bud01 miklos 'AIS01' 'Pres-iot' '<wifi-jelszo>' \
+     "$(cat ~/.ssh/hermes_nas_ed25519.pub)" HU
+
+# az OS képének letöltése + kiírása a kártyára
+sudo bash ~/dev/install_pi_os.sh
+
+# AZ SSH FÁJL (a kártya újra bedugása után!)
+diskutil unmountDisk /dev/disk6
+diskutil mount /dev/disk6s1
+touch /Volumes/bootfs/ssh
+diskutil unmountDisk /dev/disk6
+```
+
+### B) Az első boot
+
+```bash
+# a kártya a Pi-ba, a táp, a dongle (a KÉK portba!), az antenna
+ssh miklos@bud01.local
+```
+
+### C) Az SDR telepítése
 
 ```bash
 sudo apt install -y rtl-sdr
-```
-
-> **Ha a `rtl-sdr` nem található a Raspberry Pi OS repójában:** a
-> `rtl-sdr` külön repository-ból jön (a `pi.raspberrypi.com` /
-> `raspberrypi.org` repója). A hibaüzenet a telepítéskor elmondja,
-> mit kell hozzáadni.
-
-**A DVB-T driver letiltása** — különben a kernel lefoglalja a
-donglet, és a `rtl_test` nem látja:
-
-```bash
 sudo tee /etc/modprobe.d/rtl-sdr-blacklist.conf <<'EOF'
 blacklist dvb_usb_rtl28xxu
 blacklist rtl2832
 blacklist e4000
 EOF
-sudo reboot
+sudo modprobe -r dvb_usb_rtl28xxu   # a reboot nem kell
+
+# az AIS-catcher build (a Pi 4-en ~8 perc)
+sudo apt install -y git make gcc g++ cmake pkg-config \
+     libsqlite3-dev libssl-dev zlib1g-dev librtlsdr-dev
+git clone --depth 1 https://github.com/jvde-github/AIS-catcher.git
+cd AIS-catcher && mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j4 && sudo make install
 ```
 
----
-
-## [4] A dongle felismerése — a döntő pont
+### D) A kulcs elhelyezése (ha a cloud-init nem tette)
 
 ```bash
-rtl_test -t
+cat ~/.ssh/hermes_nas_ed25519.pub | ssh miklos@bud01.local \
+  'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
 ```
 
-**A várt kimenet:**
-```
-Found Rafael Micro R820T tuner
-Supported gain values: ...
-```
-
-**Ha nem látja a donglet:**
-
-| A tünet | A valószínű ok |
-|---|---|
-| `lsusb` sem látja | **USB-kábel vagy tápellátás** — az RTL stick-nek 2 USB port kell (egy az adatnak, egy a tápnek) |
-| `lsusb` látja, `rtl_test` nem | a **DVB-T driver** még aktív (a blacklista nem működött) |
-| `rtl_test` hibát dob a tunerre | az **R820T tuner chip** nem található (a dongle más típusú) |
+### E) A kalibráció és a mérés
 
 ```bash
-lsusb | grep -i realtek
-dmesg | tail -20
+ssh miklos@bud01.local
+sudo rtl_test -p > /tmp/ppm.txt 2>&1   # 10 perc
+tail -3 /tmp/ppm.txt                   # a ppm correction értéke
+
+sudo bash ~/ais-scripts/start_measurement.sh
 ```
-
----
-
-## [5] A PPM-kalibráció — a legfontosabb lépés
-
-**A frekvenciapontatlanság a legnagyobb korlát:** a generikus dongle
-frekvenciája több tíz ppm-rel elcsúszhat, és **±3 ppm már rontja a
-dekódolást**.
-
-```bash
-rtl_test -p
-```
-
-**10 percig futnia kell, nyugodtan** (a melegedés miatt a ppm
-értéke változik — ez a drift, amit kalibrálunk). A végén:
-
-```
-ppm correction: 3.4 ppm
-```
-
-**Ezt az értéket JEGYZD FEL** — ez kerül az `AIS-catcher` konfigurációba.
-
-> **A dongle típusa számít:** ha nincs benne TCXO (a legtöbb
-> RTL2832U-ban nincs), a ppm **a hőmérséklettel driftel** — nyáron
-> más érték kell. A TCXO-s változat (a „RTL-SDR Blog V3", 0,5 ppm)
-> stabilabb, de nem szükséges a mérés indításához.
-
----
-
-## [6] A helyi AIS-teszt
-
-```bash
-rtl_ais -p 161975 -s 162025 -g 20
-```
-
-**Amit keresünk:** a `!AIVDM,...` sorokat.
-
-> **A lakásban valószínűleg nem lesz jel** — a házak fala mögött
-> nincs AIS. Ez **normális**. A valódi teszt a tetőn vagy a
-> Duna-parton (a [8] pont).
-
-**Ha a konyhában mégis van jel** (a szerencsés eset) — az azt jelenti,
-hogy a ház közel van a folyóhoz vagy egy nagyon erős vevő van a
-szomszédban.
-
----
-
-## [7] A 30 napos mérés indítása
-
-A `scriptek/` mappából:
-
-```bash
-scp install_ais_receiver.sh start_measurement.sh modmj@<pi-ip>:~/
-ssh modmj@<pi-ip>
-sudo bash install_ais_receiver.sh     # a telepítés (a build ~10-15 perc)
-sudo bash start_measurement.sh        # a mérés indítása
-```
-
-**A mérés a helyi SQLite-ba ír** — a 30 napos próbaüzemhez **nem kell
-semmilyen szerver**. A nyers adatot hetente lehúzzuk, és a 30 nap
-után offline feldolgozzuk.
-
-**A heti lehúzás** a `NAS_TARGET` env-ben állítható (alapértelmezés:
-`modmj@192.168.1.205` — a NAS).
-
-### A mérés ellenőrzése (napi szinten)
-
-```bash
-sqlite3 /var/lib/ais/ais.db "SELECT count(*) FROM ais_message;"
-sqlite3 /var/lib/ais/ais.db "SELECT msg_type, count(*) FROM ais_message GROUP BY 1;"
-journalctl -u ais-receiver -f
-```
-
-**Ha az üzenetszám 0:** a dongle nem lát jelet (a [8] pontra kell
-menni), vagy a PPM nincs beállítva.
-
----
-
-## [8] A döntő teszt — a belvízi FI 10
-
-**Ez a projekt legfontosabb technikai kérdése.**
-
-A Duna hajói a **szabványos AIS** üzeneteken kívül **Inland AIS
-FI 10** üzeneteket is küldenek (DAC 200, FID 10) — ezek tartalmazzák
-az **ENI-t**, a hajó nevét és a méreteit. **Ezen múlik a katalógus:**
-az ENI a Duna-katalógus elsődleges azonosítója (a README 3.3/B).
-
-**A teszt:**
-```bash
-# a web-térkép a szűrőkkel (a statisztikus nézet)
-http://<pi-ip>:8080
-```
-**a tünetes státuszsorban keresd az „Inland" / „InlandAIS" szűrőt**
-(az AIS-catcher külön jelöli a belvízi üzeneteket).
-
-**Vagy a nyers kimenetben:**
-```bash
-sqlite3 /var/lib/ais/ais.db \
-  "SELECT count(*) FROM ais_message WHERE msg_type = 8;"
-```
-**A Msg 8 a belvízi statikus üzenet** (a szabványos AIS-ben a Msg 8
-a biztonsági üzenet — a különbséget a `nmea` tartalom és a
-`DAC 200` jelzi).
-
-### Ha nincs FI 10
-
-| A valószínű ok | A megoldás |
-|---|---|
-| **a PPM nincs pontos** | újrakalibrálás, `ppm_error` beírása |
-| **az antenna túl alacsonyan van** | a tetőre (a horizont +2-3 km) |
-| **a helyszín rossz** | a Duna-partra kell menni (a lakás 2 km-re van a folyótól) |
-| **túlterhelés** | **a szűrő kell** (a szűrő nélkül a városi zaj elnyomja a jelet) |
-| **a frekvencia rossz** | a 161,975 + 162,025 MHz sávon belül kell lenni — az AIS-catcher `filters` beállítása |
-
-> **Ha a szűrő nélkül nincs FI 10, de a szabványos AIS jön:** a
-> vevő működik, de a **belvízi üzenetek** hiányoznak — ez a
-> szűrő/erősítő/pozíció kérdése. **Ez a tipikus eredmény**, és a
-> szűrő megvásárlása **indokolt**.
-
----
-
-## A szerveroldal (később)
-
-A mérés alatt **nem kell** a NAS-hoz semmi. A központi ingest (MQTT
-broker + a Python ingest) a 30 nap **után** indul:
-
-1. a **Mosquitto** a NAS-on (TLS, a `duna/ais/<site>/msg` témával)
-2. a `data_source` és az `ais_receiver_site` seed a Postgresben
-3. az ingest szolgáltatás (a `04` – AIS-parser terv alapján)
 
 ---
 
@@ -252,17 +175,81 @@ broker + a Python ingest) a 30 nap **után** indul:
 
 | A fájl | A szerepe |
 |---|---|
-| `install_ais_receiver.sh` | a telepítés (rtl-sdr, a driver blacklista, az AIS-catcher build, a systemd unit) |
-| `start_measurement.sh` | a mérési üzemmód (a SQLite kimenet, a heti lehúzás) |
-| `analyze_measurement.py` | a mérés elemzése (a go/no-go metrikák) |
-| `inspect_schema.py` | a SQLite séma felismerése (a mérés után, az oszlopnevekhez) |
+| `install_pi_os.sh` | az OS-telepítés (a kép letöltése, a SHA-256, a cloud-init, a lemez írása) |
+| `make_cloudinit.sh` / `.py` | a cloud-init `user-data` + `network-config` generálása (a netplan-formátum ellenőrzéssel) |
+| `fix_ssh_key.sh` | az SSH-kulcs elhelyezése, ha a cloud-init nem tette |
+| `install_ais_receiver.sh` | az `rtl-sdr` telepítése, a driver blacklista, az AIS-catcher build, a systemd unit |
+| `start_measurement.sh` | a mérési üzemmód (a helyi SQLite + a heti lehúzás) |
+| `ais-fetch-weekly.sh` | a heti lehúzás a NAS-ra (a Pi-ről, direkt SSH-vel) |
+| `ais-fetch.cron` | a cron-vonal (hétfő 04:17) |
+| `nas_receive_ais.sh` | **a NAS oldalon** — ez fogadja a lehúzást (`/usr/local/bin/nas-receive-ais.sh`) |
+| `analyze_measurement.py` | a go/no-go metrikák |
+| `inspect_schema.py` | a SQLite séma felismerése |
 
 ---
 
-## A kérdések, amikre szükség van
+## A heti lehúzás: Pi → NAS (a Mac nélkül)
 
-1. **Az OS már a kártyán van?** (és a hostname/SSH be van állítva?)
-2. **A Pi hálózati IP-je?** (a statikus foglalás után)
-3. **Az antenna pontos típusa?** (AIS-optimalizált 162 MHz / 3/4 hullámos / más)
-4. **Az RTL stick típusa?** (a `rtl_test -t` kimenete — a TCXO megléte)
-5. **A Pi tápellátása:** 5V/2,5A? (a régi telefon-töltő 1A-val **nem elég**)
+**A lánc a Mac megkerülésével működik** — a Mac nem mindig van
+bekapcsolva, és a NAS (`192.168.0.207`) a Pi-ról közvetlenül elérhető
+(4,5 ms RTT).
+
+```
+Pi (bud01)  ──SSH──>  NAS (Artemis, 192.168.0.207)
+ ~/.ssh/ais_pull_key      authorized_keys:
+                           command="sudo -n /usr/local/bin/nas-receive-ais.sh"
+```
+
+### A Pi oldalon
+
+```bash
+# a kulcs (ha még nincs)
+ssh-keygen -t ed25519 -N "" -C "ais-pull@bud01" -f ~/.ssh/ais_pull_key
+
+# a heti lehuzas script
+sudo install -m 755 ais-fetch-weekly.sh /usr/local/bin/ais-fetch-weekly.sh
+
+# a cron-vonal
+sudo install -m 644 ais-fetch.cron /etc/cron.d/ais-fetch
+```
+
+### A NAS oldalon (egyszer, a `hermesadmin` userrel)
+
+```bash
+# a fogado script
+sudo install -m 755 nas_receive_ais.sh /usr/local/bin/nas-receive-ais.sh
+
+# a Pi kulcs hozzaadasa a "command=" korlatozassal
+# (a kulccsal CSAK a lehuzas futhat!)
+echo 'command="sudo -n /usr/local/bin/nas-receive-ais.sh",no-agent-forwarding,no-port-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... ais-pull@bud01' \
+  | sudo tee -a ~/.ssh/authorized_keys > /dev/null
+sudo chmod 600 ~/.ssh/authorized_keys
+```
+
+### A teszt
+
+```bash
+# a Pi-ről
+/usr/local/bin/ais-fetch-weekly.sh
+# -> "a heti lemezhuzas kesz: /opt/data/martin/work/ais-data/ais-YYYYMMDD-HHMM.db"
+
+# a NAS-on (a konténerben)
+/opt/data/martin/work/ais-data/ais-YYYYMMDD-HHMM.db
+```
+
+### A gyakorlati hibák
+
+| A hiba | A megoldás |
+|---|---|
+| `attempt to write a readonly database` | a `sudo`-val készített másolat root-tulajdonú lett; a cél a `~/.ais-pull/` mappa legyen, és utána `chown` a `miklos`-ra |
+| `unable to open database` | a `/var/lib/ais` könyvtár `0750 ais:ais` — a `sqlite3`-ot `sudo`-val kell futtatni |
+| `Pseudo-terminal will not be allocated` | ez **nem hiba**, csak a távoli SSH üzenete (a stdin nem terminál) |
+
+## A megépítés utáni teendők (a mérés mellett)
+
+| # | Teendő | A terv |
+|---|---|---|
+| 1 | a **fixture-ök** a repóba (50 üzenet a mérésből) | 04 – AIS-parser |
+| 2 | a **saját dekóder** megírása (a `pyais`-szal és az `aiscat`-tel referencia) | 04 – AIS-parser |
+| 3 | a **heti lehúzás** a NAS-ra | a `start_measurement.sh` (a cron-vonalat is beírja) |
+| 4 | a **szűrő** megvásárlása, ha a FI 10 nem érkezik | az `ais-vevo-terv.md` |

@@ -5,14 +5,14 @@ javítva; a DDL futtatva és tesztelve)
 **Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
-[`01-stack-es-struktura.md`](01-stack-es-struktura.md) (stack + struktúra + scope) ·
+[`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra + scope) ·
 [`README.md`](README.md) (a terv-sorozat tagjai) ·
 [`../../docs/funkcio-leiras.md`](../../docs/funkcio-leiras.md) ·
 [`../../docs/r1-adat-terv.md`](../../docs/r1-adat-terv.md) ·
 [`../../docs/ingest-terv.md`](../../docs/ingest-terv.md) ·
 [`../../docs/ais-vevo-terv.md`](../../docs/ais-vevo-terv.md)
 
-> A dokumentum a repóban a `docs/megvalósulas/02-adatbazis-ddl.md` útvonalon van.
+> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-02-adatbazis-ddl.md` útvonalon van.
 
 **Projekt:** `vessel-tracker` — a hajókövető a Dunán és a Balatonon.
 
@@ -1146,6 +1146,26 @@ a `waterway_i18n.name` → „Duna, 1642–1635 km, Szob–Budapest szakasz".
 ```sql
 ALTER TABLE vessel ADD COLUMN last_position_ts timestamptz;
 ALTER TABLE vessel ADD COLUMN last_river_km numeric(8,3);
+
+-- **A „leggyakoribb vízi szakasz"** (a `prof` reviewer C-1 findingje
+-- után). A F-CAT-08 (M, R1) a „vízterület (Duna-szakasz /
+-- Balaton-medence)" szűrőt kéri, de a `vessel` táblában eddig nem
+-- volt szakasz-hivatkozás — a `position` pedig 90 napos TTL-lel
+-- particionált (a szűrő a szezon vége felé üres eredményt adna).
+-- Az ingest ezt a két mezőt tölti be, ugyanabban a tranzakcióban,
+-- mint a `last_position_ts`/`last_river_km`.
+ALTER TABLE vessel ADD COLUMN home_river_section_id bigint
+    REFERENCES river_section(id);
+ALTER TABLE vessel ADD COLUMN home_basin_id bigint
+    REFERENCES basin(id);
+
+-- A vízi terület szűrőjének indexe (a F-CAT-08)
+CREATE INDEX vessel_area_home_section_idx
+    ON vessel (operating_area, home_river_section_id)
+    WHERE home_river_section_id IS NOT NULL;
+CREATE INDEX vessel_area_home_basin_idx
+    ON vessel (operating_area, home_basin_id)
+    WHERE home_basin_id IS NOT NULL;
 ```
 
 **Ezeket az ingest réteg tartja karban** (nem trigger) — az ingest

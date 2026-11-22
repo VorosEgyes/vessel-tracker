@@ -118,7 +118,9 @@ Type=simple
 User=${USER_NAME}
 Group=${USER_NAME}
 WorkingDirectory=${DB_DIR}
-ExecStart=/usr/bin/AIS-catcher -E ${CONFIG_DIR}/config.json
+# A DB-kimenet a config.json "db" blokkjanak reszletese (a v0.71
+# uj schema: a CLI "-D" parametere elavult).
+ExecStart=/usr/local/bin/AIS-catcher -E ${CONFIG_DIR}/config.json
 Restart=always
 RestartSec=10
 # a hardveres hibat nem kell folytonosan ujrainditani
@@ -132,6 +134,27 @@ Nice=-5
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# a DB sema betoltes (a v0.71-ben a schema kulon SQL fajl)
+SCHEMA_SQL=""
+for c in /usr/local/share/ais-catcher/create_sqlite.sql \
+         /usr/local/share/AIS-catcher/create_sqlite.sql; do
+    [ -f "$c" ] && SCHEMA_SQL="$c" && break
+done
+if [ -z "$SCHEMA_SQL" ]; then
+    SCHEMA_SQL=$(find /tmp/AIS-catcher-build /opt -name "create_sqlite.sql" 2>/dev/null | head -1)
+fi
+if [ -n "$SCHEMA_SQL" ]; then
+    sudo mkdir -p /usr/local/share/ais-catcher
+    sudo cp "$SCHEMA_SQL" /usr/local/share/ais-catcher/
+    sudo mkdir -p /var/lib/ais
+    sudo chown -R "${USER_NAME}:${USER_NAME}" /var/lib/ais
+    sudo sqlite3 /var/lib/ais/ais.db < "$SCHEMA_SQL" \
+        && log "    a DB sema betoltve" \
+        || warn "a sema betoltes nem sikerult"
+else
+    warn "a create_sqlite.sql nem talalhato — a semat manualisan kell betolteni"
+fi
 
 systemctl daemon-reload
 log "    a unit letolthetve (a systemctl enable a PPM beallitasa UTAN)"
@@ -150,6 +173,21 @@ cat > "${CONFIG_DIR}/config.json" <<EOF
     "agc": true,
     "antenna": "SMA"
   },
+  "db": [
+    {
+      "type": "sqlite",
+      "settings": {
+        "conn_str": "/var/lib/ais/ais.db",
+        "station_id": 1,
+        "retention": 35,
+        "nmea": "on",
+        "position": "on",
+        "static": "on",
+        "state": "on",
+        "stats": "on"
+      }
+    }
+  ],
   "ais": {
     "output": true,
     "output_nmea": true,
