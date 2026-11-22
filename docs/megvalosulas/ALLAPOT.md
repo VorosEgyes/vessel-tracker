@@ -157,7 +157,7 @@ elemzőscriptek.
   `V ON MSGS ON` → **`state ON position ON static ON nmea ON`**,
   és a DB-sémát a **`create_sqlite.sql`** betöltéssel kell létrehozni
 
-### 4.1b A mérés állapota (2026-11-22 19:23)
+### 4.1b A mérés állapota (2026-11-22 21:35)
 
 **A 30 napos mérés ELINDULT** a `bud01` telephelyen:
 
@@ -179,6 +179,46 @@ magasabban +2–3 km rádióhorizont).
 **A szűrő nélkül a mérés használható**, de a jel/zaj arány gyengébb —
 a szűrő megvásárlása a mérés után dönthető el (a `docs/ais-vevo-terv.md`
 szerint a szűrő a túlterhelést és a LO-szivárgást csökkenti).
+
+### 4.1c Az első óra eredménye (2026-11-22 21:30)
+
+**A vevő helye: 47,5755205 N, 19,046013 E** (a pesti felső városrész,
+**a Dunától 2,88 km-re**).
+
+| Metrika | Érték |
+|---|---|
+| Az üzenetek | **37 457** (egy óra alatt) |
+| A csatornák | A: 12 031 + B: 7 862 — **mindkettő működik** |
+| A PPM | −6,1 átlag |
+| A jelerősség (stdout JSON) | −1,5 … −14,8 dB — **kiváló** |
+| A hajók | **199** |
+| **A magyar hajók** | **63** (21 771 üzenet), 2,8–14,7 km |
+| A nemzetközi hajók | 11 (3 343 üzenet), 2,9–13,0 km |
+| A Duna navigációs lámpái | **108 „belső" AIS-állomás** (1592–1728 km) |
+| **A FI 10 üzenetek** | **767** — **az ENI-k elérhetők!** |
+| **A földrajzi lefedettség** | **69,8%** a Duna-korridorban |
+
+**A go/no-go kritérium** (a `docs/ais-vevo-terv.md` 5.3): a lefedettség
+≥ 50% → **a saját vevőhálózat (F1, 3 site) azonnal építhető**. A mérés
+**69,8%-ot** ad — **a küszöbön felül**.
+
+**A látott hajók között:** `GONDOLA` (ENI 8601836 — az egyetlen, aminek
+ENI-je van), `AQUINCUM`, `ATTILA`, `BAKONY`, `BOGDANY`, `BUDAPEST`,
+`CITADELLA`, `DUNA` (98×24 m), `ESZTERGOM`, `EUROPA`, `GROF SZECHENYI`,
+`ISTER`, `LAGYMANYOS`, `MILLENNIUM 2`, `PRIMUS`, `RAKOCZI`, `SIRONA`,
+`VISEGRAD`, `WIKING`, `ZIN URU` — és a nemzetközi forgalom:
+`DOUCE FRANCE` (francia), `KEPLER` + `RUBIKON23` (tankhajók),
+`STADT WIEN` (osztrák), `VIKING AEGIR`/`VIKING BRAGI`/
+`TRAVELMARVEL VEGA` (horvát-osztrák), `SLUIZER` (holland),
+`HORISHNI PLAVNI` (ukrán), `RIVER DIVA` (luxemburgi).
+
+**A tudatos döntés (2026-11-22): a jelerősség kimarad a DB-ből.**
+A v0.71-es AIS-catcher a `-M TD` flaggal számolja a jelerősséget (a
+stdout JSON-ban megvan), **de a DB-be nem írja** — a `DatabaseOutput`
+a `TAG.level`-t a JSON-stream útvonalon nem kapja meg. A mérés szempontjából
+ez nem kritikus: a go/no-go a lefedettségen alapul, a szűrő kiválasztása
+a `msg/hajó` arányból dönt. A részletek a
+`scripts/ais-receiver/PI-TELEPITES.md`-ben.
 
 **Az elkészült telepítő- és mérőscriptek** (`scripts/ais-receiver/`):
 

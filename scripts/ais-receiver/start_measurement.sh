@@ -158,15 +158,24 @@ WorkingDirectory=${DB_DIR}
 # program hibával leall, ha ezeket kapja:
 #   "DBMS: this setting was removed with the new schema, use ... instead"
 #
-# A "-o 0" (quiet) — a naplo nem irja ki minden uzenetet (a
-# nyers NMEA a DB-be megy).
-# A "-M T" a fogadasi timestampet teszi a JSON-ba (a v0.71 a "-M"
-# opcio EGY karakteres argumentumot var: T vagy D).
 # A DB-kimenet a CLI "-D" parametereivel (a v0.71-es UJ nevek:
 # a regi "V ON MSGS ON" helyett "state ON position ON static ON
 # nmea ON" — a program elall a regi nevekkel).
+#
+# A "-o 0" (quiet) — a naplo nem irja ki minden uzenetet (a nyers
+# NMEA a DB-be megy).
+# A "-M TD" a fogadasi timestampet (T) ES a decoder-metaadatot (D:
+# signalpower, ppm) kapcsolja be — a v0.71 a "-M" opcio EGY
+# argumentumban varja a ket betut ("-M TD"), nem ket kulonben.
+#
+# MEGJEGYZES (2026-11-22): a v0.71-ben a DBMS a TAG.level-t a
+# JSON-stream utvonalon nem kapja meg, ezert a "signal_level" es a
+# "signalpower" oszlop 0 marad a DB-ben (a jelerosseg a stdout JSON-
+# ban van, a "-o 3" mellett). A meres szempontjabol ez nem kritikus:
+# a szuro kivalasztasa a 30 napos adathalmazbol, a msg/hajo aranybol
+# dontendő el.
 ExecStart=/usr/local/bin/AIS-catcher -d:0 -s 1536K -a 192K -p ${PPM} \
-  -o 0 -M T \
+  -o 0 -M TD \
   -D sqlite:${DB_FILE} STATION_ID 1 RETENTION 35 \
   NMEA ON POSITION ON STATIC ON STATE ON STATS ON
 

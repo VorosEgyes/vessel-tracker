@@ -183,10 +183,39 @@ sudo bash ~/ais-scripts/start_measurement.sh
 | `ais-fetch-weekly.sh` | a heti lehúzás a NAS-ra (a Pi-ről, direkt SSH-vel) |
 | `ais-fetch.cron` | a cron-vonal (hétfő 04:17) |
 | `nas_receive_ais.sh` | **a NAS oldalon** — ez fogadja a lehúzást (`/usr/local/bin/nas-receive-ais.sh`) |
+| `report_range.py` | a vevő valódi helyzetéből számolt hatótávolság és hajólista |
+| `report_signals.sh` | a fogott jelek statisztikája (üzenettípus, csatorna, PPM) |
+| `report_vessels2.sh` | a látott hajók, a Duna kilométerjelölések és a FI 10 üzenetek |
 | `analyze_measurement.py` | a go/no-go metrikák |
 | `inspect_schema.py` | a SQLite séma felismerése |
 
 ---
+
+## A jelerősség (a `signalpower`) — a tudatos döntés
+
+**A v0.71-es AIS-catcher a DB-be nem írja a jelerősséget.**
+
+A `-M TD` flag (a dekóder-meta) **működik** — a stdout JSON-ban ott van a
+`signalpower` (−1,5 … −14,8 dB a budapesti vevőnél). **De az
+`ais_state.signalpower` és az `ais_message.signal_level` oszlop 0 marad**:
+a `DatabaseOutput` a `TAG.level`-t a JSON-stream útvonalon nem kapja meg
+(`Source/DBMS/DatabaseOutput.cpp:691` a `tag`-ből olvas, és az a `tag`
+a DBMS-nél nem tartalmazza az értéket).
+
+**A döntés (2026-11-22, Miklós): a jelerősség kimarad a DB-ből.**
+
+**A mérés szempontjából ez nem kritikus:**
+- a go/no-go kritérium a **lefedettség** (nem a jelerősség) — és azt a
+  `analyze_measurement.py` a földrajzi korridorral becsüli;
+- a **162 MHz SAW szűrő** kiválasztásához a 30 napos adathalmaz
+  `msg/hajó` aránya és a hibás dekódolások aránya kell — nem a dB;
+- a hibás dekódolások aránya **egyáltalán nem mérhető a DB-ből** (a
+  v0.71 csak a sikeresen dekódolt üzeneteket tárolja) — ezt az elemző
+  „nem mérhető"-ként jelzi, nem hamis 0%-kal.
+
+**Ha mégis kellene:** a `-o 3` (a stdout teljes) mellett egy külön
+processz parse-olná a JSON sort — de ez az SD-kártyát és a WAL-t
+terheli, és nem éri meg.
 
 ## A heti lehúzás: Pi → NAS (a Mac nélkül)
 
