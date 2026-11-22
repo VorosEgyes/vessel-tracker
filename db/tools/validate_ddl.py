@@ -25,7 +25,11 @@ HERE = pathlib.Path(__file__).parent
 # hiba volt**: a script a live fajlt olvasta, nem azt, amit a
 # reviewer auditalt. Most a parameter a default, es a --plan
 # kapcsoloval felulirhato.
-DEFAULT_PLAN = pathlib.Path("/opt/data/martin/work/duna-plan/megvalosulas-02-adatbazis-ddl.md")
+# A repo-relative default: a terv a docs/megvalosulas/ alatt van.
+# (A kesztyeben a script a db/tools/ alatt fut, a repo-gyokertol
+# szamitva — igy a script a helyerol független.)
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+DEFAULT_PLAN = _REPO_ROOT / "docs" / "megvalosulas" / "megvalosulas-02-adatbazis-ddl.md"
 PLAN = DEFAULT_PLAN
 PGDATA = HERE / "pgdata"
 PSQL = HERE / ".venv312/lib/python3.12/site-packages/pgserver/pginstall/bin/psql"
@@ -157,6 +161,21 @@ def main() -> int:
     print(f"--- a tervbol kinyert DDL ---")
     print(f"  tabla: {n_tables} | index: {n_indexes} | FK: {n_fks} | CHECK: {n_checks}")
     print(f"  GIS preprocesszor: {'igen (text)' if args.no_gis else 'nem'}")
+
+    # --- a postgres szerver inditasa ---
+    # A script korabban egy KULSERVEREN futott, amit nem inditott el
+    # -> a "connection to server ... failed" hiba. Most a pgserver
+    # maga inditja el a klust (a --keep a smoke teszt miatt kell,
+    # kulonben a schema utan eldobjuk).
+    if not PGDATA.exists():
+        PGDATA.mkdir(parents=True, exist_ok=True)
+    try:
+        import pgserver
+        srv = pgserver.get_server(str(PGDATA))
+        print(f"--- a postgres elindult: {PGDATA} ---")
+    except Exception as exc:  # pragma: no cover
+        print("HIBA: a postgres inditasa nem sikerult:", exc)
+        return 1
 
     # reset
     reset = "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO postgres;"
