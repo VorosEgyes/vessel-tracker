@@ -1,46 +1,98 @@
 # Adatút: a Pi-től az adatbázisig
 
-**Verzió:** 1.0 (2026-11-14)
+**Verzió:** 1.1 (2026-11-23 — **a `bud01` mérés alapján átírva**; a
+v1.0 az MQTT-alapú architektúrát írta le, de a mérésben a Pi **helyi
+SQLite-ot ír** és **hetente húz** — az MQTT-kimenet nincs bekapcsolva)
 **Kapcsolódó dokumentumok:** [`pi-eloallitas.md`](pi-eloallitas.md) (a Pi előkészítése) · [`ais-vevo-terv.md`](ais-vevo-terv.md) (a vevőhálózat) · [`r1-adat-terv.md`](r1-adat-terv.md) (az AIS-adat és az ENI) · [`../README.md`](../README.md) (adatbázis terv, 6. fejezet: ingest)
 
 ---
 
 ## 0. A döntés egy mondatban
 
-> **A Pi nem az adatbázisba ír.** Az AIS-catcher a beépített MQTT-kimenetével egy TLS-en futó brokernek publikál; a központi ingest szolgáltatás onnan olvassa, és az írja a termékadatbázisba. A Pi közben **helyi SQLite-ot tart** – ez a helyi archívum és egyben a kiesés-biztosítás.
+> **A Pi nem az adatbázisba ír.** A vevő **helyben, SQLite-ba ír**, és
+> **hetente** (a cron, hétfő 04:17) a nyers SQLite-fájlt a NAS-ra húzza;
+> a **központi feldolgozás** onnan olvassa, és írja a termékadatbázisba.
+> A Pi soha nem kap megnyitási jogot az adatbázisra.
 
-Ez a terv a gyakorlatban már megoldott elemekre épül: **az AIS-catchernek beépített MQTT-kimenete (`-Q`) és beépített adatbázis-kimenete (`-D`, PostgreSQL/SQLite/CSV) van**, tehát a Pi oldalán nem kell saját kódot írni.
+> **A v1.0 ezt másképp írta:** az AIS-catcher MQTT-kimenetét (`-Q`)
+> egy brokernek publikálta, és a központi ingest onnan olvasta. **A
+> mérésben ez nincs bekapcsolva** — a `bud01` vevő **csak** a
+> `-D sqlite:` kimenetet használja (a `ais-receiver.service` unitja),
+> és a nyers adat a **heti lehúzással** jut a NAS-ra.
+>
+> **Miért változott meg:**
+> 1. **a mérési időszakban a heti lehúzás a praktikus út** — a 30 napos
+>    mérés adathalmaza (~27 millió üzenet) nem Live MQTT-forgalomként
+>    érkezik, hanem **fájlokban**;
+> 2. **a Pi kiesése nem veszti el az adatot** — a heti lehúzás a NAS-ra
+>    kerül, és a feldolgozás **újrajátszható** (a dedup miatt
+>    idempotens — a `04` – parser-terv §6.1);
+> 3. **a Mac kiesése nem számít** — a láncban nincs Mac (a `Pi → NAS`
+>    közvetlen SSH, a `command=` korlátozással).
+>
+> **Az MQTT-út R2-ben jöhet** (az élő pozíció-streamhez, a `03` – API-terv
+> R2-es része) — **de R1-ben a heti lehúzás a valós út**, és ezt a
+> tervnek is dokumentálnia kell.
+
+Ez a terv a gyakorlatban már megoldott elemekre épül: **az AIS-catchernek
+beépített MQTT-kimenete (`-Q`) és beépített adatbázis-kimenete (`-D`,
+PostgreSQL/SQLite/CSV) van**, tehát a Pi oldalán nem kell saját kódot
+írni — **a `-D sqlite:` kimenet a mérésben bizonyítottan működik**
+(a v0.71 sémájával: `ais_message`, `ais_position`, `ais_static`,
+`ais_state`, `ais_stats_hourly`).
 
 ---
 
 ## 1. A teljes lánc
 
 ```
-        ┌─────────────────── A PI (3. emelet) ───────────────────┐
+        ┌─────────────────── A PI (bud01) ───────────────────────┐
         │                                                        │
-  RTL2832U ──► AIS-catcher                                      │
-  (162 MHz)      ├──► -Q mqtts://…  ──► [MQTT broker] ──┐       │
-                 │    (élő út)                          │       │
-                 ├──► -D sqlite:/var/lib/ais/ais.db     │       │
-                 │    (helyi archívum, 14 nap)          │       │
-                 └──► -N 8100 (helyi web-térkép)        │       │
-        └────────────────────────────────────────────────┼───────┘
-                                                         │ TLS 8883
-                                                         ▼
+  RTL2832U ──► AIS-catcher v0.71                               │
+  (162 MHz)      ├──► -D sqlite:/var/lib/ais/ais.db             │
+                 │    (a nyers adat, RETENTION 35 nap)           │
+                 │    + -N 8100 (a helyi web-térkép)             │
+                 │                                              │
+                 │  heti lehúzás (cron, hétfő 04:17)           │
+                 └──► scp ──────────────────────────────┐        │
+        └──────────────────────────────────────────────┼────────┘
+                                                       │ SSH
+                                                       ▼
+        ┌─────────────────── A NAS (Artemis) ────────────────────┐
+        │  /opt/data/martin/work/ais-data/ais-YYYYMMDD-HHMM.db  │
+        └───────────────────────────────────────────────────────┘
+                                                       │
+                                                       │ (a feldolgozás
+                                                       │  olvassa a *.db
+                                                       │  fájlokat)
+                                                       ▼
         ┌─────────────────── A KÖZPONT (VPS) ────────────────────┐
-        │  Mosquitto (broker)                                    │
-        │    └─► ingest szolgáltatás (MQTT subscriber)           │
+        │  ingest szolgáltatás (a saját dekóder)                 │
         │          ├─► ais_message_raw   (havi partíció, 14 nap) │
-        │          ├─► position          (havi partíció)         │
+        │          ├─► position          (havi partíció, 90 nap) │
         │          ├─► position_archive / position_hourly       │
         │          ├─► vесel + vessel_identifier (ENI!)          │
-        │          └─► Parquet → objektátár (nyers archívum)     │
+        │          └─► a nyers *.db fájlok megmaradnak           │
         │                                                       │
-        │  Postgres + PostGIS · MinIO/S3 · Caddy (TLS)          │
+        │  Postgres + PostGIS · Caddy (TLS)                     │
         └───────────────────────────────────────────────────────┘
 ```
 
-**A szabály:** a Pi kizárólag **publikál**; a központi ingest **ír**. A Pi soha nem kap megnyitási jogot az adatbázisra.
+**A szabály:** a Pi **helyben ír** (SQLite) és **hetente húz**; a
+központi feldolgozás **ír** a termékadatbázisba. A Pi soha nem kap
+megnyitási jogot az adatbázisra.
+
+**A `VIRTUAL` pontok és a navigációs lámpák** (a mérés valós adata):
+a `992438xxx` MMSI-k a **Duna navigációs infrastruktúrájának**
+állomásai — **nem hajók** → a feldolgozás a fantom-szűrőben zárja ki
+őket (a `04` – parser-terv §4.7.1).
+
+> **Az MQTT-út R2-ben jöhet** (az élő pozíció-stream) → a diagram
+> a `-Q mqtts://…` sort R2-re hagyja.
+
+**A `Parquet → objektátár` a v1.0-ban a nyers archívumot jelentette —
+a mérésben a nyers archívum a SQLite-fájl** (a heti lehúzás a
+`*.db` fájlokat másolja a NAS-ra, ~4 MB/óra → ~600 MB/hét).
 
 ---
 
@@ -75,23 +127,27 @@ Ez a terv a gyakorlatban már megoldott elemekre épül: **az AIS-catchernek be�
 
 ### 3.2 A konkrét indítás (R1, budapesti site)
 
-```bash
-/usr/bin/AIS-catcher \
-  -d:0 -s 1536K -a 192K -p <ppm> \
-  -gr tuner auto rtlagc on \
-  -Q mqtts://site_bud01:<jelszó>@ingest.example.hu:8883 \
-       client_id bud01 \
-       topic 'duna/ais/bud01/msg' \
-       qos 1 \
-       msgformat JSON_FULL \
-       keep_alive on timeout 60 \
+# A MÉRÉSBEN MŰKÖDŐ PARANCS (a bud01, a 2026-11-22-i mérés)
+#
+# **A v1.0-s parancssor ELAVULT FLAG-eket használt** — a v0.71-ben
+# a `-gr tuner auto rtlagc on` és a `position on static on nmea on`
+# SZINTAKTIKAI hibát ad ("syntax error on command line"), és a
+# `retention 14` a helyén `retention 35` kell (a 30 napos mérés +
+# 5 nap tartalék).
+/usr/local/bin/AIS-catcher \
+  -d:0 -s 1536K -a 192K -p 8 \
+  -o 0 -M TD \
   -D sqlite:/var/lib/ais/ais.db \
-       station_id 1 \
-       position on static on nmea on \
-       unique on position_interval 60 \
-       retention 14 \
+       STATION_ID 1 RETENTION 35 \
+       NMEA ON POSITION ON STATIC ON STATE ON STATS ON \
   -N 8100
 ```
+
+> **A `-gr` flag NEM MŰKÖDIK a v0.71-ben** — a syntax error elbukik
+> rajta. **A gain automatikus**, nem kell megadni. Az `-M TD` a
+> fogadási timestampet (T) és a dekóder-metaadatot (D) kapcsolja be
+> — **a v0.71 a két betűt EGY argumentumban várja** (`-M TD`, nem
+> `-M T D`).
 
 **A flag-ek magyarázata:**
 
@@ -100,14 +156,18 @@ Ez a terv a gyakorlatban már megoldott elemekre épül: **az AIS-catchernek be�
 | `-d:0` | a 0. indexű SDR eszköz (`AIS-catcher -l` kilistázza) |
 | `-s 1536K` | mintarate (RTL-SDR alapértéke) |
 | `-a 192K` | tuner-sávszélesség |
-| `-p <ppm>` | **frekvenciakorrekció** – a kalibrációból származó érték |
-| `-gr tuner auto rtlagc on` | RTL-SDR tuner-beállítások (AGC be, erősítés automatikus) |
-| `-Q … qos 1` | MQTT QoS 1 – a broker nyugtáz, a hálózat hibájánál újraküld |
-| `-Q … msgformat JSON_FULL` | teljes dekódolás a payloadban (a `nmea` tömb is benne van) |
-| `-D … station_id 1` | minden sorra ráíró site-azonosító – ez köti össze az `ais_receiver_site`-tal |
-| `-D … unique on` | eldobja a 3 másodpercen belüli ismétlődéseket |
-| `-D … position_interval 60` | hajónként legfeljebb 1 pozíció percenként (≈95%-os térfogatcsökkenés) |
-| `-D … retention 14` | 14 napos helyi retention, napi automatikus tisztítással |
+| `-p 8` | **frekvenciakorrekció** – a kalibrációból (a `rtl_test -p`, 25 perc) |
+| `-o 0` | **quiet** – a napló nem írja ki minden üzenetet (a nyers NMEA a DB-be megy) |
+| `-M TD` | a fogadási timestamp (T) + a dekóder-meta (D: signalpower, ppm) a JSON-ba |
+| `-D … STATION_ID 1` | minden sorra ráíró site-azonosító – ez köti össze az `ais_receiver_site`-tal |
+| `-D … RETENTION 35` | **35 napos** helyi retention (a 30 napos mérés + 5 nap tartalék) |
+| `-D … NMEA/POSITION/STATIC/STATE/STATS ON` | a v0.71-es **új** nevek — a régi `position on static on nmea on` **elavult** |
+| `-N 8100` | a helyi web-térkép |
+
+> **A `unique on` és a `position_interval 60` FLAG-EK ELHIVTAK** a
+> v0.71-ben → **a dedupot a feldolgozás végzi** (a `msg_hash` alapján,
+> a `04` – parser-terv §6.1) → **a nyers adat teljes** (a mérésben
+> 37 494 üzenet/óra, ebből 199 hajó).
 
 > **A topikus sablonok:** az AIS-catcher a témában placeholder-eket is támogat (`%mmsi%`, `%type%`, `%channel%`, `%station%`, `%rxtimeux%`). **Ne ezeket használd** a terméküzeneteknél – egy fix `duna/ais/<site>/msg` témát használj, hogy az ACL egyszerű legyen, és a site-ot a broker hitelesített felhasználónevéből lehessen megállapítani. A per-hajó témák a külső fogyasztóknak (térkép, értesítés) hasznosak.
 
@@ -207,35 +267,96 @@ A `station_id` mező egyébként is a `data_source`-hoz köti a site-ot (az `ais
 
 ## 6. Kiesés, újrajátszás, dedup
 
-| Helyzet | Mi történik |
+> **A mérési időszakban NINCS MQTT** (a heti lehúzás a út) → **a
+> broker-sor nem létezik**, és a kiesés kezelése **más**.
+
+| Helyzet | Mi történik (a **heti lehúzásos** úton) |
 |---|---|
-| **Internetkiesés 1–2 óra** | a broker QoS 1 + perzisztens session miatt sorba teszi; a Pi újracsatlakozik, a sor kifogy |
-| **Hosszabb kiesés** | a broker sorra kerül; a Pi közben a **helyi SQLite**-ba ír → a kiesés nem adatvesztés, csak késés |
-| **A broker leáll** | a `persistence true` miatt az üzenetek a diszken vannak, újraindítás után kiszolgálva |
-| **Későn érkező adat** | a `received_at` a **valódi** fogadási idő marad (a Pi ideje), az `ingested_at` a szerver ideje → a késés látható |
-| **Duplikátum** | dedup kulcs `(vessel_id, ts)` + tartalom-hash; az újrajátszott feed nem duplikál |
+| **A Pi internet-kiesése** | a vevő a **helyi SQLite-ba ír** (nem a brokernek) → **nincs adatvesztés**, csak a lehúzás késődik |
+| **A Pi leáll (táp/SD/Wi-Fi)** | a `ais-receiver.service` nem indul újra → **a nyers adat a leállás pillanatáig megvan** a DB-ben; a heti lehúzás az utolsó mentett állapotot viszi el → **a kiesés NEM néma** (a fájl dátuma régebbi) |
+| **A NAS elérhetetlen** | az `scp` nem sikerül → **a fájl a Pi-n marad** (`~/.ais-pull/`) → a következő lehúzás újrapróbálja (a `command=` korlátozás miatt más nem futhat) |
+| **A lehúzás kimarad egy héten** | a `RETENTION 35` nap a mérés + 5 nap tartalék → **a 2. héten még megvan**, a 3.-on már **elveszik** → **riasztandó** |
+| **Későn érkező adat** | a `received_at` a **valódi** fogadási idő marad (a Pi ideje, a `ais_message.received_at`), az `ingested_at` a feldolgozás ideje → a késés látható |
+| **Duplikátum** | a dedup kulcs a `msg_hash` (`raw_nmea` + `received_at` + `source_id`) → **a visszajátszott fájl nem duplikál** → **a backfill idempotens** |
 | **A vevő kiesése** | a `last_seen_at` nem frissül → riasztás. **A kiesés soha nem néma adatveszteség.** |
 
 **A dedup kulcs és az UPSERT** a README 6.2 fejezetében már rögzítve van (`ON CONFLICT (vessel_id, ts) DO UPDATE`).
+
+> **A dedup korlátja** (a `04` – parser-terv prof L-1 findingje): a
+> `msg_hash` a `received_at` **millisecondszresolutionját** használja →
+> **a hálózati retry** (a vevő újraküldi az üzenetet **más**
+> időbélyeggel) **nem szűrődik** → a második védvonal a `position`
+> upsert (a `(vessel_id, ts)`).
+
+> **A MQTT-út (R2)** a fenti táblázat első három sorát kezeli helyesen
+> (a broker QoS 1 + a perzisztens session) → **R2-ben a táblázat
+> mindkét ágát használjuk**.
 
 ---
 
 ## 7. Terhelés és sávszélesség
 
-| Mutató | Becslés (budapesti vevő) |
-|---|---|
-| Üzenet | **~150–350 üzenet/mperc** átlagban (a teljes flotta ~2 millió üzenet/nap, a budapesti szakasz ennek 10–25%-a); csúcsidőben a duplája |
-| Payload (JSON_FULL) | ~500–800 B |
-| **Sávszélesség (átlag)** | **~15–35 kbit/s** – a házi internet bármilyen formájában elviseli |
-| Sávszélesség (csúcs) | ~100 kbit/s |
-| Napi adat | ~175–420 MB MQTT-forgalom |
-| Broker terhelés | egy vCPU-s VPS-en is kisebb 1% |
-| Központi ingest írás | ~0,3 millió pozíció/nap a `position`-be (havi partíció, BRIN index) |
-| Pi írás a kártyára | **nulla** – minden a helyi SQLite-ba megy, az is USB-SSD-re |
+> **A `04` – parser-terv prof C-6 és a preshaz P-C-3 findingje után:**
+> a v1.0 **a README becslését** használta (2 millió üzenet/nap). **A
+> mérés valós számai:**
 
-> **A számítás forrása:** az adatbázis-terv 5.1 fejezete ~700 napi aktív hajót és ~30 s-os üzenetközt intervalumot feltételez, ami a teljes Dunán ~2,0 millió üzenet/nap. Egyetlen budapesti vevő ennek 10–25%-át látja.
+| Mutató | A v1.0 becslése | **A mérés (2026-11-22)** |
+|---|---|---|
+| Üzenet/nap | ~2 000 000 (a teljes flotta) | **~900 000** (a budapesti vevő) |
+| Üzenet/perc (átlag) | ~150–350 | **~10,4** (átlag), **~100–300** (csúcs) |
+| A 30 napos adat | ~60 millió | **~27 millió** |
+| A nyers SQLite mérete | ? | **~4 MB/óra** → **~3,4 GB** (35 nap) |
+| A heti lehúzás fájl mérete | ? | **~600 MB** |
+| A NAS éves terhelése | ? | **~30 GB** (a fájlokat **törölni kell**) |
+| Központi `position` írás | ~0,3 millió pozíció/nap | **~900 000 pozíció/nap** (a `position` havonta partícionált, 90 napos TTL → ~81 millió sor) |
+| Pi írás a kártyára | "nulla" | **~4 MB/óra** (a 32 GB-os SD: 4,1 GB a DB-vel = 15%) |
+
+> **A mérési tények:**
+> - a **37 494 üzenet/óra** a 199 hajóból → **188 üzenet hajónként**;
+> - a **hétközapi MMSI-k száma** (a `ais-vevo-terv.md` 5.2 metrikája:
+>   **≥ 120**) → **a mérésben 199** → **teljesül**;
+> - a **lefedettség** (a Duna-korridorban lévő pozíciók aránya, a
+>   földrajzi becsléssel) → **69,8%** → **a go/no-go küszöbön (50%)**.
+
+> **A sávszélesség nem a szűk keresztmetszet.** A szűk keresztmetszet a
+> **központi Postgres írási sebessége** és a **partíciózás** – ezt az
+> R1 adat-terv és az adatbázis-terv 5. fejezete kezeli.
 >
-> **A sávszélesség nem a szűk keresztmetszet.** A szűk keresztmetszet a **központi Postgres írási sebessége** és a **partíciózás** – ezt az R1 adat-terv és az adatbázis-terv 5. fejezete kezeli. A **valós** üzenetszámot a 30 napos mérés adja meg; addig ez becslés.
+> **Az MQTT-forgalom sávszélessége R1-ben nem érvényes** — a mérés
+> időszakában **nincs MQTT-kimenet** (a heti lehúzás a fájlokat mozgatja,
+> nem a hálózat). A sávszélesség-adatok **R2-re** érvényesek (az élő
+> pozíció-stream).
+
+---
+
+## 6b. A heti lehúzás (a mérési időszak tényleges útja)
+
+> **Ez a fejezet a v1.0-ból hiányzott** — a `preshaz` P-C-5 findingje.
+
+**A lépés (a Pi-n, a `scripts/ais-receiver/ais-fetch-weekly.sh`):**
+```
+1. sqlite3 /var/lib/ais/ais.db ".backup '/home/miklos/.ais-pull/ais-<STAMP>.db'"
+2. scp -i ~/.ssh/ais_pull_key <NAS_USER>@<NAS_HOST>:<NAS_PATH>/ais-<STAMP>.db
+```
+**a kulcs** (`~/.ssh/ais_pull_key`) **a NAS-on** a `command=` korlátozással
+van regisztrálva → **a Pi a NAS-on kizárólag a lehúzást futtathatja**
+(más parancsot a szerver elutasít).
+
+**A NAS-on** a fogadó script (`/usr/local/bin/nas-receive-ais.sh`) a
+bind mounton keresztül a martin munkamappájába ír:
+`/opt/data/martin/work/ais-data/ais-<STAMP>.db`.
+
+**A cron:** `17 4 * * 1 miklos` (hétfő 04:17) — a `miklos` userrel,
+mert a lehúzási kulcs a saját home-jában van.
+
+**A feldolgozás** a `*.db` fájlokat olvassa (a `04` – parser-terv
+§8.0) → **a dedup a `msg_hash` alapján → a backfill idempotens** → a
+félig feldolgozott fájl újrafuttatható.
+
+> **A `RETENTION 35` nap a mérés + 5 nap tartalék** — ha a heti
+> lehúzás kimarad, **a nyers adat elvész** (a preshaz P-L-2 findingje)
+> → ezért a lehúzás sikeressége **riasztandó** (a NAS-on a fájlok
+> dátumai).
 
 ---
 
@@ -244,7 +365,7 @@ A `station_id` mező egyébként is a `data_source`-hoz köti a site-ot (az `ais
 | Fázis | Időtartam | Mi fut | Szerver kell? |
 |---|---|---|---|
 | **F0 – próbaüzem** | 30 nap | **csak** `-D sqlite:` a Pi-n + `-N 8100` helyi térkép | **nem** |
-| **F1 – első éles átvétel** | R1 | MQTT → központi ingest → Postgres + PostGIS | igen |
+| **F1 – első éles átvétel** | R1 | **a heti lehúzás** (a NAS-ra) → központi feldolgozás → Postgres + PostGIS | igen |
 | **F2 – bővítés** | R1–R2 | további site-ok, S-AIS feed, aggregációk | igen |
 
 **A F0 fázis előnye:** a go/no-go döntés **nulla infrastruktúra-kockázattal** hozható meg. Nem kell VPS-t, domaint, TLS-t, adatbázist állítani, mielőtt tudjuk, hogy a vevő egyáltalán működik-e. A 30 nap után a helyi SQLite fájlt bármikor visszafejthetjük az ingestbe.
@@ -259,16 +380,16 @@ Ez a lista a mérési fázis végén futtatható, és **a projekt legkockázatos
 
 | # | Ellenőrzés | Miért kritikus |
 |---|---|---|
-| 1 | Az `nmea` tömb megvan-e a payloadban? | a központi újradekódolás ennek az alapján működik |
-| 2 | **Megvan-e az Inland FI 10 üzenet a forgalomban?** | ha nincs, az ENI-terv összeomlik |
-| 3 | **Van-e benne `fairway hectometre` mező?** | **a `river_km` innen jön** – ha hiányzik, vissza kell térni a geometriai km-illesztésre |
-| 4 | A `vin` mező (ENI) a várt formátumban van-e? | `vessel.eni` a kulcs a katalógusban |
-| 5 | A `draught` a RNW-re értendő-e? | a `draught_reference` mező indoka |
-| 6 | Az `eri ship type` kódok a `vessel_type` típusokra fordíthatók-e? | a hajótípus-katalógus |
-| 7 | Mennyi a `repeat` (ismétlődő üzenet) arány? | a dedup és a tárolási becslés pontossága |
-| 8 | A `rxtime` pontossága (a Pi órája) | NTP-hiba → hibás pozícióidőbélyeg |
-| 9 | Üzenetszám csúcsidőben | az ingest terhelésének tervezése |
-| 10 | Van-e „ghost" hajó (a folyón kívüli pozíció)? | a pozíció-validáció szabályainak finomítása |
+| 1 | Az `nmea` tömb megvan-e a payloadban? | **IGEN** — a v0.71 a `nmea`-t **tömbként** adja (a `04` – parser-terv prof H-1) |
+| 2 | **Megvan-e az Inland FI 10 üzenet a forgalomban?** | **IGEN — 767 üzenet** (a 8-as típus, a mérés első órájában) → **az ENI-terv nem omlik el** |
+| 3 | **Van-e benne `fairway hectometre` mező?** | **NEM** — a magyar szakaszon a pozíciók fairway-mezője **üres** → **a `river_km` a navigációs lámpák neveiből vagy geo-illesztésből jön** (a `04` – parser-terv C-5) |
+| 4 | A `vin` mező (ENI) a várt formátumban van-e? | **egy hajónál jött le ENI** (a `GONDOLA`, 8601836) → **a `vessel.eni` a kulcs, de ritka** (a mérésben 0,5%) |
+| 5 | A `draught` a RNW-re értendő-e? | **igen** — a magyar hajóknál értelmes (a Balatonnál nem) |
+| 6 | Az `eri ship type` kódok a `vessel_type` típusokra fordíthatók-e? | **IGEN — a 02-es v1.4 seedje 89 típust tartalmaz** (a mérés 14 kódja mind benne van: 8444/8443/8440/8000/60/69/80/8450/51/0/90/8430/8460/8220) |
+| 7 | Mennyi a `repeat` (ismétlődő üzenet) arány? | a mérésben a 15-ös típus (interrogálás) 60 üzenet (0,2%); a `repeat` a pozícióknál gyakori → **a dedup a feldolgozás dolga** (a `msg_hash`) |
+| 8 | A `rxtime` pontossága (a Pi órája) | **a PPM kalibráció a 7–8 értékre állította be** (a `rtl_test -p`, 25 perc) |
+| 9 | Üzenetszám csúcsidőben | **átlag ~10,4/mp, csúcs ~100–300/mp** (a reggeli átkelés) |
+| 10 | Van-e „ghost" hajó (a folyón kívüli pozíció)? | **IGEN — a navigációs lámpák (106) és a bázisállomások (3) nem hajók** → a fantom-szűrő kizárja őket (a `04` – parser-terv §4.7.1) | a pozíció-validáció szabályainak finomítása |
 
 > **A 3. pont a legfontosabb.** A teljes adatbázis-terv azon a feltételezésen áll, hogy a folyó-km **közvetlenül az AIS-ből jön**. Ez a feltételezés a 30 napos mérés végén **empirikusan igazolódik vagy megdől** – és ha megdől, az `r1-adat-terv.md` 1.5 fejezetét és az adatbázis-terv 5.2 fejezetét módosítani kell. **Ezért a mérés a legfontosabb következő lépés, nem az infrastruktúra.**
 
