@@ -15,7 +15,7 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 | 06 | [szerkesztői felület](megvalosulas-06-szerkesztoi-felulet.md) | A session-alapú hitelesítés, a `/api/admin/v1/` végpontok, a mezőnkénti eredet szerkesztése, a konfliktuskezelés (a F-ADM-09), az üzemeltetői önbevallás (a F-ADM-08), a tömeges import (a F-ADM-07), a fordítási hiánylista | **v0.1 — draft** |
 | 07 | [CI/CD és környezetek](megvalosulas-07-ci-cd-es-kornyezetek.md) | A pipeline (a `ci.yml`/`build.yml`/a deploy-workflow-ok), a build (a `justfile`, a Docker image-ek), a környezet-változók, a migrációk, a deploy és a rollback, a titkok, a smoke teszt | **v0.1 — draft** (a `01` – stack-terv §4.2/§6.1 alapján; a `pg_cron` custom image, a heti lehúzás a `command=` korlátozással) |
 | 08 | [teszt-stratégia](megvalosulas-08-teszt-strategia.md) | A teszt-piramis (7 szint), a 20 NFR → a mérőszám, a szintenkénti tesztek, a mérésből jövő fixture-ök, a kilépési feltételek | **v0.1 — draft** (a mérési adatból épülve: a `docs/measurement_2026-11-22.md`) |
-| 09 | üzemeltetés és observability | A mentés, a monitor, a naplózás | **nincs meg** (a 07 – CI/CD terv a deploy utáni smoke tesztet előírja) |
+| 09 | [üzemeltetés és observability](megvalosulas-09-uzemeltetés-es-observability.md) | A mentés és a visszaállítás (a PITR, a heti restore-drill), a monitorozás, a **watchdog** (a riasztás), a naplózás, a vevőhálózat üzemeltetése, az incidenskezelés | **v0.1 — draft** (a `02` – DDL-terv §13.2 szerint a watchdog itt készül) |
 
 ## Olvasási sorrend
 
@@ -89,3 +89,22 @@ oszlopokkal és a teljes referenciaadat-seeddel):**
 
 **Mind a 96 finding be van írva** — a `02` **v1.3** és a `03` **v0.3**
 újra validálva.
+
+---
+
+## A sorozat állapota (2026-11-23)
+
+| A terv | A verzió | A review |
+|---|---|---|
+| 01 – stack és struktúra | v1.3 | ✅ 2 kör, 17 finding |
+| 02 – adatbázis-DDL | **v1.5** | ✅ 113 finding, 17/17 validálva |
+| 03 – API-specifikáció | **v0.3** | ✅ 96 finding |
+| 04 – AIS-parser | **v1.0** | ✅ 64 finding (a mérés alapján) |
+| 05 – frontend-arkitektúra | v0.1 | 📄 draft |
+| 06 – szerkesztői felület | v0.1 | 📄 draft |
+| 07 – CI/CD és környezetek | v0.1 | 📄 draft |
+| 08 – teszt-stratégia | v0.1 | 📄 draft |
+| 09 – üzemeltetés és observability | v0.1 | 📄 draft |
+
+**A sorozat teljes (01–09).** A 02–04 terv **swarm review-zott**; az
+05–09 **draft**, a review-juk a következő kör.
