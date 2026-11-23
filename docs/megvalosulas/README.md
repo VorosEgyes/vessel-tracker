@@ -8,14 +8,14 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 | # | Terv | Tartalom | Státusz |
 |---|---|---|---|
 | 01 | [stack és projektstruktúra](megvalosulas-01-stack-es-struktura.md) | Technológiai stack, monorepo-struktúra, környezetek, az AIS-adatút, az R1-scope | **v1.4** — swarm review 2 körön átesett, a 2. kör 17 új findingje javítva; **+ a `just check` pontosítása** (a `07` §3.1 definiálja) |
-| 02 | [adatbázis-DDL v1.1 + migrációk](megvalosulas-02-adatbazis-ddl.md) | A teljes R1-séma (71 tábla), a partíciós terv, az indexek, a nézetek, a trigger-ek, a DB-szerepkörök, a mentés és a monitorozás | **v1.6 — futtatva és tesztelve** valódi PostgreSQL 17-en (**157 index, 124 FK, 372 CHECK, 85 trigger; 17/17 funkcionális teszt zöld**); 1. körű swarm review: **113 finding**, **10 blokkoló** — mind javítva és újra validálva; **a teljes referenciaadat-seed** (89 hajótípus a magyar nevekkel, a `language`, a `country`, a `waterway`, a `river_section`, a `basin`, a `cargo_type`, az `operator` — a `bud01` mérésből); **a `position.msg_type`/`msg_subtype` és a `nav_status` CHECK** (a `04` – parser-terv 1. körű swarm review-jának 64 findingje); **+ az `admin_api` szűk szerepkör** (a `06` §2.1a — a `public_api` nem olvashatja az `app_user`-t) |
-| 03 | [API-specifikáció](megvalosulas-03-api-specifikacio.md) | A belső R1 API és az R5 B2B API határvonala, a hibakódok, a lokalizáció, a DB-szerepkör, a kivétel-kezelés | **v0.4** — 1. körű swarm review: **96 finding** (3 reviewer: `bori` 34, `preshaz` 24, `prof` 27 + a szintézis) — **mind javítva**; a `type` URI domainfüggetlen URN, a `moving` szűrő R1-ben meghatározva, a `meta.total` specifikálva, a `Page[T]`/`Data[T]` burkolók; a pinelt séma: a `02` **v1.3**; **+ a `?lang=` prioritás** (a `03` §6.1: a `?lang=` → a `session` → az `Accept-Language` → `hu`) és **az ENI-korlát kommunikációja** (a `meta.hint`) |
+| 02 | [adatbázis-DDL v1.1 + migrációk](megvalosulas-02-adatbazis-ddl.md) | A teljes R1-séma (71 tábla), a partíciós terv, az indexek, a nézetek, a trigger-ek, a DB-szerepkörök, a mentés és a monitorozás | **v1.6 — futtatva és tesztelve** valódi PostgreSQL 17-en (**157 index, 124 FK, 372 CHECK, 85 trigger; 17/17 funkcionális teszt zöld**); 1. körű swarm review: **113 finding**, **10 blokkoló** — mind javítva és újra validálva; **a teljes referenciaadat-seed** (89 hajótípus a magyar nevekkel, a `language`, a `country`, a `waterway`, a `river_section`, a `basin`, a `cargo_type`, az `operator` — a `bud01` mérésből); **a `position.msg_type`/`msg_subtype` és a `nav_status` CHECK** (a `04` – parser-terv 1. körű swarm review-jának 64 findingje); **+ az `admin_api` szűk szerepkör** (a `06` §2.1a — a `public_api` nem olvashatja az `app_user`-t); **+ a `destination`/`destination_eta` oszlop** (a bori B-C-3); **+ a `position` TTL-job** (a blackboard X-3) |
+| 03 | [API-specifikáció](megvalosulas-03-api-specifikacio.md) | A belső R1 API és az R5 B2B API határvonala, a hibakódok, a lokalizáció, a DB-szerepkör, a kivétel-kezelés | **v0.4** — 1. körű swarm review: **96 finding** (3 reviewer: `bori` 34, `preshaz` 24, `prof` 27 + a szintézis) — **mind javítva**; a `type` URI domainfüggetlen URN, a `moving` szűrő R1-ben meghatározva, a `meta.total` specifikálva, a `Page[T]`/`Data[T]` burkolók; a pinelt séma: a `02` **v1.6**; **+ a `?lang=` prioritás** (a `03` §6.1: a `?lang=` → a `session` → az `Accept-Language` → `hu`); **+ az ENI-korlát kommunikációja** (a `meta.hint`); **+ a `destination` a `VesselDetail`-ben** |
 | 04 | [AIS-parser specifikáció](megvalosulas-04-ais-parser.md) | A NMEA frame-validáció, a 6 bites dekódolás, az üzenettípus-dispatch, a normalizált rekord (a `02` és a `04` közötti közös szerződés), a dedup, a mérési protokoll | **v1.0 — a mérés után**; 1. körű swarm review: **64 finding** (3 reviewer: `prof` 27 · `bori` 18 · `preshaz` 19), a verifier audit szerint **61 valós, 11 blokkoló** — **mind javítva**; a terv **a `bud01` mérés valós adataihoz** igazítva (a nem hajó üzenettípusok = a forgalom 27,3%-a, a SQLite architektúra, a mért ~900 000 üzenet/nap, a nem mérhető hibás arány) |
-| 05 | [frontend-arkitektúra](megvalosulas-05-frontend-arkitektura.md) | Az Astro SSR, az i18n routing (a F-INTL-01…08), a SEO (a `hreflang`, a JSON-LD, a sitemap), a komponensmodell, a hajóadatlap blokkjai | **v0.2** — a 05–09-es swarm review javításai (a nyelvválasztó süti/prefix, a rendezés, a bizonyossági badge, a `river_km` 3 forrás, a súgó) |
+| 05 | [frontend-arkitektúra](megvalosulas-05-frontend-arkitektura.md) | Az Astro SSR, az i18n routing (a F-INTL-01…08), a SEO (a `hreflang`, a JSON-LD, a sitemap), a komponensmodell, a hajóadatlap blokkjai | **v0.3** — a 05–09-es swarm review javításai (a nyelvválasztó süti/prefix, a rendezés, a bizonyossági badge, a `river_km` 3 forrás, a súgó) **+ a 2. kör: a `output: 'static'` + a rebuild-mechanizmus** (a C-9 blokkoló) |
 | 06 | [szerkesztői felület](megvalosulas-06-szerkesztoi-felulet.md) | A session-alapú hitelesítés, a `/api/admin/v1/` végpontok, a mezőnkénti eredet szerkesztése, a konfliktuskezelés (a F-ADM-09), az üzemeltetői önbevallás (a F-ADM-08), a tömeges import (a F-ADM-07), a fordítási hiánylista | **v0.2** — a 05–09-es swarm review javításai (a `admin_api` DB-szerepkör, az egy-session korlát, az AIS-import, a célállomás mező, az import limit) |
-| 07 | [CI/CD és környezetek](megvalosulas-07-ci-cd-es-kornyezetek.md) | A pipeline (a `ci.yml`/`build.yml`/a deploy-workflow-ok), a build (a `justfile`, a Docker image-ek), a környezet-változók, a migrációk, a deploy és a rollback, a titkok, a smoke teszt | **v0.2** — a 05–09-es swarm review javításai (a `justfile` a szintenkénti célokkal és a `check`/`check-release` kapukkal, a coverage-küszöb a `just test`-ben, a `pg_stat_statements` a Dockerfile-ban, a host cron telepítése a deployban) |
+| 07 | [CI/CD és környezetek](megvalosulas-07-ci-cd-es-kornyezetek.md) | A pipeline (a `ci.yml`/`build.yml`/a deploy-workflow-ok), a build (a `justfile`, a Docker image-ek), a környezet-változók, a migrációk, a deploy és a rollback, a titkok, a smoke teszt | **v0.3** — a 05–09-es swarm review javításai (a `justfile` a szintenkénti célokkal és a `check`/`check-release` kapukkal, a coverage-küszöb a `just test`-ben, a `pg_stat_statements` a Dockerfile-ban, a host cron telepítése a deployban) **+ a 2. kör: a `ddl-diff` séma-drift lépés, a heti cron-ütem, a Telegram-titok, a branch protection javítása** |
 | 08 | [teszt-stratégia](megvalosulas-08-teszt-strategia.md) | A teszt-piramis (7 szint), a 20 NFR → a mérőszám, a szintenkénti tesztek, a mérésből jövő fixture-ök, a kilépési feltételek | **v0.2** — a 05–09-es swarm review javításai (a fixture-méretkorlát, a replay a NAS-ról, a szintenkénti `just` célok, a flake-gate) |
-| 09 | [üzemeltetés és observability](megvalosulas-09-uzemeltetés-es-observability.md) | A mentés és a visszaállítás (a PITR, a heti restore-drill), a monitorozás, a **watchdog** (a riasztás), a naplózás, a vevőhálózat üzemeltetése, az incidenskezelés | **v0.2** — a 05–09-es swarm review javításai (a lehúzás-határ 8 → **4 nap**, a környezetfüggő heartbeat-határ, a restore-drill a **stagingben**, a 3 site kapacitás, a havi partícióméret, a `COPY` batchelés) |
+| 09 | [üzemeltetés és observability](megvalosulas-09-uzemeltetés-es-observability.md) | A mentés és a visszaállítás (a PITR, a heti restore-drill), a monitorozás, a **watchdog** (a riasztás), a naplózás, a vevőhálózat üzemeltetése, az incidenskezelés | **v0.3** — a 05–09-es swarm review javításai (a lehúzás-határ 8 → **4 nap**, a környezetfüggő heartbeat-határ, a restore-drill a **stagingben**, a 3 site kapacitás, a havi partícióméret, a `COPY` batchelés) **+ a 2. kör: a PPM 7, a watchdog mind a 10 riasztása, a `job_run`-ba író drill, a katalógusméret-metrika** |
 
 ## Olvasási sorrend
 
@@ -117,8 +117,27 @@ oszlopokkal és a teljes referenciaadat-seeddel):**
 | `preshaz` | **17** (5 C · 7 H · 4 M · 1 L) | az üzemeltethetőség (a lehúzás-határ, a 3 site, a drill, a cron, a partícióméret) |
 | **a verifier** | audit | **66/67 igazolt**, 2 hamis (a worker javította), 8 duplikáció összevontva |
 
-**A javítások a tervekben:** a `03` v0.4 · a `05` v0.2 · a `06` v0.2 ·
-a `07` v0.2 · a `08` v0.2 · a `09` v0.2 · a `02` v1.6 · a `01` v1.4.
+**A javítások a tervekben:** a `03` v0.4 · a `05` v0.3 · a `06` v0.2 ·
+a `07` v0.3 · a `08` v0.2 · a `09` v0.3 · a `02` v1.6 · a `01` v1.4.
+
+### A 2. kör (a worker-ek újraellenőrzése) — 3 új BLOKKOLÓ
+
+**A worker-ek a saját kimenetüket újraellenőrizték**, és **három
+blokkolót találtak, amit az első körben egyik sem látott**:
+
+| A finding | Mi a hiba | A javítás |
+|---|---|---|
+| **C-9 / X-1** | a `05` §1 **kizárta** az `output: 'static'`-ot → **az `01` §3.2.1 rebuild-mechanizmusa (a hook, a `published` gating, a build-idő) levegőben maradt**, és a `07` §3.3 **egy nem létező kimenetre** épült | a `05` §1 → **`output: 'static'` + a Node adapter**; a §5.2 → **`getStaticPaths`**; a rebuild-mechanizmus táblázata |
+| **C-8** | a `09` §4.2 a PPM-et **−6,1**-nek adta, **a mérési adat 7** → **a mérési adat ellentmondása** (és a `09` §9.2 maga 7-et írt) | a cella → **7**; a határ → `\|ppm − 7\| > 8` (a **drift** nagyságára, nem az abszolút értékre) |
+| **H-12** | a `07` §8.1-ben **nem volt** a `db/ddl/` generálás + `git diff --exit-code`, amit a `02` §11 előír → **a séma-drift csendben benne maradt** | a **10b. lépés** (`just ddl-diff`) + a `justfile`-beli `ddl-diff` cél |
+
+**További 2. körös javítások:** a `09` §5.1 watchdog SQL (`WHERE active` →
+`WHERE status = 'active'` + a `NULL` ág) · a watchdog **mind a 10
+riasztása** · a drill a production `job_run`-ba ír · a `07` §2.3
+Telegram-titkok · a heti cron-ütem · a `02` §8.4 `position` TTL-job ·
+a `02` `destination` oszlop + a `03` `VesselDetail` · a branch protection
+javítása (a nem létező `ci / ddl-validate` job) · a `09` §8.2 a 3 site
+adataival.
 
 **A legfontosabb javítások:**
 

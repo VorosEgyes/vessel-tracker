@@ -82,7 +82,7 @@ benyújtott fájlt olvassa).
 | Mi | Hol | Állapot |
 |---|---|---|
 | **A bud01 AIS-vevő** | a Pi-n (`ais-receiver.service`) | ✅ **fut** 2026-11-22 19:19 óta — 38 000+ üzenet/óra, 199 hajó |
-| **A heti lehúzás** | a Pi cron → a NAS (`/opt/data/martin/work/ais-data/`) | ✅ **működik** (a `command=` korlátozással) — hétfő 04:17-kor |
+| **A heti lehúzás** | a Pi bootja után (`ExecStartPost`) → a NAS (`/opt/data/martin/work/ais-data/`) | ✅ **működik** (a legutóbbi: `ais-20261123-2328.db`, 99 MB, **382 968 üzenet**, 245 hajó) (a `command=` korlátozással) — hétfő 04:17-kor |
 | **A mérési elemző** | a NAS-on (`analyze_measurement.py`) | ✅ fut — a read-only (`immutable=1`) nyitás nem hagy `-wal`/`-shm` fájlokat |
 | **A 30 napos mérés** | a `bud01` telephelyen | **2026-12-22-ig** — a go/no-go küszöbön (69,8% ≥ 50%) |
 
@@ -183,7 +183,7 @@ elemzőscriptek.
 | Az üzenetek | ~300 az első percekben (Msg 1/2/5/20/23) |
 | A hajók | 91 különböző MMSI az első 10 percben |
 | A PPM | **8** (a kalibráció 25 percet futott; a 13–15 az átmeneti szakasz volt) |
-| A heti lehúzás | hétfő 04:17-kor → **a NAS közvetlenül** (`/opt/data/martin/work/ais-data/`) — **a Mac kimarad a láncból** (nem mindig van bekapcsolva; a NAS a Pi-ról 4,5 ms alatt elérhető) |
+| A heti lehúzás | **a Pi bootja után** (`ExecStartPost`) + a biztonsági cron hétfő 04:17-kor → **a NAS közvetlenül** (`/opt/data/martin/work/ais-data/`) — **a Mac kimarad a láncból** (nem mindig van bekapcsolva; a NAS a Pi-ról 4,5 ms alatt elérhető) |
 | A web-térkép | `http://192.168.0.2:8080` |
 
 **A döntő teszt még hátra van:** a **belvízi FI 10** üzenetek (ezen múlik az

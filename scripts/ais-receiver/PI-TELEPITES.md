@@ -240,6 +240,23 @@ sudo install -m 755 ais-fetch-weekly.sh /usr/local/bin/ais-fetch-weekly.sh
 
 # a cron-vonal
 sudo install -m 644 ais-fetch.cron /etc/cron.d/ais-fetch
+
+# a boot utani lehuzas script (a systemd ExecStartPost-ja hívja)
+sudo install -m 755 ais-pull-after-boot.sh /usr/local/bin/ais-pull-after-boot.sh
+
+# a sudoers: a service "User=ais"-szal indul, a lehuzas a "miklos"
+# kulcsaval megy -> a sudo -n -u miklos kell
+sudo tee /etc/sudoers.d/ais-pull > /dev/null <<'EOF'
+ais ALL=(miklos) NOPASSWD: /usr/local/bin/ais-fetch-weekly.sh
+EOF
+sudo chmod 440 /etc/sudoers.d/ais-pull
+
+# a BIZTONSAGI heti lehuzas (a FOE a boot utani ExecStartPost)
+# A Debian cron a /etc/cron.d fajlokat a "run-parts" szuressel olvassa,
+# es a "miklos" userrel a /etc/cron.d-ből NEM mukodik -> a 2026-11-23-i
+# teszt: a /etc/cron.d/ais-fetch SOHA nem futott! -> a CRONTABBA kell
+(crontab -l 2>/dev/null | grep -v ais-fetch-weekly; \
+ echo "17 4 * * 1 DB_FILE=/var/lib/ais/ais.db /usr/local/bin/ais-fetch-weekly.sh") | crontab -
 ```
 
 ### A NAS oldalon (egyszer, a `hermesadmin` userrel)
@@ -270,6 +287,10 @@ sudo chmod 600 ~/.ssh/authorized_keys
 
 | A hiba | A megoldás |
 |---|---|
+| **a `/etc/cron.d/ais-fetch` SOHA nem futott** (a Debian cron nem olvasta) | **a `miklos` crontabba** (`crontab -`) — a `/etc/cron.d` a `run-parts` szűrővel olvasódik |
+| **a Pi este ki, reggel 8-kor be** → a fix 04:17-es cron soha nem futna | **a lehúzás a boot után** (a systemd `ExecStartPost`) + a cron csak biztonsági |
+| a service `User=ais`, a lehúzás a `miklos` kulcsát használja | a sudoers (`/etc/sudoers.d/ais-pull`) + a unit `ExecStartPost` |
+| a `miklos` nem tud írni a `/var/log`-ba | a log a `~/.ais-pull.log`-ba megy |
 | `attempt to write a readonly database` | a `sudo`-val készített másolat root-tulajdonú lett; a cél a `~/.ais-pull/` mappa legyen, és utána `chown` a `miklos`-ra |
 | `unable to open database` | a `/var/lib/ais` könyvtár `0750 ais:ais` — a `sqlite3`-ot `sudo`-val kell futtatni |
 | `Pseudo-terminal will not be allocated` | ez **nem hiba**, csak a távoli SSH üzenete (a stdin nem terminál) |

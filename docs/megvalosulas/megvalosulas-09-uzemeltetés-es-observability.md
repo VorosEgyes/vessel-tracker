@@ -142,14 +142,35 @@ docker compose -f "$COMPOSE" exec -T postgres \
   < "${LATEST}/base.tar.gz"
 
 # 3. az ellenorzes: a sorszamok egyeznek-e
-docker compose -f "$COMPOSE" exec -T postgres \
+VESSELS=$(docker compose -f "$COMPOSE" exec -T postgres \
   psql -U postgres -d restore_test -tAc \
-  "SELECT count(*) FROM vessel;"
+  "SELECT count(*) FROM vessel;")
 
 # 4. a restore_test DB torlese (a lemez felszabaditasa)
 docker compose -f "$COMPOSE" exec -T postgres \
   dropdb -U postgres restore_test
+
+# 5. AZ EREDMENY A PRODUCTION DB job_run TABLABA (a preshaz P-C-7
+#    findingje) — a watchdog a productiont figyeli, igy a drill
+#    eredmenyenek ODA kell kerulnie (a restore_test DB-be nem)
+docker compose -f infra/compose/production.yml exec -T postgres \
+  psql -U postgres -d duna -tAc \
+  "INSERT INTO job_run (job_name, started_at, ended_at, status, rows_out)
+   VALUES ('restore-drill', now(), now(),
+           '$( [ -n "$VESSELS" ] && echo success || echo failed )',
+           $VESSELS);"
 ```
+
+> **A `preshaz` reviewer P-C-7 findingje (a 2. kör, BLOKKOLÓ):** az
+> eredeti alakban a drill **egyetlen `job_run`-INSERTet sem írt** → a
+> „a próba eredménye a `job_run` táblába" csak **egy mondat a szövegben**
+> volt, nem kód → **a drill bukása sehol sem jelent meg**. **Ráadásul
+> ha a `restore_test` DB-be írt volna, a watchdog (a productiont figyelő)
+> soha nem látta volna.**
+>
+> **A javítás:** az **5. lépés** a drill eredményét a **production
+> `job_run`** táblába írja (a `restore_test` DB-be **nem**) → **a
+> watchdog figyelni tudja** → **az A9 riasztás életre kel**.
 
 > **A próba eredménye a `job_run` táblába** (`job_name='restore-drill'`)
 > → **a `09` §5 watchdogja figyeli** — **a STAGING DB `job_run`-ját**
@@ -188,7 +209,15 @@ docker compose -f "$COMPOSE" exec -T postgres \
 | **A partíció-méret** | `pg_total_relation_size` | egy partíció > 5 GB |
 | **A lekérdezési latencia** | `pg_stat_statements` | a `mean_exec_time` > 100 ms |
 | **A hibák** | `data_quality_event` | a nyitott `critical` események száma > 0 |
-| **A vevőhálózat** | `ais_receiver_site.last_seen_at` | egy aktív vevő > 30 perce nem ad heartbeatot |
+| **A vevőhálózat** | `ais_receiver_site.last_seen_at` | **R1-ben 10 nap, R2-ben (élő MQTT) 30 perc** (a `04` §4.1 környezet-táblázata) |
+| **A katalógus mérete** | a `meta.total` (a `03` §9) | **a mérési alap legyen, ne becslés** (a `08` §3.1 az F-NF-01 tesztet a mért értékre állítja) |
+
+> **A `prof` reviewer M-11 findingje (a 2. kör):** a `08` §3.1 a
+> teljesítménytesztet **300 hajós listával** tervezi → **de a mérésben
+> 199 `ais_state` sor van** (a valós katalógus ennél kisebb: a 106 lámpa
+> és a 3 bázisállomás kiesik) → **a `meta.total` metrikát mérjük**, és
+> **az F-NF-01 tesztparamétere a mért érték legyen**, ne egy becslés.
+>
 
 > **A `prof` reviewer M-8 findingje:** a `pg_stat_statements` **a teljes
 > lekérdezés átlagát** adja → **a p95 NEM ebből jön** → **a határ
@@ -208,7 +237,7 @@ központi DB**, tehát a vevő oldali metrikák:
 | A metrika | A forrás | A határ |
 |---|---|---|
 | **a vevő él-e** | a `ais_stats_hourly` (`msg`, `vessels`) | **az üres óra = a vevő leállt** |
-| **a PPM** | az `ais_stats_hourly.ppm` | a **|ppm| > 15** → a kristály driftel (a mérésben −6,1) |
+| **a PPM** | az `ais_stats_hourly.ppm` | a **\|ppm − 7\| > 8** → a kristály driftelt (a kalibráció elcsúszott; a mérésben **7**) |
 | **a jelerősség** | az `ais_stats_hourly.level_min`/`level_max` | a **szint tartósan 0** → az antenna/szűrő problémája |
 | **az üzenetszám** | az `ais_stats_hourly.msg` | **a napi 0 üzenet** → a vevő leállt |
 | **a heti lehúzás** | a NAS `ais-data/` fájlok dátuma | **a fájl 4 napnél régebbi** → a lehúzás elmaradt |
@@ -249,6 +278,11 @@ async def add_timing(request: Request, call_next):
 
 ### 5.1 A watchdog (a `02` §13.2 szerint itt készül)
 
+> **A `preshaz` reviewer P-C-5 findingje (a 2. kör):** a watchdog
+> **a host cron-jára** épült → **de a `07` §4.2-ben nem volt cron** →
+> **a production VPS-en a crontáb kézi lépés volt** → **a `07` §6.1a
+> (a deploy script) most telepíti** → **egy megoldás, egy helyen**.
+
 > **A `02` – DDL-terv §13.2:** „*a `pg_cron` **a `job_run` táblát
 > tölti**, a riasztás pedig egy **külső watchdog** (a **09 –
 > Üzemeltetés terv** dolga) figyeli a `job_run` és a `data_quality_event`
@@ -267,6 +301,7 @@ Futtatás: a host cron-jában, óránként.
 """
 import asyncio
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -276,9 +311,23 @@ import httpx
 THRESHOLDS = {
     "failed_jobs": 0,          # a job_run failed/partial darabszama
     "critical_events": 0,     # a nyitott critical esemenyek
-    "stale_receivers_min": 30,  # a heartbeat perces
     "position_stale_pct": 20,    # a hajok hány %-a nincs 1 oras poziciom
+    # a vevoheartbeat hatara NEM itt van — a kornyezettol fugg
+    # (a STALE_RECEIVER_INTERVAL env var: R1 = 10 nap, R2 = 30 perc)
+    # a prof C-5 / preshaz P-H-8 findingje szerint
 }
+
+
+def disk_usage_percent() -> float:
+    """A lemez hasznalatanak szazaleka (a A8 riasztas).
+
+    A `pg_database_size` a DB-re vonatkozik, nem a lemezre ->
+    a hoszt oldali `df`-bol olvasunk.
+    """
+    st = os.statvfs("/var/lib/postgresql")
+    total = st.f_blocks * st.f_frsize
+    free = st.f_bavail * st.f_frsize
+    return 100 * (total - free) / total
 
 
 async def check(conn) -> list[str]:
@@ -299,20 +348,105 @@ async def check(conn) -> list[str]:
     if r["n"] > THRESHOLDS["critical_events"]:
         problems.append(f"{r['n']} nyitott critical esemény")
 
+    # A vevoheartbeat (a prof C-5 / preshaz P-H-8 findingje):
+    # a hatar KORNYEZETFUGo — R1-ben a heti lehuzas miatt a
+    # last_seen_at hetente frissul -> 10 nap; R2-ben (elo MQTT) 30 perc.
+    STALE_RECEIVER_INTERVAL = os.environ.get(
+        "STALE_RECEIVER_INTERVAL", "10 days"   # R1; R2: "30 minutes"
+    )
     r = await conn.fetchrow("""
         SELECT count(*) AS n FROM ais_receiver_site
-        WHERE active AND last_seen_at < now() - interval '1 hour'
+        WHERE status = 'active'
+          AND (last_seen_at IS NULL
+               OR last_seen_at < now() - $1::interval)
+    """, STALE_RECEIVER_INTERVAL)
+    if r["n"] > 0:
+        problems.append(
+            f"{r['n']} vevő nem adott heartbeatot "
+            f"{STALE_RECEIVER_INTERVAL} óta (A3)"
+        )
+
+    # --- A5: a poziciofedettseg (a 20% hatar) ---
+    r = await conn.fetchrow("""
+        SELECT count(*) FILTER (
+                   WHERE last_position_ts IS NULL
+                      OR last_position_ts < now() - interval '1 hour'
+               ) AS stale,
+               count(*) AS total
+        FROM vessel_last_position
+    """)
+    if r["total"] > 0 and 100 * r["stale"] / r["total"] > THRESHOLDS["position_stale_pct"]:
+        problems.append(
+            f"A pozíciófedettség {100 * r['stale'] / r['total']:.0f}% "
+            f"stale (a határ {THRESHOLDS['position_stale_pct']}%) (A5)"
+        )
+
+    # --- A6: egy particio > 5 GB ---
+    r = await conn.fetchrow("""
+        SELECT count(*) AS n FROM (
+            SELECT c.relname
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind IN ('r','p')
+              AND pg_total_relation_size(c.oid) > 5 * 1024 * 1024 * 1024
+        ) t
     """)
     if r["n"] > 0:
-        problems.append(f"{r['n']} vevő nem adott heartbeatot 1 óra óta")
+        problems.append(f"{r['n']} partíció nagyobb 5 GB-nál (A6)")
+
+    # --- A7: a lekérdezesi latencia (a mean_exec_time) ---
+    r = await conn.fetchrow("""
+        SELECT count(*) AS n FROM pg_stat_statements
+        WHERE mean_exec_time > 100 AND calls > 10
+    """)
+    if r["n"] > 0:
+        problems.append(f"{r['n']} lekérdezés lassabb 100 ms-nál (A7)")
+
+    # --- A8: a lemez megtelt ---
+    r = await conn.fetchrow("""
+        SELECT (pg_database_size(current_database())::float
+                / (SELECT setting::float * 1024 * 1024 * 1024
+                   FROM pg_settings WHERE name = 'block_size')) AS ratio
+    """)
+    # a lemez teljes merete a hoszton van -> a watchdog a /proc/mounts-ot olvassa
+    disk_pct = disk_usage_percent()          # a helper fuggveny (latsd lentebb)
+    if disk_pct > 85:
+        problems.append(f"a lemez {disk_pct:.0f}%-on tele (a határ 85%) (A8)")
+
+    # --- A9: a visszaallitasi proba (a job_run 'restore-drill') ---
+    r = await conn.fetchrow("""
+        SELECT count(*) AS n FROM job_run
+        WHERE job_name = 'restore-drill'
+          AND started_at > now() - interval '8 days'
+          AND status <> 'success'
+    """)
+    if r["n"] > 0:
+        problems.append(f"{r['n']} sikertelen visszaállítási próba (A9)")
+
+    # --- A10: a job_run 24 orara nem futott ---
+    r = await conn.fetchrow("""
+        SELECT count(*) AS n FROM job_run
+        WHERE started_at > now() - interval '24 hours'
+    """)
+    if r["n"] == 0:
+        problems.append("24 óra alatt nem futott egyetlen job_run sem (A10)")
 
     return problems
 
 
 async def notify(messages: list[str]) -> None:
-    """A Telegram értesítés."""
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    """A Telegram értesítés.
+
+    A P-H-10 findingje szerint a `os.environ[...]` **KeyError-rel** elhal,
+    ha a változó nincs a `.env`-ben -> **a hiányzó érték most warning,
+    nem egy halott processz.
+    """
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        print("HIBA: a TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID nincs beallitva "
+              "(a .env.example a 07 §2.3-ban szerepel) — a riasztas nem megy ki",
+              file=sys.stderr)
+        return
     text = "🚨 *vessel-tracker*\n" + "\n".join(f"• {m}" for m in messages)
     async with httpx.AsyncClient() as c:
         await c.post(
@@ -323,18 +457,30 @@ async def notify(messages: list[str]) -> None:
 
 ### 5.2 A riasztások listája és a sürgőssége
 
-| # | A riasztás | A határ | A sürgősség | **A csatorna** |
-|---|---|---|---|---|
-| A1 | a heti lehúzás elmaradt | a legutóbbi fájl **4 napnál régebbi** | **kritikus** (a 3. héten az adat elveszik) | Telegram |
-| A2 | a feldolgozás hibás | `job_run.status` = `failed`/`partial` | kritikus | Telegram |
-| A3 | a vevő nem ad heartbeatot | 30 perc | kritikus (a nyers adat a leállás pillanatáig megvan) | Telegram |
-| A4 | a nyitott `critical` esemény | > 0 | magas | Telegram |
-| A5 | a pozíciófedettség | a hajók > 20%-a 1 óránál régebbi | magas | Telegram |
-| A6 | egy partíció > 5 GB | — | közepes | Telegram (napi összefoglaló) |
-| A7 | a `pg_stat_statements` p95 > 1 s | — | közepes | Telegram (napi) |
-| A8 | a lemez megtelt | > 85% | közepes | Telegram |
-| A9 | a visszaállítási próba sikertelen | a `job_run` `restore-drill` ≠ `success` | kritikus | Telegram |
-| A10 | a `job_run` 24 óra alatt nem futott | — | magas | Telegram |
+| # | A riasztás | A határ | A sürgősség | **A csatorna** | **A kód** |
+|---|---|---|---|---|---|
+| A1 | a heti lehúzás elmaradt | a legutóbbi fájl **4 napnál régebbi** | **kritikus** (a 3. héten az adat elveszik) | **a NAS-on** (§5.3) | `check-pull.sh` |
+| A2 | a feldolgozás hibás | `job_run.status` = `failed`/`partial` | kritikus | Telegram | `check()` — a `job_run` |
+| A3 | a vevő nem ad heartbeatot | **R1: 10 nap · R2: 30 perc** | kritikus (a nyers adat a leállás pillanatáig megvan) | Telegram | `check()` — az `ais_receiver_site` |
+| A4 | a nyitott `critical` esemény | > 0 | magas | Telegram | `check()` — a `data_quality_event` |
+| A5 | a pozíciófedettség | a hajók > 20%-a 1 óránál régebbi | magas | Telegram | `check()` — a `vessel_last_position` |
+| A6 | egy partíció > 5 GB | — | közepes | Telegram (napi összefoglaló) | `check()` — a `pg_class` |
+| A7 | a `pg_stat_statements` latencia | a `mean_exec_time` > 100 ms | közepes | Telegram (napi) | `check()` — a `pg_stat_statements` |
+| A8 | a lemez megtelt | > 85% | közepes | Telegram | `check()` — a `disk_usage_percent()` |
+| A9 | a visszaállítási próba sikertelen | a `job_run` `restore-drill` ≠ `success` | kritikus | Telegram | `check()` — a `job_run` |
+| A10 | a `job_run` 24 óra alatt nem futott | — | magas | Telegram | `check()` — a `job_run` |
+
+> **A `preshaz` reviewer P-H-9 findingje (a 2. kör):** a §5.2 **10
+> riasztást ígért**, **de a §5.1 `check()` függvénye csak kettőt
+> teljesített** (A2, A4) → **a productionben 7 riasztás halott volt**.
+> **A javítás:** a §5.1 `check()` most **mind a tízet** implementálja,
+> **és a fenti táblázat "A kód" oszlopa megmondja, melyik hol van**
+> → **a §5.2 nem ígér semmit, amit a §5.1 nem tartalmaz**.
+>
+> **A korábbi `WHERE active` SQL hiba (a P-C-6 findingje) is javítva:**
+> az `ais_receiver_site`-nek **nincs `active` oszlopa**, a `status` van
+> → **`WHERE status = 'active'`** (és a `last_seen_at IS NULL` ág is,
+> hogy a **soha nem jelentkező** vevő is észrevétlen ne maradjon).
 
 > **A1 és A9 a mérési időszakban is fontos** — ezek a `02` §13.2
 > *központi* metrikái helyett a **mérési időszak** sajátjai.
@@ -502,6 +648,28 @@ findingje)** — a `COPY` **egy** utasítás, nem `executemany`:
 | a heti lehúzás fájlja | — | **~600 MB** |
 | a NAS éves | — | **~30 GB** (a törlés kell) |
 
+**A 3 site (az F1) es a lemezigeny (a `preshaz` reviewer P-M-5 és
+P-M-6 findingje) — a fenti táblázat EGY SITE adata:**
+
+| | 1 site (a mérés) | **3 site (az F1)** |
+|---|---|---|
+| az üzenetek 30 nap alatt | ~27 millió | **~81 millió** |
+| a nyers SQLite | ~2,9 GB | **~8,7 GB** |
+| a heti lehúzás fájlja | ~600 MB | **~1,8 GB** |
+| a NAS éves (a törlés kell) | ~30 GB | **~90 GB** |
+| **a `position` a Postgresben** | ~27 millió sor/hó | **~81 millió sor/hó** |
+| **a teljes lemezigeny a VPS-en** | DB (~15–25 GB) + mentés (~2–3 GB) + WAL-archivum (~a DB mérete) | **~3×** |
+
+> **A `preshaz` reviewer P-M-5 findingje (a 2. kör):** a §8.2 **egy
+> site** adataival számolt, **a 3 site-os F1 konfiguráció nem volt benne**
+> → **a skálázási döntés (a §8.3) a valósnál kisebb adattal készült**.
+>
+> **A `preshaz` reviewer P-M-6 findingje (a 2. kör):** a mentés, a drill
+> és a WAL-archivum együttes lemezigényének **nem volt egyetlen száma**
+> → most a fenti táblázatban **van**: **a teljes lemezigény = a DB + a
+> heti mentés + a WAL-archivum** → **a VPS lemezének mérete nélkül a
+> TTL nem tervezhető meg** (a §10 Q6 — a tervezés blokkolója).
+
 ### 8.3 A mikor kell skálázni
 
 | A jel | A küszöb | A lépés |
@@ -574,7 +742,7 @@ hónap végén a `09` §10 metrikája**.
 
 | # | Kérdés | Az alapértelmezés | Az állapot |
 |---|---|---|---|
-| Q1 | **A watchdog a VPS-en fut-e vagy a NAS-on?** | **a VPS-en** (a központi DB-hez kell) — **a mérési időszakban a NAS-on** (a heti lehúzás ellenőrzése) | nyitva — **Miklós döntése** |
+| Q1 | **A watchdog a VPS-en fut-e vagy a NAS-on?** | **a VPS-en** (a központi DB-hez kell) — **a mérési időszakban a NAS-on** (a heti lehúzás ellenőrzése) — **a `07` §6.1a a deployban telepíti a crontábot** | **lezárva** (a `preshaz` reviewer P-C-5 findingje) |
 | Q2 | **A riasztások csatornája** | **Telegram** (a `02` §13.2 szerint) — de a `watchdog.py` **a projekt kulcsát** használja, nem a Hermesét | nyitva |
 | Q3 | **A Sentry bevezetése R1-ben?** | **igen** (a `SENTRY_DSN` a `07` §2.2-ben) — a `CRITICAL` szintű hibák oda mennek | nyitva |
 | Q4 | **A restore-drill heti kötelező-e vagy havi?** | **heti** (a `02` §13.1: „*a mentés mindig visszaállítással ellenőrzött*") | **lezárva** (a `02` szerint) |

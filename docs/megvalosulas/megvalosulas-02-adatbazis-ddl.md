@@ -619,6 +619,16 @@ CREATE TABLE vessel (
     flag_country_code       char(2) NOT NULL REFERENCES country(code),
     operator_id             bigint REFERENCES operator(id),
     home_port_id            bigint REFERENCES port(id),
+    -- A CELALLOMAS (a bori reviewer B-C-3 findingje — a blackboard
+    -- szerint a 02 v1.6 es a 03 v0.4 feladata):
+    -- a funkcioleiras US-04-je ("a folyamatban levo utjat es varhato
+    -- erkezeset akarom latni") a CELALLOMAS az egyik fo kerdes.
+    -- A meresben 100%-ban URES (a 04 v1.0 szerint a FI 10-bol jonne,
+    -- de a magyar szakaszon a fairway-mezo ures) → **a keszitok adja
+    -- meg kezzel** (a 06 §4.2).
+    destination             text,
+    -- A VARHATO ERKEZES (a FI 10 `eta` mezeje — a 04 v1.0 §4.5)
+    destination_eta         timestamptz,
     build_year              smallint,
     length_m                numeric(6,2),
     beam_m                  numeric(5,2),
@@ -2170,9 +2180,25 @@ SELECT cron.schedule('drop-raw-partitions', '17 3 * * 1',
 -- a vízállás-mérések 90 napos TTL-je
 SELECT cron.schedule('drop-water-level-partitions', '23 3 * * 1',
   $$SELECT drop_expired_partitions('water_level', 90)$$);
+
+-- A POSITION (a hajok poziciok) 90 napos TTL-je
+-- **A blackboard X-3 findingje (a 05-09-es swarm review-bol):** a
+-- `position` a legnagyobb particionalt tabla (~27 millio sor/hó a
+-- meresbol, a 09 §8.1) → **a 90 napos TTL-nek is kell cron-job**,
+-- kulonben a particiok **korlatanul gyarodnak** (a 02 §8.2 szerint
+-- ez a legnagyobb tarhelyigeny).
+SELECT cron.schedule('drop-position-partitions', '27 3 * * 1',
+  $$SELECT drop_expired_partitions('position', 90)$$);
 ```
 
-> **A `pg_cron` extension a stock `postgis/postgis:16-3.4` image-ben
+> **> **A blackboard X-3 findingje (a 05–09-es swarm review-ból):** a
+> `position` **nem volt** a `pg_cron` jobok között → **a 90 napos TTL
+> soha nem futott le** → a `position` partíciók **korlátlanul gyűjtődtek**
+> (a `09` §8.1 szerint ez a legnagyobb tárhelyigény: ~27 millió sor/hó
+> a mérésből). **A javítás: a `drop-position-partitions` heti job** →
+> a `07` §5.2 cronja is ezt a heti ütemet használja.
+
+A `pg_cron` extension a stock `postgis/postgis:16-3.4` image-ben
 > nincs** — a `infra/docker/postgres/Dockerfile` telepíti
 > (`postgresql-16-cron` apt csomag) és a
 > `shared_preload_libraries = 'pg_cron'` beállítással indít. A

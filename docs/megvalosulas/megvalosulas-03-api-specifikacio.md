@@ -1115,7 +1115,23 @@ class VesselDetail(BaseModel):
     )
     last_position_ts: datetime | None = Field(
         default=None, description="az utolsó pozíció időbélyege")
-    last_river_km: Decimal | None = Field(
+    last_river_km: Decimal | None = Field
+
+    # **A CELALLOMAS** (a bori reviewer B-C-3 findingje — a blackboard
+    # szerint a 02 v1.6 / a 03 v0.4 / a 06 §4.2 feladata):
+    # a funkcióleírás US-04-je („a folyamatban lévő útját és várható
+    # érkezését akarom látni") → **a célállomás az egyik fő kérdés**.
+    # A mérésben **100%-ban üres** (a `04` v1.0 szerint a FI 10-ből
+    # jönne, de a magyar szakaszon a fairway-mező üres) → **a szerkesztő
+    # adja meg kézzel** (a `06` §4.2).
+    destination: str | None = Field(
+        default=None,
+        description="a hajó célállomása; None, ha még nincs megadva",
+    )
+    destination_eta: datetime | None = Field(
+        default=None,
+        description="a várható érkezés (a FI 10 `eta` mezője)",
+    )(
         default=None, description="az utolsó folyó-kilométer")
 
     # **A hajótörténet** (a F-DET-05): a korábbi nevek külön

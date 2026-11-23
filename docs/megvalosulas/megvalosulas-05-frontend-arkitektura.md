@@ -18,28 +18,52 @@
 
 ---
 
-## 1. Az alapelv: a SEO megköveteli a szerveroldali renderelést
+## 1. Az alapelv: a SEO megköveteli a **build-kori** szerveroldali renderelést
 
 **Az R1 termék lényege a kereshetőség** (a F-NF-04: „*Indexelhető
 hajóoldalak minden nyelven — 100%*"), és ez **nem** megvalósítható
 tiszta kliensoldali rendereléssel (a Google a JS-t renderszeli, de
 a kezdeti HTML üres).
 
-**Ezért: Astro SSR** — a `output: 'server'`, a `web` konténer a Node
-adapterrel fut, és **minden nyilvános oldal szerveroldalon jön**.
+**Ezért: Astro `output: 'static'` + a Node adapter** — a `web`
+konténer a **build-kor** olvassa a DB-t, és **minden nyilvános oldal
+a build-ben szerveroldalon jön** (a `getStaticPaths` a DB-ből generálja
+a hajólistát, a hajóoldalak a build során renderelődnek).
+
+> **A `prof` reviewer C-9 findingje (a 2. kör, BLOKKOLÓ):** az eredeti
+> alakban ez a fejezet **kizárta** az `output: 'static'`-ot (a
+> `output: 'server'`-t írva) → **a `01` §3.2.1 rebuild-mechanizmusa
+> (a hook, a `published` gating, a build-idő) levegőben maradt**, és a
+> `07` §3.3 **egy nem létező kimenetre** épült.
+>
+> **A `01` §3.2.1 egyértelmű:** *„Statikus vs. szerver | **statikus
+> marad** (a `output: 'static'` a SEO-hoz kell) — az újraépítés a
+> tartalom változására triggerelődő deploy, **nem** per-request SSR"*.
+>
+> **A „a hajóoldalak folyamatosan változó adata" nem indokolja az
+> SSR-t** — a hajóoldalak `static` módban is a DB-ből olvasnak
+> (build-kor) → **a tartalom-újraépítés (a `01` §3.2.1) a katalógus
+> frissességét is biztosítja**: a hajóadat hetente változik (a F-NF-08),
+> a heti ingest **rebuildet triggerel**.
 
 | Renderelés | Hol | Mikor |
 |---|---|---|
-| **Szerveroldali (SSR)** | a nyilvános oldalak **mind** | R1-ben **nincs** kliensoldali renderelés |
+| **Build-kori szerveroldali** | a nyilvános oldalak **mind** (`getStaticPaths` + a DB a build-ben) | az Astro build során |
 | **Kliensoldali sziget** | a React-szigetek (a szűrő, a lapinyítás) | ahol a JavaScript valóban kell |
-| **Statikus** | a `docs/`, a fejlécek | a build során |
+| **Statikus kimenet** | a `docs/`, a fejlécek | a build során |
 
-**Amit ez kizár:**
-- a `output: 'static'` (a 02-es terv §3.2.1-ben említett **rebuild-mechanizmus**
-  a DB-ben lévő cikkek miatt kellett — a cikkek a DB-ben vannak, és a
-  `status='published'` a publish gating; **nem** lehet minden
-  szerkesztés után statikusan újraépíteni az egész oldalt, mert a
-  hajóoldalak **folyamatosan változó** adatot mutatnak).
+**A rebuild-mechanizmus (a `01` §3.2.1 szerint — R1-kötelező):**
+
+| Ki indítja | Hogyan | Mikor |
+|---|---|---|
+| a `content_text`/`article` mentése (a `06`) | a `web` build-hook (`WEBHOOK_URL`) → `POST /rebuild` → a CI `web-build` job | a szerkesztés után |
+| **a heti ingest** (a `09` §3.2) | ugyanez a hook → a katalógus **hetente** frissül | hétfő 04:17 után |
+
+**Amit ez NEM zár ki:**
+- a `output: 'static'` **marad** (a `01` §3.2.1) → **a Node adapter**
+  a statikus kimenetet a `web` konténerben szolgálja ki;
+- a `docs/megvalosulas/` és a `README.md` **statikus** marad (a
+  GitHubon olvasható, nem a weboldalon).
 
 **Amit ez megenged:**
 - a `docs/megvalosulas/` és a `README.md` **statikus** maradhat — a
@@ -111,7 +135,7 @@ apps/web/
 ```js
 // astro.config.mjs
 export default defineConfig({
-  output: 'server',
+  output: 'static',
   adapter: node({ mode: 'standalone' }),
   i18n: {
     defaultLocale: 'hu',
@@ -473,20 +497,36 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 — **nem** a publikus URL. A belső API **nem** publikálódik (a
 03-as terv §1).
 
-### 5.2 A szerveroldali adatlekérés (a `getStaticPaths` helyett)
+### 5.2 A build-kori adatlekérés (a `getStaticPaths`)
 
-**Az SSR-ben nincs `getStaticPaths`** — minden kéréskor kell az adat:
+**A `output: 'static'`-ban a `getStaticPaths` generálja az oldalak
+listáját** — a hajóoldalak a **build során** olvassák a DB-t:
 
 ```astro
 ---
 // src/pages/[lang]/hajos/[slug].astro
-const { lang } = Astro.params;
-const { slug } = Astro.params;
+export async function getStaticPaths() {
+  // a build-kor egy lekérdezés — a hajólista a DB-ből
+  const vessels = await apiFetch('/api/v1/vessels?area=duna&per_page=5000');
+  return vessels.flatMap((v) =>
+    ['hu', 'de', 'en'].map((lang) => ({
+      params: { lang, slug: v.slug },
+      props: { vessel: v },
+    })),
+  );
+}
 
-const vessel = await apiFetch(`/api/v1/vessels/by-slug/${slug}?lang=${lang}`);
-if (!vessel) return Astro.redirect(`/${lang}/404`);
+const { lang } = Astro.params;
+const { vessel } = Astro.props;
 ---
 ```
+
+> **A `prof` reviewer C-9 findingje (a 2. kör, BLOKKOLÓ):** az eredeti
+> alakban ez a fejezet **„a `getStaticPaths` helyett"** szöveggel
+> **kizárta** a statikus generálást → **az `01` §3.2.1 rebuild-mechanizmusa
+> nem kapcsolódott semmihez** → most **a `getStaticPaths` a kanonikus**,
+> és **a `slug` alapján is kell keresni** (a `03` §3.6 szerint a
+> `/vessels/{id}` a `slug`-ot is elfogadja).
 
 **A `by-slug` végpont** — a 03-as tervben a `/vessels/{id}` van (a
 `{id}` a numerikus azonosító). **A mély link a `slug`-ot használja**

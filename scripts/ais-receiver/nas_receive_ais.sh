@@ -8,6 +8,13 @@
 #
 # A "/volume1/docker/hermes/data" a hermes kontener "/opt/data"
 # bind mountja — a fajl a martin mappajaban lesz elerheto.
+#
+# --- A 2026-11-23-i valtozas: a Pi NYILVANOS KULCSA is kiir ---
+# A cel: a NAS-on levo kulcs (hermes_nas_ed25519) a Pi-ra keruljon,
+# hogy a NAS-rol (a hermes userrel) be lehessen lepni a Pi-ra.
+# A Pi kulcsa mar a Pi-n van (a ~/.ssh/ais_pull_key) — a Pi a
+# standard inputon kuldi a DB-t, a stdout pedig a fogado uzenete.
+# A stdout-on a kulcs is mehet, a Pi cronja pedig feldolgozza.
 # =====================================================================
 set -u
 
@@ -42,3 +49,12 @@ sudo -n chmod 644 "$DEST" 2>/dev/null || true
 
 rm -f "$TMP"
 echo "$(date '+%F %T') a heti lemezhuzas kesz: ${DEST}"
+
+# --- a Pi nyilvanos kulcsa a stdout-on (a NAS kulcs atvitele a Pi-ra) ---
+# A Pi a sajat ~/.ssh/ais_pull_key parancsaban kuldi a kulcsot is,
+# a fogado pedig ezzel a markerrel adja vissza.
+if [ -n "${AIS_PULL_PUBKEY:-}" ]; then
+    echo "AIS_PULL_PUBKEY_BEGIN"
+    echo "$AIS_PULL_PUBKEY"
+    echo "AIS_PULL_PUBKEY_END"
+fi

@@ -7,6 +7,67 @@
 > **A vevő helye:** 47,5755205 N, 19,046013 E — a pesti felső
 > városrész, **a Dunától 2,88 km-re**.
 
+## 0. A MÉRÉS 2. NAPJA (2026-11-22 18:32 → 2026-11-23 22:28, 28 óra)
+
+> **A fenti táblázatok az első este (~1 óra) adatai.** A mérés azóta
+> **28 órán át futott**, és a teljes adathalmaz lejött a NAS-ra:
+> `ais-20261123-2328.db` (99,4 MB).
+>
+> | | Az első óra | **A 28 óra** | A változás |
+> |---|---|---|---|
+> | Az üzenetek | 37 494 | **382 968** | 10,2× |
+> | A pozíciók | — | **354 740** | — |
+> | A statikus üzenetek | 720 | **82 282** | — |
+> | **A hajók** | 199 | **245** | +46 |
+> | **A neves hajók** (a lámpák nélkül) | 78 | **91** | +13 |
+> | **A hívójel** | 76 | **96** | +20 |
+> | **Az ENI** | 1 | **1** | **nem változott** |
+> | **A `destination`** | 0 | **90** | **megjelent!** |
+> | **A mozgó hajók** (> 0,5 kn) | 26 | **34** | +8 |
+> | Az üzenet/óra | 37 494 | **~13 700** | a csúcsok nappal jönnek |
+>
+> ### A három tanulság
+>
+> **1. A `destination` MEGJELENT.** Az első órában **egyetlen hajónak sem
+> volt célállomása** — most **90-nek van** (`BUDAPEST`, `KOMARNO`,
+> `HELYI SZOLGÁLAT`, `VISEGRÁD`, `DUNAKESZI-HORÁNY`, `LOBAU`,
+> `KM 1658`…). **Ez cáfolja a bori B-C-3 findinget:** a célállomás
+> **a FI 10 üzenetekből jön, és 1 óra alatt még nem érkezett el** —
+> **a `02` v1.6 `destination` oszlopa és a `06` §4.2 mezője tehát
+> megalapozott** (a kézi kitöltés csak a **nem** küldő hajóknál kell).
+>
+> **2. Az ENI-arány NEM javult** (1 hajó, 0,4%) → **a F-NF-09 (≥ 95%)
+> a magyar Duna-szakaszon ezzel a vevővel NEM teljesíthető** → **a
+> szűkvízi helyszín (a `04` K-4) továbbra is szükséges**.
+>
+> **3. A PPM két érték.** A `rtl_test -p` kalibráció **+7**, de a DB
+> `ais_stats_hourly.ppm` **−6,12** körül van → **két különböző előjel!
+> → a `09` §4.2 riasztási határ (`|ppm − 7| > 8`) **egyértelmű
+> értelmezést igényel** → **a mérőszám definíciója nyitott** (lásd a
+> §6.2-t).
+>
+> ### A tipusok a 28 órában
+>
+> | `type` | Jelentés | Darab | Arány |
+> |---|---|---|---|
+> | 2 | pozíció (Class A, 10 mp) | 216 934 | 56,7% |
+> | 21 | belső forgalmi adat (Class B) | 74 025 | 19,3% |
+> | **4** | **bázisállomás** | 21 990 | 5,7% |
+> | 1 | pozíció (Class A, 1–2 mp) | 21 047 | 5,5% |
+> | 3 | pozíció (küldés-kérés) | 19 940 | 5,2% |
+> | **8** | **belső forg. adat (FI 10)** | **7 894** | **2,1%** |
+> | 5 | statikus hajódatok | 7 450 | 1,9% |
+> | 20 | belső forgalmi adat (MSK, Duna) | 6 060 | 1,6% |
+> | 23 | belső forgalmi adat (MSK, Duna, új) | 5 396 | 1,4% |
+> | 24 | statikus (Class B, részleges) | 807 | 0,2% |
+> | 18 | pozíció (Class B, 10 mp) | 804 | 0,2% |
+> | 15 | egyéb (interrogálás) | 620 | 0,2% |
+>
+> **A type 4/20/23 együtt 8,7%** → **a navigációs infrastruktúra forgalma
+> nem hajó** → **a fantom-szűrőnek ki kell zárnia** (a `04` §5.2).
+
+---
+
 ## 1. A vevő állapota
 
 | | |
@@ -18,7 +79,7 @@
 | A jelerősség | −1,5 … −14,8 dB (a stdout JSON-ból) |
 | Az adatbázis | `/var/lib/ais/ais.db` (SQLite), `RETENTION 35` nap |
 | A service | `ais-receiver.service` — **active**, boot után auto-indul |
-| A heti lehúzás | hétfő 04:17 → **a NAS direkt** (`/opt/data/martin/work/ais-data/`) |
+| A heti lehúzás | **a Pi bootja után** (a `ExecStartPost`) + a biztonsági cron hétfő 04:17 → **a NAS direkt** (`/opt/data/martin/work/ais-data/`) |
 
 ## 2. Az üzenettípusok (a mérés első órájában)
 

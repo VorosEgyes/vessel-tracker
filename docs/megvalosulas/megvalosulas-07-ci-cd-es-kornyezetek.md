@@ -101,11 +101,27 @@ STATION_ID=1
 LOG_LEVEL=INFO
 SENTRY_DSN=
 BACKUP_BUCKET=
+
+# a riasztasi watchdog (a 09 §5.1 — a preshaz P-H-10 findingje:
+# ezek nelkul a watchdog os.environ[]-en KeyError-rel elhal, es a
+# riasztas soha nem megy ki)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+# a vevoheartbeat hatara: R1 = 10 nap, R2 (elo MQTT) = 30 perc
+STALE_RECEIVER_INTERVAL=10 days
 ```
 
 > **A `.gitignore` tartalmazza a `.env`-et** — és **a pre-commit hook
 > ellenőrzi**, hogy a `.env` fájl ne kerüljön be (a `02` – DDL-terv
 > 4.1a: a `password_hash` és a `session_token_hash` **nem publikus**).
+>
+> **A `preshaz` reviewer P-H-10 findingje (a 2. kör):** a Telegram-titok
+> **hiányoztak** a `.env.example`-ből → **a watchdog a cronból indítva
+> az első `os.environ[...]`-nél `KeyError`-rel elhalt** → **a riasztás
+> soha nem ment ki** (még a crontábal sem — lásd a P-C-5).
+> **A javítás:** a fenti három változó (érték nélkül) a `.env.example`-ben
+> → **a `07` §7.2 a VPS-en a `.env`-ből olvassa** → **a `09` §5.1
+> `notify()`-ja hiányzó értéknél warninget ad, nem hal meg**.
 
 ---
 
@@ -150,10 +166,17 @@ stack-terv §11.3 és a `08` – teszt-stratégia-terv §6.1 szerint):
 
 ```make
 # a teljes minőségi kapu (a 01 §11.3 és a 08 §6.1 szerint)
-check: lint typecheck test-unit test-property test-component        test-integration ddl-validate
+check: lint typecheck test-unit test-property test-component \
+       test-integration ddl-validate ddl-diff
 
 # a release teljes kapuja (a 08 §6.1 — hetente)
 check-release: check test-e2e test-perf test-regression
+
+# a schema-drift ellenorzese (a 02 §11 — a prof H-12 findingje)
+ddl-diff:
+    pg_dump --schema-only --no-owner --no-privileges "$$DATABASE_URL" \
+      > db/ddl/schema-v1.1.sql
+    git diff --exit-code db/ddl/schema-v1.1.sql
 ```
 
 > **A `prof` reviewer C-3 findingje (a 05–09-es swarm review-ból):**
@@ -313,6 +336,9 @@ jobs:
       - run: just ddl-validate
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/duna_test
+      - run: just ddl-diff
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/duna_test
 
   build:
     runs-on: ubuntu-latest
@@ -340,11 +366,24 @@ jobs:
 
 **A `main` védelme** (a GitHub beállításban):
 ```
-✓ ci / lint        — kötelező
-✓ ci / test         — kötelező
-✓ ci / build        — kötelező
-✓ ci / ddl-validate — kötelező
+✓ ci / lint   — kötelező
+✓ ci / test   — kötelező
+✓ ci / build  — kötelező
 ```
+
+> **A blackboard X-5 findingje (a 05–09-es swarm review-ból):** a
+> `ci / ddl-validate` **nem létező job** volt a listában → **a
+> branch protection egy nem futó ellenőrzést követelt** (a GitHub
+> ilyenkor **örökké pending** marad a PR-en → **a `main` merge-je
+> lehetetlen**).
+>
+> **A javítás:** **a `ddl-validate` (és a `ddl-diff`) a `test` job
+> része** (a §4.2) → **nincs külön job** → **a három felsorolt
+> ellenőrzés mind fut** → **a `main` védelme működik**.
+
+**A `test` job tartalma (a §4.2):** a lint nem, de a tesztek, a
+`ddl-validate` **és** a `ddl-diff` mind a `test` jobban fut → **egy
+kötelező ellenőrzés, mindent lefed.**
 
 **A `main` védett** — a **force push tiltva** (a GitHub API-n
 ellenőrizve: `allow_force_pushes: false`, `allow_deletions: false`).
@@ -386,16 +425,30 @@ stack-terv §3.2) — **a DB-be job, nem az appba**:
 
 ```sql
 -- a 02-es tervben a partition maintenance
+-- A HETI utem a helyes (a 02 §13.3 heti jobot ir, es a 09 §8.1
+-- szerint is heti a drop_expired_partitions) → a preshaz P-H-11
+-- findingje a 07 §5.2 havi utemet javitotta
 SELECT cron.schedule(
   'create-position-partitions',
-  '0 3 1 * *',                              -- a hónap elején, hajnal 3
-  $$SELECT duna.create_future_partitions(2) $$
+  '0 3 * * 0',                              -- vasarnap hajnal 3
+  $$SELECT duna.create_future_partitions(2);
+    SELECT duna.drop_expired_partitions(); $$
 );
 ```
+
+| A heti job két dolgot csinál | Miért heti |
+|---|---|
+| `create_future_partitions(2)` — a következő **2 hónap** partícióit létrehozza | **soha nem fogyhat el** a partíció (a `02` §13.3) |
+| `drop_expired_partitions()` — a **90 napos TTL** lejárt partícióit eldobja | a `09` §8.1 szerint a heti ütem **~1,3 GB/partíció** méretet tart (a havi ütem ~5 GB-ot érne el — a `02` §13.2 5 GB-os riasztási határát azonnal elérné) |
 
 > **A `pg_cron` a `shared_preload_libraries`-ben** (a custom image) →
 > **újraindítás nélkül nem érhető el** → a CI a `strip_cron`
 > preprocesszort használja.
+>
+> **A `preshaz` reviewer P-H-11 findingje (a 2. kör):** a `07` §5.2
+> **havi** cron-t írt (`0 3 1 * *`) → **a `02` §13.3 heti jobot ír**
+> → **a két terv ellentmondott**. **A javítás: a heti ütem** (a fenti
+> táblázat szerint) → **a `02`-vel és a `09` §8.1-gyel egyezik**.
 
 ### 5.3 A migráció a deploy során
 
@@ -558,7 +611,7 @@ sudo bash ~/dev/install_pi_os.sh        # a cloud-init a beállításokat is be�
 ssh -X -t miklos@bud01.local 'sudo bash -s' < scripts/ais-receiver/install_ais_receiver.sh
 
 # 3. a mérés indítása
-ssh miklos@bud01.local 'PPM=8 sudo -E bash ~/ais-scripts/start_measurement.sh'
+ssh miklos@bud01.local 'PPM=7 sudo -E bash ~/ais-scripts/start_measurement.sh'
 ```
 
 > **A `PPM` a `rtl_test -p` kalibráció eredménye** — a mérésben **7**
@@ -608,9 +661,22 @@ echo 'command="sudo -n /usr/local/bin/nas-receive-ais.sh",no-agent-forwarding,no
 | **8. a migráció-visszafordíthatóság** | `pytest -k reversible` | bármelyik bukás | **minden push** |
 | **9. az image build** | `docker build` | bármelyik hiba | **minden push** |
 | **10. a frontend build** | `pnpm build` | bármelyik hiba | **minden push** |
+| **10b. a séma-drift ellenőrzése** | `just ddl-diff` | **bármelyik eltérés** | **minden push** |
 | **11. az e2e tesztek** | `just test-e2e` | bármelyik bukás | **hetente** |
 | **12. a teljesítményteszt** | `just test-perf` | a p95 > 800 ms (a F-NF-01) | **hetente** |
 | **13. az adat-regresszió** | `just test-regression` | bármelyik eltérés | **hetente** |
+
+> **A `prof` reviewer H-12 findingje (a 2. kör, BLOKKOLÓ):** a `02` §11
+> előírja, hogy a CI a `db/ddl/schema-v1.1.sql`-t **újragenerálja és
+> `git diff --exit-code`-tel ellenőrizze** (*„ha eltérés van, a build
+> elbukik"*) → **de a pipeline-ban eddig nem volt ilyen lépés** → **a
+> séma-drift csendben benne maradt**, és a `db/ddl/` **verziózott
+> fájlként** hamissá válhatott (a `03` OpenAPI sémája is a DB-ből
+> generálódik).
+>
+> **A javítás:** a **10b. lépés** (`just ddl-diff`) — a `justfile`-ban
+> a `ddl-diff` cél (a `check` cél is hívja) → **a `02` §11 szerinti
+> ellenőrzés a `07`-ben is létezik**.
 
 > **A `preshaz` reviewer P-H-1 findingje (a 05–09-es swarm review-ból):**
 > a `08` – teszt-stratégia-terv §2.1 **~17 percet** számol a teljes

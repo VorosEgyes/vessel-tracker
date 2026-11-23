@@ -184,6 +184,13 @@ RestartSec=10
 SupplementaryGroups=plugdev
 Nice=-5
 
+# A BOOT UTANI LEHUZAS (a 2026-11-23-i valtozas)
+# A Pi este kikapcsol es reggel 8-kor indul -> a fix 04:17-es cron
+# SOHA nem futna -> a lehuzas a service indulasa UTAN megy.
+# Az ExecStartPost nem blokkolja a service-t (a "-" prefix: a hiba
+# nem allitja le a unitot).
+ExecStartPost=-/usr/local/bin/ais-pull-after-boot.sh
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -213,9 +220,43 @@ fi
 
 sudo tee /etc/cron.d/ais-fetch > /dev/null <<EOF
 # a nyers AIS-adat heti lehuzasa a meres idejere (Pi -> NAS direkt)
+#
+# A UTEM: **a boot UTAN** (nem egy fix oraban) — a Pi este kikapcsol
+# es reggel 8-kor indul -> a fix 04:17-es cron soha nem futna.
+# A cron a heti *biztonsagi* lehuzast adja (a service indulasa kozben
+# is mehet), a Fo lehuzas a systemd unit ExecStartPost-jaban van.
 17 4 * * 1 ${USER_NAME} DB_FILE=/var/lib/ais/ais.db /usr/local/bin/ais-fetch-weekly.sh
 EOF
 sudo chmod 644 /etc/cron.d/ais-fetch
+
+# --- a boot UTANI lehuzas (a systemd ExecStartPost) ---
+# A Pi ejszaka ki van kapcsolva -> a fix oras cron nem mukodik.
+# A lehuzas a SERVICE indulasa UTAN fut (a vevo elindulasa nem
+# var a lehuzasra, es a lehuzas nem var a vevore -> a sorrend jo).
+sudo tee /usr/local/bin/ais-pull-after-boot.sh > /dev/null <<'BOOTEOF'
+#!/bin/bash
+# A heti lehuzas a service indulasa utan (a Pi ejszaka ki van kapcsolva).
+set -u
+# A log a sajat home-jaba megy — a "miklos" user nem tud irni a
+# /var/log-ba (a 2026-11-23-i teszt: a /var/log/ais-pull.log nem jott
+# letre, a sudo nelkul nem is irhato)
+LOG="${LOG:-$HOME/.ais-pull.log}"
+DB_FILE="${DB_FILE:-/var/lib/ais/ais.db}"
+export DB_FILE
+
+# a service keszen all-e? (a vevonek mar be kell indulnia)
+for i in $(seq 1 12); do
+    if [ -f "$DB_FILE" ] && [ -s "$DB_FILE" ]; then break; fi
+    sleep 10
+done
+
+{
+    echo "--- $(date '+%F %T') a boot utani lehuzas indul ---"
+    /usr/local/bin/ais-fetch-weekly.sh
+    echo "--- $(date '+%F %T') a boot utani lehuzas vege (a stausz: $?) ---"
+} >> "$LOG" 2>&1
+BOOTEOF
+sudo chmod 755 /usr/local/bin/ais-pull-after-boot.sh
 
 # ---------------------------------------------------------------------
 sudo systemctl enable ais-receiver
