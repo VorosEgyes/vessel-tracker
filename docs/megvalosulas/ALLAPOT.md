@@ -33,21 +33,25 @@ még **nincs elkezdve** — ez a mostani munkaterület.
 | `docs/ais-vevo-terv.md` | a saját AIS-vevőhálózat terve (a lefedettség, a hardver, a mérési protokoll) | kész |
 | `docs/ingest-terv.md` | az adatút (a Pi → MQTT → ingest → Postgres) | kész |
 | `docs/pi-eloallitas.md` | **a Pi előállítása lépésről lépésre** (28 lépés) | kész |
+| `docs/measurement_2026-11-22.md` | **a bud01 vevő első mérési órája** (44 000 üzenet, 199 hajó, 106 lámpa, a go/no-go 69,8%) | kész |
 | `docs/sema-core.mmd`, `docs/sema-irodalom.mmd` | a Mermaid séma-ábrák | kész |
 
 ### 2.2 Az implementációs terv-sorozat (`docs/megvalosulas/`)
 
-| # | Terv | Méret | Státusz |
-|---|---|---|---|
-| 01 | technológiai stack és projektstruktúra | 90,7 KB | **v1.3** — 2 körű swarm review, a 2. kör 17 findingje javítva |
-| 02 | adatbázis-séma (DDL v1.1) | 109,6 KB | **v1.2** — 113 finding (3 reviewer + verifier), a 10 blokkoló javítva, **futtatva és tesztelve** |
-| 03 | API-specifikáció | 19,0 KB | **v0.1** — 1. körű swarm review **fut** |
-| 04 | AIS-parser specifikáció | 25,4 KB | **v0.1** — draft |
-| 05 | frontend-arkitektúra | 24,8 KB | **v0.1** — draft |
-| 06 | szerkesztői felület | 22,1 KB | **v0.1** — draft |
-| 07 | CI/CD és környezetek | — | **nincs meg** |
-| 08 | teszt-stratégia | — | **nincs meg** |
-| 09 | üzemeltetés és observability | — | **nincs meg** |
+| # | Terv | Státusz |
+|---|---|---|
+| 01 | technológiai stack és projektstruktúra | **v1.3** — 2 körű swarm review, a 2. kör 17 findingje javítva |
+| 02 | adatbázis-séma (DDL v1.1) | **v1.5** — 113 finding, a 10 blokkoló javítva, **futtatva és tesztelve** (17/17 zöld) |
+| 03 | API-specifikáció | **v0.3** — 96 finding (3 reviewer + verifier), **mind javítva** |
+| 04 | AIS-parser specifikáció | **v1.0** — 64 finding, **mind javítva** (a mérés alapján) |
+| 05 | frontend-arkitektúra | v0.1 — draft |
+| 06 | szerkesztői felület | v0.1 — draft |
+| 07 | CI/CD és környezetek | **v0.1** — draft (új) |
+| 08 | teszt-stratégia | **v0.1** — draft (új, a mérési adatból) |
+| 09 | üzemeltetés és observability | **v0.1** — draft (új, a watchdog) |
+
+**A sorozat teljes (01–09).** A 02–04 terv swarm review-zott; az 05–09
+draft, a review-juk a következő kör.
 
 ### 2.3 A 02-es DDL — a legjobban validált rész
 
@@ -56,19 +60,20 @@ még **nincs elkezdve** — ez a mostani munkaterület.
 | Objektum | Darabszám |
 |---|---|
 | Tábla | 71 |
-| Index | 150 |
-| FK constraint | 121 |
-| CHECK constraint | 370 |
+| Index | **157** |
+| FK constraint | **124** |
+| CHECK constraint | **372** |
 | Particionált tábla | 3 (`ais_message_raw`, `water_level`, `position`) |
 | Trigger-definíció | 28 |
+| **A referenciaadat-seed** | **89 hajótípus** (a magyar nevekkel), 3 nyelv, 24 ország, 11 folyószakasz, 4 medence, 8 teherfajta, 5 üzemeltető |
 
-**16 funkcionális teszt, mind zöld** — a `db/tools/validate_ddl.py`
+**17 funkcionális teszt, mind zöld** — a `db/tools/validate_ddl.py`
 a terv markdown-ból kicsomagolja a DDL-t, lefuttatja egy élő
 PostgreSQL-en, majd füstöt hajt végre.
 
-**A validáló a `--plan` kapcsolóval bármely tervet validál** (a
-swarm review ezt a hiányt mutatta ki: a script a live fájlt olvasta
-a benyújtott helyett).
+**A validáló maga indítja el a postgres-t** (a `pgserver`) és a
+**`--plan` kapcsolóval bármely tervet validál** (a live helyett a
+benyújtott fájlt olvassa).
 
 ---
 
@@ -76,8 +81,17 @@ a benyújtott helyett).
 
 | Mi | Hol | Állapot |
 |---|---|---|
-| **A 03-as API-terv 1. körű swarm review** | a `review-swarm` kanban boardon (`t_cecb1fc2` prof, `t_60ad07e9` bori, `t_369dcd42` preshaz) | a 3 worker fut, a kimenetek még nincsenek meg |
-| A 03-as verifier + szintézis | `t_bb0c1a30`, `t_419ba291` | a worker-ek után indul |
+| **A bud01 AIS-vevő** | a Pi-n (`ais-receiver.service`) | ✅ **fut** 2026-11-22 19:19 óta — 38 000+ üzenet/óra, 199 hajó |
+| **A heti lehúzás** | a Pi cron → a NAS (`/opt/data/martin/work/ais-data/`) | ✅ **működik** (a `command=` korlátozással) — hétfő 04:17-kor |
+| **A mérési elemző** | a NAS-on (`analyze_measurement.py`) | ✅ fut — a read-only (`immutable=1`) nyitás nem hagy `-wal`/`-shm` fájlokat |
+| **A 30 napos mérés** | a `bud01` telephelyen | **2026-12-22-ig** — a go/no-go küszöbön (69,8% ≥ 50%) |
+
+**A mérés első órája:** 44 000 üzenet, 199 hajó (78 neves), 106
+navigációs lámpa, 767 FI 10 (ENI) üzenet, **69,8% földrajzi lefedettség**
+→ **a go/no-go küszöbön** (a `docs/measurement_2026-11-22.md`).
+
+> **A 03-as és a 04-es swarm review lezárult** — a findingek mind
+> be vannak írva (a 03 → v0.3, a 04 → v1.0).
 
 ---
 
@@ -97,14 +111,15 @@ a go/no-go).
 
 | Elem | Specifikáció | Ár (EUR) | Állapot |
 |---|---|---|---|
-| **Raspberry Pi** | **3B+** (a `pi-eloallitas.md` szerint a 4/5 ajánlott, de a 3B+ megfelel) | ~50 | **beszerzendő** |
-| **SD-kártya** | 32 GB, A2 osztály (a wear levelling miatt) | ~10 | **beszerzendő** |
-| **AIS USB dongle** | RTL2832U + **TCXO** (a V3, 0,5 ppm — a `pi-eloallitas.md` szerint a frekvenciapontatlanság a legnagyobb korlát) | ~25–35 | **beszerzendő** |
-| **162 MHz antenna** | AIS-re hangolt, fix, függőleges polarizáció, ~3 dB | 80–250 | **beszerzendő** |
-| **162 MHz SAW szűrő** | a túlterhelés és a LO-szivárgás csökkentésére | ~20 | **beszerzendő** |
-| **Koax** | RG-58/U, **max. ~10 m** (a hosszú kábel tönkreteszi a jelet) | 20–60 | **beszerzendő** |
-| **Táp** | a Pihoz + **UPS** (power bank) — a tápkiesés = adatlyuk | 30–60 | **beszerzendő** |
-| **Hűtés** | a Pi és a dongle is melegszik | ~10 | **beszerzendő** |
+| **Raspberry Pi 4** | a gyorsabb processzor, a 2× USB 3.0 és az 5 GHz-es Wi-Fi miatt | ~50 | ✅ **van** |
+| **SD-kártya** | 32 GB, A2 osztály (a wear levelling miatt) | ~10 | ✅ **van** (a DB 4,1 GB / 29 GB = 15%) |
+| **AIS USB dongle** | RTL2832U (a mérésben **PPM 7–8** — TCXO nélkül) | ~25–35 | ✅ **van** — a **TCXO-s (0,5 ppm) verzió a következő méréshez** |
+| **162 MHz antenna** | AIS-re hangolt, fix, függőleges polarizáció, ~3 dB | 80–250 | ✅ **van** |
+| **162 MHz SAW szűrő** | a túlterhelés és a LO-szivárgás csökkentésére | ~20 | ⬜ **később** — a mérés szűrő nélkül is indulhat |
+| **Koax** | RG-58/U, **max. ~10 m** (a hosszú kábel tönkreteszi a jelet) | 20–60 | ✅ **van** (a kék USB 3.0 portban működik) |
+| **Táp** | a Pi 4 hivatalos 5V/3A | 30–60 | ✅ **van** |
+| **UPS** (power bank) | a tápkiesés = adatlyuk | 30–60 | ⬜ **beszerzendő** |
+| **Hűtés** | a Pi és a dongle is melegszik (a PPM driftel) | ~10 | ⬜ **beszerzendő** |
 
 **A telephely:** Budapest, 3. emelet, a parttól ~2 km-re (a
 `ais-vevo-terv.md` 10.1: a rádióhorizont ~14,3 km, a **hasznos
@@ -352,15 +367,16 @@ az egyszerű útvonalat végzi (a remote beállítása + a push).
 ## 7. A terv-sorozat és a megépítés kapcsolata
 
 ```
-┌─ TERVEZÉS (kész vagy készül) ──────────────────────────────┐
-│ 01 stack  →  02 séma (VALIDÁLVA)  →  03 API (review fut)  │
+┌─ TERVEZÉS — a sorozat TELJES (01–09) ─────────────────────┐
+│ 01 stack  →  02 séma (VALIDÁLVA, v1.5)  →  03 API (v0.3)  │
 │                                       ↓                    │
-│ 04 parser  05 frontend  06 szerkesztő  07 CI  08 teszt     │
-│ 09 üzemeltetés                                                │
+│ 04 parser (v1.0)  05 frontend  06 szerkesztő  07 CI        │
+│ 08 teszt  09 üzemeltetés                                   │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─ MEGÉPÍTÉS (a mostani szakasz) ────────────────────────────┐
-│ hardver → Pi előállítás → 30 napos mérés → fixture-ök       │
+│ hardver ✅ → Pi előállítás ✅ → 30 NAPOS MÉRÉS ⏳ FUT        │
+│ (2026-11-22 óta, a go/no-go 69,8%-on)                       │
 │                              ↓                               │
 │              a saját parser → az ingest → az API             │
 └─────────────────────────────────────────────────────────────┘
@@ -372,7 +388,28 @@ fixture-ök a mérésből jönnek) — tehát a sorrend:
 
 **hardver → Pi előállítás → mérés (30 nap) → parser → ingest → API**
 
-**A közben** elkészülnek a 07–09 tervek és a 03-as review-javítások.
+**A közben** elkészültek a 07–09 tervek és a 03-as/04-es
+review-javítások — **a tervezés gyakorlatilag kész**.
+
+### 7.1 A következő három lépés
+
+| # | A lépés | A mikor |
+|---|---|---|
+| 1 | **a mérés fut** — a heti lehúzás ellenőrzése hétfőnként | **2026-12-22-ig** |
+| 2 | **a 05–09 terv swarm review-ja** (a draftok) | a mérés alatt, párhuzamosan |
+| 3 | **a saját parser implementálása** (a 04-es terv v1.0 szerint) | a mérés után (a fixture-ök készen állnak) |
+
+### 7.2 A mérésből jövő döntések
+
+| A döntés | A határ | A jelenlegi állapot |
+|---|---|---|
+| **a go/no-go** (a lefedettség) | ≥ 50% | **69,8%** ✅ |
+| **a szűvíz helyszín** (az ENI-k) | a szűkvízi szakaszokon kell mérni | **a városi helyen az ENI-arány 0,5%** → **egy 2. site kell** |
+| **a TCXO-s dongle** | a PPM ≤ 2 | **a mérésben PPM 7–8** (a TCXO nélküli dongle) |
+| **a 162 MHz szűrő** | a túlterhelés csökkentésére | **a mérés szűrő nélkül is fut** → a döntés a mérés végén |
+
+> **A Q7 (melyik telephelyen mérünk) a legfontosabb nyitott kérdés** —
+> a `04` – parser-terv K-4 findingje és a `08` – teszt-stratégia Q5-e.
 
 ---
 
