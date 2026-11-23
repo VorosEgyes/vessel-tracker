@@ -14,7 +14,7 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 | 05 | [frontend-arkitektúra](megvalosulas-05-frontend-arkitektura.md) | Az Astro SSR, az i18n routing (a F-INTL-01…08), a SEO (a `hreflang`, a JSON-LD, a sitemap), a komponensmodell, a hajóadatlap blokkjai | **v0.1 — draft** |
 | 06 | [szerkesztői felület](megvalosulas-06-szerkesztoi-felulet.md) | A session-alapú hitelesítés, a `/api/admin/v1/` végpontok, a mezőnkénti eredet szerkesztése, a konfliktuskezelés (a F-ADM-09), az üzemeltetői önbevallás (a F-ADM-08), a tömeges import (a F-ADM-07), a fordítási hiánylista | **v0.1 — draft** |
 | 07 | [CI/CD és környezetek](megvalosulas-07-ci-cd-es-kornyezetek.md) | A pipeline (a `ci.yml`/`build.yml`/a deploy-workflow-ok), a build (a `justfile`, a Docker image-ek), a környezet-változók, a migrációk, a deploy és a rollback, a titkok, a smoke teszt | **v0.1 — draft** (a `01` – stack-terv §4.2/§6.1 alapján; a `pg_cron` custom image, a heti lehúzás a `command=` korlátozással) |
-| 08 | teszt-stratégia | A teszt-piramis, a kilépési feltételek mechanizmusa | **nincs meg** (a 07 – CI/CD terv a CI-ban futó teszteket előírja) |
+| 08 | [teszt-stratégia](megvalosulas-08-teszt-strategia.md) | A teszt-piramis (7 szint), a 20 NFR → a mérőszám, a szintenkénti tesztek, a mérésből jövő fixture-ök, a kilépési feltételek | **v0.1 — draft** (a mérési adatból épülve: a `docs/measurement_2026-11-22.md`) |
 | 09 | üzemeltetés és observability | A mentés, a monitor, a naplózás | **nincs meg** (a 07 – CI/CD terv a deploy utáni smoke tesztet előírja) |
 
 ## Olvasási sorrend
