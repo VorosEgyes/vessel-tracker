@@ -375,6 +375,49 @@ UPDATE app_user SET role = 'admin' WHERE id = 2;
         msg = " | ".join(r.stderr.strip().splitlines()[-2:])[:90]
         print(f"  a role-vedelem: OK -> {msg}")
 
+    # A DB-SZEREPKOR (a 06 §2.1a / a prof C-4 findingje):
+    # a public_api NEM olvashatja az app_user-t (a session-hash nem
+    # publikus), az admin_api viszont igen -> a ket szerep hatarai
+    # valobban mukodnek.
+    r = psql(stdin_text="""
+SET ROLE public_api;
+SELECT count(*) FROM app_user;
+""")
+    if r.returncode == 0:
+        print("  HIBA: a public_api OLVASNI TUDJA az app_user-t "
+              "(a session-hash nyilanos!)")
+    else:
+        msg = " | ".join(r.stderr.strip().splitlines()[-2:])[:90]
+        print(f"  a public_api nem olvashatja az app_user-t: OK -> {msg}")
+
+    r = psql(stdin_text="""
+SET ROLE admin_api;
+SELECT count(*) FROM app_user;
+""")
+    if r.returncode != 0:
+        print("  HIBA: az admin_api NEM olvashatja az app_user-t:")
+        print("     ", " | ".join(r.stderr.strip().splitlines()[-3:])[:300])
+    else:
+        # a password_hash viszont TOGATVA marad
+        r2 = psql(stdin_text="""
+SET ROLE admin_api;
+SELECT password_hash FROM app_user LIMIT 1;
+""")
+        if r2.returncode == 0:
+            print("  HIBA: az admin_api olvashatja a password_hash-et!")
+        else:
+            msg = " | ".join(r2.stderr.strip().splitlines()[-2:])[:90]
+            print(f"  az admin_api a sessiont olvassa, a password_hash-ot nem: OK -> {msg}")
+
+    r = psql(stdin_text="""
+SET ROLE admin_api;
+SELECT count(*) FROM ais_message_raw;
+""")
+    if r.returncode == 0:
+        print("  HIBA: az admin_api olvashatja az ais_message_raw-ot!")
+    else:
+        print("  az admin_api nem olvashatja a nyers AIS-t: OK")
+
     # A ROUTE CARGO_TYPES trigger (P1-17): az ismeretlen kodo elbukik
     r = psql(stdin_text="""
 INSERT INTO route (code, origin_port_id, dest_port_id, cargo_types)

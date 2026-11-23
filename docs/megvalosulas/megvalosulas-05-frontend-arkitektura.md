@@ -142,37 +142,73 @@ alapján csak **első látogatáskor** ajánlunk nyelvet (a F-INTL-03).
 import { defineMiddleware } from 'astro:middleware';
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  const lang = context.params.lang ?? 'hu';
-  context.locals.lang = lang;
+  // A nyelv sorrendje a 03-as terv 6.1-e szerint:
+  //   1. a ?lang= query parametrer (a web explicit dontese)
+  //   2. a session / app_user.locale (csak az /api/admin/v1/-en)
+  //   3. az Accept-Language header (csak fallback)
+  //   4. a 'hu' default
+  const SUPPORTED = ['hu', 'de', 'en'];
 
-  // A nyelvválasztó sütije (a felhasznalo valaszthato)
+  const queryLang = context.url.searchParams.get('lang');
+  const pathLang = context.params.lang;
   const cookieLang = context.cookies.get('site_lang')?.value;
-  if (cookieLang && ['hu', 'de', 'en'].includes(cookieLang)) {
-    context.locals.lang = cookieLang;
-  }
 
-  // A F-INTL-03: a bongeszo nyelve alapjan csak elso latogataskor
-  const isFirstVisit = !context.cookies.get('site_lang');
-  if (isFirstVisit) {
+  let lang = 'hu';
+
+  // 1. a ?lang= a legerosebb (a README 4.3 szerint felulirhatja)
+  if (queryLang && SUPPORTED.includes(queryLang)) {
+    lang = queryLang;
+  }
+  // 2. a session — csak az admin feluleten (a 03-as terv 6.1)
+  else if (context.url.pathname.startsWith('/api/admin/v1/')) {
+    const sessionLang = context.locals.session?.user?.locale;
+    if (sessionLang && SUPPORTED.includes(sessionLang)) {
+      lang = sessionLang;
+    }
+  }
+  // 3. az utvonal-prefix (a /de/hajos oldal)
+  else if (pathLang && SUPPORTED.includes(pathLang)) {
+    lang = pathLang;
+  }
+  // 4. a suti — csak ha nincs utvonal-prefix (a kezdeti latogatas)
+  else if (!pathLang && cookieLang && SUPPORTED.includes(cookieLang)) {
+    lang = cookieLang;
+  }
+  // 5. az Accept-Language — csak fallback (a bongeszo nyelve)
+  else {
     const browserLang = pickFromAcceptLanguage(
       context.request.headers.get('accept-language'),
-      ['hu', 'de', 'en'],
+      SUPPORTED,
     );
-    if (browserLang) {
-      context.cookies.set('site_lang', browserLang, {
-        path: '/', maxAge: 60 * 60 * 24 * 365, sameSite: 'lax',
-      });
-      context.locals.lang = browserLang;
-    }
+    lang = browserLang ?? 'hu';
+  }
+
+  context.locals.lang = lang;
+
+  // A F-INTL-03: a bongeszo nyelve alapjan csak elso latogataskor
+  // tesszuk el a sütit (a path-prefix nem győzi le a kesőbbi latogatasokon)
+  if (!context.cookies.get('site_lang') && !pathLang) {
+    context.cookies.set('site_lang', lang, {
+      path: '/', maxAge: 60 * 60 * 24 * 365, sameSite: 'lax',
+    });
   }
 
   return next();
 });
 ```
 
-**A `pickFromAcceptLanguage`** a `q` értékek szerinti rendezést végzi
-(`de-DE,de;q=0.9,en;q=0.8` → `de`), és a **nyelv-prefixet** nézi
-(`de-DE` → `de`).
+**A `pickFromAcceptLanguage`** a README 4.3 szerint **egyszerű** —
+**nem `q=` súlyozással** (a README: *„nem releváns: a weboldal nyelve
+explicit módon választott"*): a nyelv-prefixet nézi (`de-DE` → `de`),
+és a **támogatott nyelvek sorrendjében** (`hu`, `de`, `en`) az első
+egyezést adja.
+
+> **A `prof` reviewer C-2 findingje (a 05–09-es swarm review-ból):**
+> az eredeti verzió **a sütivel felülírta az útvonal-prefixet** → a
+> `/de/hajos` oldalon magyar jöhetett egy magyar süti miatt → **a
+> `hreflang` (a F-NF-04) és a megjelenített nyelv ellentmondott**.
+> A fenti sorrendben **a prefix erősebb a sütinél**, a `?lang=` pedig
+> **mindenkinél erősebb**.
 
 **A `context.locals.lang` a `src/env.d.ts`-ben deklarálva** — a
 TypeScript típusát a `App.Locals` interface adja.
@@ -188,8 +224,13 @@ const LOCALE: Record<string, string> = {
 };
 
 /** A szamformazas a nyelv szerint (a 09. fejezet). */
-export function formatNumber(value: number, lang: string): string {
-  return new Intl.NumberFormat(LOCALE[lang] ?? 'hu-HU').format(value);
+export function formatNumber(value: number | string, lang: string): string {
+  // A 03-as terv M-4 findingje szerint a `numeric` mezok STRING-kent
+  // jonnek vissza (a pontossag megorese a deadweight_t-nel) — ezert
+  // a format string-bol epul, nem number-bol -> nincs pontossagveszteseg.
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (!Number.isFinite(n)) return '—';
+  return new Intl.NumberFormat(LOCALE[lang] ?? 'hu-HU').format(n);
 }
 
 /** A datumrend a nyelv szerint. */
@@ -202,9 +243,10 @@ export function formatDate(d: Date, lang: string): string {
 /** A mertekegyseg: a 09. fejezet szerint a hajomerek SI-alapuan
  *  tarolva, a megjelenites a nyelvtol fugo (km/h, t, m; a nemzet-
  *  kozi felhasznaloknak kn, nm, ft). */
-export function formatLength(meters: number, lang: string): string {
+export function formatLength(meters: number | string, lang: string): string {
   const unit = lang === 'en' ? 'ft' : 'm';
-  const value = lang === 'en' ? meters * 3.28084 : meters;
+  const m = typeof meters === 'string' ? Number(meters) : meters;
+  const value = lang === 'en' ? m * 3.28084 : m;
   return `${formatNumber(Math.round(value * 10) / 10, lang)} ${unit}`;
 }
 ```
@@ -212,6 +254,11 @@ export function formatLength(meters: number, lang: string): string {
 **A tárolás SI-alapú, a megjelenítés a kliensoldali.** A 02-es terv
 sémája a hosszt `length_m`-ben, a merülést `draught_max_m`-ben tárolja
 — **nincs mértékegység-konverzió a DB-ben**.
+
+> **A `prof` reviewer H-2 findingje (a 05–09-es swarm review-ból):**
+> a `03` – API-terv szerint a `numeric` mezők **`string`-ként** jönnek
+> vissza (a pontosság megőrzése miatt) → a formázó **`string`-et
+> fogad** → **nincs `string → number → string` körút**.
 
 ### 3.4 A paraméterezett szövegek (a F-INTL-07)
 
@@ -380,6 +427,20 @@ export async function GET({ site }) {
 }
 ```
 
+**Mely URL-eket tartalmazza?** — a **F-NF-04** (100% indexelhető)
+szerint a sitemap a **minden nyelvi változatot** tartalmazza, **a
+`hreflang`-hoz igazodva**:
+
+| A hajó állapota | A sitemap URL-jei |
+|---|---|
+| **a `vessel_i18n`-ben van mindhárom nyelv** | `/hu/hajos/<slug>`, `/de/hajos/<slug>`, `/en/hajos/<slug>` |
+| **csak a magyar van** | `/hu/hajos/<slug>` **egyedül** (a többi nem létezik → a `05` §12 Q1 szerint a `hreflang` sem kerül rá) |
+
+> **A `prof` reviewer M-2 findingje (a 05–09-es swarm review-ból):**
+> a `hreflang` (a §4.2) és a sitemap **ugyanazt a nyelvi halmazt** kell
+> lefedje → **a sitemap generátor a `vessel_i18n` nyelveit használja**,
+> **nem** mindig mindhármat.
+
 **A `robots.txt`** a `public/` mappában:
 
 ```
@@ -528,6 +589,28 @@ betöltése (300 hajós lista) < 800 ms p95*".
 
 **A `page` a lapozás** — a 03-as terv szerint.
 
+**A rendezési lehetőségek (a `03` – API-terv §3.1 szerint):**
+
+| A `sort` értéke | A rendezés | A UI-ban |
+|---|---|---|
+| `name` | a `vessel_i18n.name` (a `unaccent` + `lower` szerint) | ✅ **mutatjuk** |
+| `type` | a `vessel_type` (a hajótípus neve) | ✅ mutatjuk |
+| `length` | a `vessel.length_m` | ✅ mutatjuk |
+| `updated_at` | a `vessel.updated_at` | ✅ mutatjuk |
+| `operator` | a **`vessel.operator_id`** (a `03` §3.1 szerint) | ❌ **nem mutatjuk** |
+
+> **A `prof` reviewer H-1 findingje (a 05–09-es swarm review-ból):**
+> a `sort=operator` a `03` szerint **az `operator_id`-re** rendez
+> (indexelt) → **a felhasználó a kezelő nevét látja, de ID szerint
+> rendez** → **zavaró**. **A megoldás: a UI nem kínálja ezt a
+> rendezést** (a `03` whitelistjében maradhat, ha később kell).
+>
+> *(Ez a `bori` B-M-2 findingje is — ugyanaz a döntés, két oldal.)*
+
+**A szűrő mellé számot mutatunk?** — **nem** (a `03` §9 szerint a
+`meta.total` a **szűrés utáni** darabszám) → a szűrő **előtti** szám
+nincs a válaszban → a UI ne ígérje meg.
+
 ### 7.3 Az üres állapot (a F-SRCH-06)
 
 **Nincs találat → a javasolt lépések:**
@@ -550,11 +633,12 @@ megy (a F-DET-11).
 
 | # | Blokk | Tartalom | F |
 |---|---|---|---|
-| 1 | **Fejléc** | a név, a típus, az állapotjelző, a terület, a **bizonyossági badge** | F-DET-01, F-DET-14 |
+| 1 | **Fejléc** | a név, a típus, az állapotjelző, a terület, a **bizonyossági badge**, a **frissítés dátuma** | F-DET-01, F-DET-14, F-NF-08 |
 | 2 | **Azonosító blokk** | az ENI/MMSI/IMO/hajószám + a **forrásjelölés** | F-DET-02, F-DET-15 |
 | 3 | **„Hol van"** | a szöveges hely (R1-ben) | F-DET-06 |
 | 4 | **Műszaki adatok** | a hossz, a szélesség, a merülés, a GT, a DWT, a TEU, a teljesítmény, az építési év | F-DET-03 |
 | 5 | **Üzemeltető blokk** | a cég neve, az ország | F-DET-04 |
+| 5b | **Utazási adatok** | a **célállomás**, az indulási idő, az `eta` (ha van) | US-04 |
 | 6 | **„A hajó szerepe"** | az önjáró / bárka / toló / vontató / személyhajó | F-DET-08 |
 | 7 | **Hajótörténet** | a korábbi nevek, a tulajdonosváltások | F-DET-05 |
 | 8 | **Bizonyítékok** | a hajóhoz kötött kikötők, zsilipek | F-DET-07 |
@@ -593,6 +677,42 @@ Hossz: 110,0 m
 **A `confidence`** a `vessel_data_origin.confidence` mezője — ha van,
 egy sávgrafikon jelzi.
 
+**A bizonyossági szint (a F-CAT-14, a `03` – API-terv §5.4
+`verification_level`)** — a fejlécben:
+
+| A `verification_level` | A badge | Magyar felirat |
+|---|---|---|
+| `ais_identified` | egy ikon | „AIS-azonosított" |
+| `ais_partial` | egy ikon | „AIS-részleges" |
+| `operator_claimed` | egy ikon | „Üzemeltető állítása" |
+| `name_only` | egy ikon | „Név alapján — ENI nélkül" |
+| `unverified` | egy ikon | „Forrás nélkül" |
+
+> **A `bori` reviewer B-C-5 findingje (a 05–09-es swarm review-ból):**
+> a mérésben (a `bud01` vevő, 199 hajó) **a hajók 99,5%-a `name_only`**
+> (az ENI-arány 0,5%) → **a badge NEM opcionális kiegészítő, hanem a
+> leggyakoribb állapot** → **a felületnek ezt kell mutatnia**.
+
+**A hivatalos név és a közhasználatú név (a F-DET-02)** — **két külön
+mező**, külön jelöléssel:
+
+| A mező | A forrás | A jelölés |
+|---|---|---|
+| a **hivatalos név** (latin betűkkel) | a `vessel_i18n.name` (a `03` §6.2 szerint **nem fordított**) | nincs jelölés (ez a hivatalos) |
+| a **közhasználatú név** (a magyar név) | a `content_text` (`content_key` = `vessel.name`) | a forrásjelölés |
+
+> **A `bori` reviewer B-H-1 findingje:** a mérésben a hivatalos nevek
+> angolul jönnek (`MILLENNIUM 2`, `ZIN URU`) → **két helyen van a
+> név**, és **a felületnek meg kell mondania, melyik a hivatalos**.
+
+**A frissítés dátuma (a F-NF-08)** — a fejlécben, a
+`last_position_ts` alapján (a `09` – üzemeltetés-terv §4.1 szerint a
+`job_run.ended_at` az utolsó feldolgozás ideje):
+
+```
+Utolsó pozíció: 2026-11-22 19:50 · Katalógus frissítve: 2026-11-23 04:17
+```
+
 ### 8.3 A hiányzó adat (a F-DET-16)
 
 **A hiányzó adat üresen és jelölve** — nem találgatott értékkel:
@@ -604,6 +724,28 @@ egy sávgrafikon jelzi.
 ```
 
 **A jelölés nyelvfüggő** — a `content_key` (`vessel.field.missing`).
+
+**Két különböző hiányzó állapot (a `bori` reviewer B-H-2 findingje):**
+
+| Az állapot | A `content_key` | A jelölés | Mikor |
+|---|---|---|---|
+| **nincs ilyen adat** | `vessel.field.missing` | „Nincs adat" | a hajó nem közlekedik ilyen mezővel (pl. a `draught_reference` a Balatonnál) |
+| **még nem tudjuk** | `vessel.field.unknown` | „Még nem tudjuk" | a mező létezik, de a forrás még nem adta (pl. a `destination` — a mérésben 100%-ban üres) |
+
+**A súgó (a README 4.2, a F-INTL-07)** — minden mező mellett egy
+súgó-ikon, a `content_key` alapján (`content_text` → a `tooltip`):
+
+```astro
+<dd>
+  {formatLength(vessel.length_m, lang)}
+  <OriginBadge origin={originOf('length_m')} observedAt={...} />
+  <HelpTooltip contentKey="vessel.field.length" />
+</dd>
+```
+
+> **A `bori` reviewer B-H-7 findingje:** a README 4.2 szerint a
+> `content_key` **a súgókat is** tartja → a felületen a „mi az ENI?"
+> kérdésre **a súgó-ikon** válaszol.
 
 ---
 
@@ -623,6 +765,21 @@ Duna, 1642–1635 km, Szob–Budapest szakasz
 
 **A `river_section` a `position.river_section_id`-ből jön** — a
 `vessel_last_position` nézet tartalmazza.
+
+**A `river_km` három forrása (a `04` – parser-terv §4.5)** — a `02`
+sémában **nincs** `river_km` oszlop, ezért **három helyről** jöhet:
+
+| A forrás | A sorrend | Mikor |
+|---|---|---|
+| 1. a **fairway-mező** az AIS-üzenetből | az első | a magyar szakaszokon **üres** (a mérésben!) |
+| 2. a **`river_section` geo-illesztés** | a második | a `position.river_section_id`-ből |
+| 3. a **`fairway_distance`** (a közeli ponttól mért távolság) | a harmadik | a hajó a korridoron belül van |
+
+> **A `bori` reviewer B-C-2 findingje (a 05–09-es swarm review-ból):**
+> a mérésben (a `bud01` vevő) **a fairway-mező 100%-ban üres** → **a
+> `river_km` a 2. és a 3. forrásból jön** → **és ha ezek sem adnak
+> értéket, a „hol van" blokk a F-DET-16 szerinti „Nincs pozícióadat"
+> jelölést mutassa** — **ne egy félig kitöltött mondatot**.
 
 **Ha nincs pozíció** (a hajó még nem küldött, vagy a szűrő kizárta):
 **„Nincs pozícióadat"** — a F-DET-16 szerint.
@@ -677,6 +834,19 @@ mutat-e (a `docs/megvalosulas/` és a `docs/` között is).
 | Q5 | A sötét mód (a dark mode) | **R1-ben nincs** — a világos téma a design alapja | nyitva (R3+) |
 | Q6 | A „hasonló hajók" ajánlás (a katalógus oldalán) | **R4** (a F-CAT-13) | nyitva (R4) |
 | Q7 | A React-szigetek hydration strategiája | `client:idle` a szűrőnél, `client:visible` a többinél | **lezárva** |
+
+---
+
+**A sorozat állapota** — a terv-sorozat táblázata a
+[`README.md`](README.md)-ben (a `docs/megvalosulas/README.md`) → **a
+státusz egy helyen legyen** (a `prof` reviewer L-3 findingje):
+
+| A terv | A szomszéd |
+|---|---|
+| a 04 – parser (v1.0) | a `05` – frontend (ez a terv) |
+| a `05` – frontend (ez a terv) | a `06` – szerkesztői felület |
+| a `07` – CI/CD | a `08` – teszt-stratégia |
+| a `09` – üzemeltetés | a sorozat vége |
 
 ---
 

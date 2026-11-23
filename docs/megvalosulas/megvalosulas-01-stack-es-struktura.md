@@ -1,6 +1,6 @@
 # Implementációs terv – 01: technológiai stack és projektstruktúra
 
-**Verzió:** 1.3 (2026-11-15) — **a swarm review 2 körön át futott
+**Verzió:** 1.4 (2026-11-23 — a 05–09-es swarm review javításai) — **a swarm review 2 körön át futott
 (3 reviewer × 2 kör); a 2. kör 3 új blokkolót talált, azok is javítva**;
 a review eredménye a §12-ben
 **Dátum:** 2026-11-15
@@ -12,7 +12,7 @@ a review eredménye a §12-ben
 [`../../docs/ais-vevo-terv.md`](../../docs/ais-vevo-terv.md) ·
 [`../../docs/ingest-terv.md`](../../docs/ingest-terv.md)
 
-> A dokumentum a repóban a `docs/megvalosulas/megvalosulas-01-stack-es-struktura.md`
+> A dokumentum a repóban a `docs/megvalosulas/01-stack-es-struktura.md`
 > útvonalon van — a relatív linkek ehhez képest számolnak.
 
 **Ez a dokumentum** a hiányzó implementációs terv első darabja: a
@@ -1096,7 +1096,9 @@ Ez a terv akkor kész, ha:
    `pg_cron`-t** (custom image, nem a stock PostGIS).
    **Konkrétan:** a `just dev` felállítja a local környezetet a
    `docker compose` egyszeri hívásával; a `just check`
-   (lint + typecheck + unit + integration) zöld; a `just db-reset` tiszta
+   (lint + typecheck + unit + property + komponens + integráció +
+   DDL-validáció — **a `07` §3.1 `justfile`-ja definiálja**, a
+   `08` §6.1 kilépési feltétele) zöld; a `just db-reset` tiszta
    sémát állít elő seedelt adatokkal. A §6.1 öt szolgáltatása
    **mindegyike** a repóból buildelt vagy a repóban definiált
    konfigurációval indul (a `Dockerfile`-ok, a `mosquitto.conf`/`acl`,

@@ -126,9 +126,52 @@ szórva a workflow-ban).
 | `just db-migrate` | az Alembic `upgrade head` |
 | `just db-seed` | a referenciaadat-seed (`02` – DDL-terv §12) |
 | `just db-reset` | a DB újra (a `down -v` + `up` + migrate + seed) |
-| `just test` | a `pytest` (a unit + az integrációs) |
+| `just test` | a `pytest` (a unit + az integrációs) **a coverage flaggel** |
 | `just test-api` | az API-tesztek (a `testcontainers` DB-vel) |
 | `just test-frontend` | a `pnpm test` (a Vitest) |
+
+**A szintenkénti teszt-célok (a `prof` reviewer H-9 findingje — a
+`08` – teszt-stratégia-terv §2.1 hét szintet különböztet meg):**
+
+| A parancs | A szint | A `08` §2.1 időigénye |
+|---|---|---|
+| `just test-unit` | a unit (a `pytest tests/unit`) | ~30 s |
+| `just test-property` | a property (a `hypothesis`) | ~20 s |
+| `just test-component` | a komponens (a `pytest tests/component`) | ~2 perc |
+| `just test-integration` | az integrációs (a `testcontainers` + a PostGIS) | ~3 perc |
+| `just test-e2e` | az e2e (a `playwright`) | ~8 perc |
+| `just test-perf` | a teljesítmény (a `locust`) | ~5 perc |
+| `just test-regression` | az adat-regresszió (a `08` §7) | ~1 perc |
+| `just test-api` | az API-tesztek (a `testcontainers` DB-vel) | ~3 perc |
+| `just test-frontend` | a frontend (a `pnpm test`, a Vitest) | ~1 perc |
+
+**A `just check` — a teljes minőségi kapu egy parancsban** (a `01` –
+stack-terv §11.3 és a `08` – teszt-stratégia-terv §6.1 szerint):
+
+```make
+# a teljes minőségi kapu (a 01 §11.3 és a 08 §6.1 szerint)
+check: lint typecheck test-unit test-property test-component        test-integration ddl-validate
+
+# a release teljes kapuja (a 08 §6.1 — hetente)
+check-release: check test-e2e test-perf test-regression
+```
+
+> **A `prof` reviewer C-3 findingje (a 05–09-es swarm review-ból):**
+> a `08` §6.1 a `just check`-et írja elő a kilépési feltételnek, **de a
+> `justfile` nem definiálta** → **a kilépési feltétel nem teljesíthető**
+> volt. **A fenti `check` cél ezt megoldja** → **és a `07` §8.1
+> pipeline-lépései ebből származtatnak**.
+
+**A coverage a `just test` része (a `prof` reviewer H-10 findingje):**
+
+```make
+test:
+    pytest tests/unit tests/property tests/component --cov=duna       --cov-report=term-missing --cov-fail-under=85
+```
+
+> **A `08` §8.1 coverage-küszöböt ír elő (85%, a `domain/` és az
+> `ingest/` 90%)** → **ha ez nincs a `just test`-ben, a küszöb soha
+> nem ellenőrződik.**
 | `just lint` | a `ruff check` + a `ruff format --check` + az `eslint` + a `prettier --check` |
 | `just typecheck` | a `mypy` (a `duna` csomagra) + a `tsc --noEmit` |
 | `just build` | a Docker image-ek buildje |
@@ -149,11 +192,14 @@ szórva a workflow-ban).
 ```dockerfile
 FROM postgis/postgis:16-3.4
 # a pg_cron extension a stock PostGIS image-ben NINCS (a 01 H-11)
+# a postgresql-contrib a pg_stat_statements-hoz kell (a 09 §4.1
+# latencia-metrika) — a 02 §13.2 a custom image-ben kéri
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-16-cron \
+ && apt-get install -y --no-install-recommends \
+      postgresql-16-cron postgresql-contrib \
  && rm -rf /var/lib/apt/lists/*
 # a shared_preload_libraries a postgresql.conf-ban:
-#   shared_preload_libraries = 'pg_cron'
+#   shared_preload_libraries = 'pg_cron,pg_stat_statements'
 ```
 
 > **A `pg_cron` a custom imageben kell** — a stock PostGIS image-ben
@@ -393,6 +439,40 @@ echo "==> a health check"
 | **A migráció** | igen (a `alembic upgrade head`) | igen |
 | **A smoke teszt** | igen | igen (§9) |
 | **A rollback** | a `git revert` + a `alembic downgrade` | **a `git revert` + a `alembic downgrade`** — a `release-terv` 9. szerint |
+| **a host cron telepítése** | igen (a §6.1a) | igen (a §6.1a) |
+
+### 6.1a A host cron telepítése (a `preshaz` reviewer P-C-5 findingje)
+
+**A `09` – üzemeltetés-terv §5.1 (a watchdog) és §3.1 (a heti mentés)
+a **host cron-jára** épül** → **a deploy script telepíti** →
+**nem kézi lépés** (különben elcsúszhat).
+
+```bash
+# infra/deploy.sh — a cron telepítése (a production VPS-en)
+install_crontab() {
+  local CRON_FILE=/etc/cron.d/duna-ops
+  cat > "$CRON_FILE" <<'CRON'
+# a Duna hajokoveto uzemeltetesi feladatai (a 09 — uzemeteles terv)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# a heti teljes mentes (a 09 §3.1) — vasarnap 03:00 (a hétfői lehuzas ELOTT)
+17 3 * * 0 root /opt/duna/infra/backup.sh >> /var/log/duna-backup.log 2>&1
+
+# a riasztasi watchdog (a 09 §5.1) — orankent
+23 * * * * root /opt/duna/infra/watchdog.py >> /var/log/duna-watchdog.log 2>&1
+CRON
+  chmod 0644 "$CRON_FILE"
+  chown root:root "$CRON_FILE"
+}
+```
+
+> **A `09` §3.1 szerint a heti mentésnek a deploy ELŐTT kell lennie**
+> (a `preshaz` P-M-4 findingje) → **a vasárnapi 03:00** a hétfői
+> 04:17-es Pi-lehúzás előtt van → **a mentés friss adatot tartalmaz**.
+>
+> **A `09` §5.2 A9 (a drill riasztása)** a staging DB `job_run`-ját
+> figyeli → **a drill a stagingben fut** (a `09` §3.2 szerint).
 
 ### 6.2 A rollback
 
@@ -516,16 +596,45 @@ echo 'command="sudo -n /usr/local/bin/nas-receive-ais.sh",no-agent-forwarding,no
 
 ### 8.1 A pipeline kötelező lépései (a sorrend)
 
-| A lépés | A parancs | A bukás feltétele |
+| A lépés | A parancs | A bukás feltétele | A gyakoriság |
+|---|---|---|---|
+| **1. a lint** | `just lint` | bármelyik warning | **minden push** |
+| **2. a típusellenőrzés** | `just typecheck` | bármelyik hiba | **minden push** |
+| **3. az unit tesztek** | `just test-unit` | bármelyik bukás | **minden push** |
+| **4. a property tesztek** | `just test-property` | bármelyik bukás | **minden push** |
+| **5. a komponens tesztek** | `just test-component` | bármelyik bukás | **minden push** |
+| **6. az integrációs tesztek** | `just test-integration` | bármelyik bukás | **minden push** |
+| **7. a DDL-validáció** | `just ddl-validate` | bármelyik constraint-hiba | **minden push** |
+| **8. a migráció-visszafordíthatóság** | `pytest -k reversible` | bármelyik bukás | **minden push** |
+| **9. az image build** | `docker build` | bármelyik hiba | **minden push** |
+| **10. a frontend build** | `pnpm build` | bármelyik hiba | **minden push** |
+| **11. az e2e tesztek** | `just test-e2e` | bármelyik bukás | **hetente** |
+| **12. a teljesítményteszt** | `just test-perf` | a p95 > 800 ms (a F-NF-01) | **hetente** |
+| **13. az adat-regresszió** | `just test-regression` | bármelyik eltérés | **hetente** |
+
+> **A `preshaz` reviewer P-H-1 findingje (a 05–09-es swarm review-ból):**
+> a `08` – teszt-stratégia-terv §2.1 **~17 percet** számol a teljes
+> szintre → **minden pushra ennyi túlzás** → **a gyors lépések
+> (1–10) mindig, a lassúak (11–13) hetente.**
+>
+> **A gyors lépések (1–10) ideje: ~6 perc** → **elfogadható minden
+> pushra**.
+
+**A flake-ek és a gate (a `preshaz` reviewer P-H-7 findingje):**
+
+| A teszt | A retry | A bukás feltétele |
 |---|---|---|
-| **1. a lint** | `just lint` | bármelyik warning |
-| **2. a típusellenőrzés** | `just typecheck` | bármelyik hiba |
-| **3. a unit tesztek** | `pytest apps/api/tests/unit` | bármelyik bukás |
-| **4. az integrációs tesztek** | `pytest apps/api/tests/integration` | bármelyik bukás |
-| **5. a DDL-validáció** | `just ddl-validate` | bármelyik constraint-hiba |
-| **6. a migráció-visszafordíthatóság** | `pytest -k reversible` | bármelyik bukás |
-| **7. az image build** | `docker build` | bármelyik hiba |
-| **8. a frontend build** | `pnpm build` | bármelyik hiba |
+| a unit + a property + a komponens | **nincs retry** | bármelyik bukás |
+| az integrációs + az e2e | **1 retry** (`pytest-rerunfailures`) | **a retry után is bukik** |
+
+**A flake-ek külön jelölve** (a `pytest` `--reruns` + a CI egy külön
+számlálója) → **a havi release a flake-ek számát is nézze**
+(a `09` – üzemeltetés-terv §10) → **egy flake nem gyengíti a gate-et,
+de látható**.
+
+> **A `08` §8.2 szerint** a CI 2 újrapróbálkozást csinál → **a
+> fenti táblázat szűkíti**: **a gyors szintek retry nélkül** (a
+> determinisztikusak), **a lassúak 1 retry-val**.
 
 ### 8.2 A tesztek CI-ban futása
 

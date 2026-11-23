@@ -61,6 +61,25 @@
 | **teljesítmény** | a betöltési idők (a `locust`/`k6`) | **~6** | **< 5 perc** | hetente |
 | **regresszió (adat)** | a mérési adat teljes replayje | **1** | **~7,5 óra** | a mérési időszak végén |
 
+**A szintek a `just` célokhoz rendelése (a `prof` reviewer H-9
+findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
+
+| A szint | A `just` cél | A `just check` része? |
+|---|---|---|
+| unit | `just test-unit` | ✅ |
+| property | `just test-property` | ✅ |
+| komponens | `just test-component` | ✅ |
+| integrációs | `just test-integration` | ✅ |
+| e2e | `just test-e2e` | ❌ (a `check-release`-ben) |
+| teljesítmény | `just test-perf` | ❌ (a `check-release`-ben) |
+| regresszió | `just test-regression` | ❌ (a `check-release`-ben) |
+
+> **A `just check`** = a lint + a typecheck + az 5 gyors szint + a
+> DDL-validáció (**~6 perc**, a `07` §8.1 szerint) → **ez a
+> kilépési feltétel** (a §6.1).
+> **A `just check-release`** = a `check` + az e2e + a teljesítmény + a
+> regresszió.
+
 ### 2.2 A piramis aránya
 
 ```
@@ -304,6 +323,42 @@ típusból legalább egy**, és a gyakori típusokból több:
 fixture-ök forrása**. **A nyers `ais.db` fájl nem kerül a repóba**
 (~600 MB/hét) → **a NAS-on marad** (`/opt/data/martin/work/ais-data/`).
 
+**A `manifest.json` tartalma (a `prof` reviewer C-6 findingje):**
+
+```json
+{
+  "version": 1,
+  "created_at": "2026-11-22T19:50:00Z",
+  "source": "bud01 (a 47.5755205, 19.046013 pontban)",
+  "total_messages": 43425,
+  "fixtures": [
+    {"file": "msg_01_position.json", "type": 1, "count": 10,
+     "mmsi": "243043014", "received_at": "2026-11-22T19:44:12Z"},
+    {"file": "msg_08_fi10.json", "type": 8, "count": 5,
+     "mmsi": "243043014", "received_at": "2026-11-22T19:46:03Z"}
+  ],
+  "coverage": {
+    "types_present": [1, 2, 3, 4, 5, 8, 15, 18, 20, 21, 23, 24],
+    "missing_types": [6, 7, 9, 10, 11, 12, 13, 14, 16, 17, 19, 22],
+    "note": "a hianyzó tipusok nem fordultak elo a merésben — a 04 §5.1 szerint ez nem hiba"
+  }
+}
+```
+
+**A méretkorlát (a `preshaz` reviewer P-C-4 findingje)** — **a repó
+mérete korlátlanul ne nőjön**:
+
+| A határ | Az érték | Ellenőrzés |
+|---|---|---|
+| a `manifest.json` mérete | **legfeljebb 100 KB** | a `08` §8.1 coverage-lépés |
+| a JSON fixture-ök összesen | **legfeljebb 5 MB** | ugyanott |
+| **a teljes `.db` a repóban** | **tilos** | a pre-commit hook |
+
+> **A `prof` reviewer C-6 findingje:** a §7.2 egy **teljes
+> `full-2026-12-22.db` SQLite-fájlt** hivatkozott a repóban
+> (~3 GB) → **ellentmondott a §5.3-nak**. **A javítás: a teljes
+> replay a NAS-ról jön** (lásd a §7.2).
+
 ---
 
 ## 6. A kilépési feltételek
@@ -312,7 +367,7 @@ fixture-ök forrása**. **A nyers `ais.db` fájl nem kerül a repóba**
 
 | A sprint | A kilépési feltétel | **Hogyan mérjük** |
 |---|---|---|
-| **1 — a projekt alapja** | a `just check` zöld | a CI `lint`+`test` job |
+| **1 — a projekt alapja** | a `just check` zöld | a CI `lint`+`test` job (a `07` §3.1 definiálja a `check` célt) |
 | **2 — a séma** | a migrációk visszafordíthatók, a constraint-ek élnek | a `just ddl-validate` + a `reversible` teszt |
 | **3 — az API** | a 20 NFR-ből a **nem vizuális**ak teljesülnek | az integrációs tesztek |
 | **4 — a frontend** | a **3 kritikus e2e** zöld | a Playwright |
@@ -352,13 +407,26 @@ terv 3.2 táblázatának forrása**, és **a regressziós tesztek alapja**.
 
 **A 30 napos mérés végén** a teljes adathalmaz **replay**-elhető:
 ```bash
-just replay db/fixtures/ais/full-2026-12-22.db
+# a teljes adathalmaz a NAS-on van (a 08 §5.3) — NEM a repóban
+just replay /opt/data/martin/work/ais-data/ais-20261222-1950.db
 ```
 → **a teljesítmény mérhető** (a `preshaz` P-H-3 findingje: a
 `job_run` `started_at`/`ended_at` → a feldolgozási sebesség).
 
+> **A `prof` reviewer C-6 findingje:** az eredeti alakban a replay a
+> **repóban lévő** `db/fixtures/ais/full-2026-12-22.db` fájlt
+> hivatkozta (~3 GB) → **ellentmondott a §5.3-nak** (a nyers DB nem
+> kerül a repóba) → **a javítás: a NAS-ról jön** (a fenti útvonal).
+>
 > **A teljes replay a CI-ban NEM fut** (7,5 óra) → **a mérési
 > időszak végén, egyszer** → a regressziós baseline.
+>
+> **A `justfile`-ban (a `07` §3.1):**
+> ```make
+> # a teljes meresi adat replay (a NAS-rol — a 08 §7.2)
+> replay FILE:
+>     python -m duna.ingest.replay --file {{FILE}} --batch-size 2000
+> ```
 
 ---
 
@@ -389,11 +457,24 @@ just replay db/fixtures/ais/full-2026-12-22.db
 ### 8.2 A flake-ek
 
 **A hálózati függő tesztek** (a külső AIS-forrás, az S3, a Sentry)
-→ **`@pytest.mark.flaky`** a `pytest-rerunfailures`-szal, és
-**a CI-ban 2 újrapróbálkozás**.
+→ **`@pytest.mark.flaky`** a `pytest-rerunfailures`-szal.
+
+| A szint | A retry | Miért |
+|---|---|---|
+| unit + property + komponens | **0** | determinisztikusak → **a retry elrejtené a valódi hibát** |
+| integrációs + e2e | **1** | a DB és a böngésző flake-el |
 
 > **A „flake" a release-gate-et gyengíti** → **a havi release-ben a
-> flake-ek számát nézzük** (a `09` terv metrikája).
+> flake-ek számát nézzük**.
+
+**A flake-szám a `09` – üzemeltetés-terv §10 metrikája (a `prof`
+reviewer M-9 findingje — a lánc eddig nem zárult):**
+
+| A metrika | A mérés | A küszöb |
+|---|---|---|
+| **a flake-ek száma a havi release-ben** | a CI összesítője a `@pytest.mark.flaky` jelölésből | **a release előtt: 0 új flake** (a meglévő is lista) |
+
+**A `09` §10 metrikatáblázata ezt tartalmazza** → **a lánc zárva.**
 
 ---
 
@@ -402,8 +483,8 @@ just replay db/fixtures/ais/full-2026-12-22.db
 | # | Kérdés | Az alapértelmezés | Az állapot |
 |---|---|---|---|
 | Q1 | **A coverage küszöb** | **85%** (a `domain/` és az `ingest/` 90%) | nyitva — **Miklós döntése** |
-| Q2 | **A teljesítményteszt hetente fut-e a CI-ban?** | **igen** (a `main`-en, a PR-en nem) | nyitva (a `07` Q6-tól függ) |
-| Q3 | **Az e2e a `main`-en fut-e vagy csak a release-ben?** | **a `main`-en** (a PR-en túl lassú) | nyitva |
+| Q2 | **A teljesítményteszt hetente fut-e a CI-ban?** | **igen** (a `main`-en, a PR-en nem) — **a `07` §8.1 a 11–13. lépéseket hetente futtatja** | **lezárva** (a `prof` reviewer P-H-1 findingje) |
+| Q3 | **Az e2e a `main`-en fut-e vagy csak a release-ben?** | **a `main`-en** (a PR-en túl lassú) — **a `07` §8.1 szerint hetente** | **lezárva** |
 | Q4 | **A regressziós replay (7,5 óra) a CI-ba kerül-e?** | **nem** — a mérési időszak végén, egyszer, a baseline-ra | nyitva |
 | Q5 | **Az F-NF-18 (≥ 60% ENI) mérhető-e a városi helyen?** | **nem** → **a szűkvízi helyszín kell** (a `04` K-4 finding) | **nyitva — Miklós döntése** |
 | Q6 | **Mekkora a `hypothesis` példaszám a CI-ban?** | **100** (a nightlyban 10 000) | nyitva |

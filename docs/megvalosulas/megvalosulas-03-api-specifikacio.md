@@ -516,6 +516,40 @@ GET /api/v1/search?q=12345678&area=duna
 
 **A `q` minimális hossza 2 karakter** — 1 karakterre **422**.
 
+> **Az azonosítók elérhetősége — a mérési adat korlátja**
+> (a `bori` reviewer B-C-1 findingje, a 05–09-es swarm review-ból).
+>
+> A `docs/measurement_2026-11-22.md` szerint a mérésben (a `bud01`
+> vevő, 199 hajó) **az ENI-vel azonosított hajók aránya 0,5%** (1 hajó),
+> miközben a **hívójellel 76/78 hajó azonosítható**.
+>
+> **Ez nem API-hiba, hanem adatforrás-hiány** — de a felhasználónak
+> tudnia kell. Ezért:
+>
+> | Az azonosító | A mérésben | A kereső viselkedése |
+> |---|---|---|
+> | az `mmsi` | 100% | mindig talál (minden AIS-üzenetben van) |
+> | a `callsign` | ~97% | talál (a `vessel_identifier`-ben) |
+> | az `imo` | ritka | nem talál → **üres eredmény** |
+> | az `eni` | **0,5%** | nem talál → **üres eredmény** |
+>
+> **A `GET /search` üres eredményre** (pontos azonosító, de nincs találat)
+> → **404 `not-found-in-area`** a szokásos válasszal, **de a
+> `meta.hint` mezővel** (a `03` §5.4a szerint):
+>
+> ```json
+> {
+>   "error": {
+>     "code": "not-found-in-area",
+>     "message": "Nincs ENI-vel azonosított hajó a Duna-katalógusban.",
+>     "hint": "Az ENI-k a magyar Duna-szakaszon ritkák (a mérésben a hajók 0,5%-ának van). Próbáld a hívójellel vagy a MMSI-vel."
+>   }
+> }
+> ```
+>
+> **A `hint` a `search` végpont kizárólagos mezője** — a többi
+> végpont nem ad `hint`-et (a `03` §5.4a).
+
 ### 3.3 A referenciatáblák
 
 | Method | Path | Leírás |
@@ -1215,13 +1249,29 @@ def build_location_text(row, section_name: str | None,
 
 **A sorrend (az első nem-null győz):**
 
-1. a path prefix (`/api/v1/hu/...`)? — **R1-ben nincs**, a `web` adja át
-2. az `Accept-Language` header (`hu-DE,hu;q=0.9,de;q=0.8`)
-3. a `?lang=` query paraméter
+1. **a `?lang=` query paraméter** — a `web` **explicit döntése**; a
+   README 4.3 szerint *„a weboldal nyelve explicit módon választott, a
+   `?lang=` paraméterrel felülírható"* → **ez az elsőbbség**
+2. **a `session` / `app_user.locale`** — **csak az `/api/admin/v1/`-en**
+   (a bejelentkezett szerkesztő nyelve); a `public_api` nem olvashatja
+   az `app_user`-t (a `02` – DDL-terv §9)
+3. az `Accept-Language` header (`hu-DE,hu;q=0.9,de;q=0.8`) — **csak
+   fallback**, ha nincs explicit kérés. A README 4.3 **ellenzi** a `q=`
+   súlyozás használatát (*„nem releváns: a weboldal nyelve explicit
+   módon választott"*) → **a header csak az első látogatáskor számít**
 4. az alapértelmezés: **`hu`**
 
 **A `?lang=` csak a belső API-n érvényes** — a B2B-nél (R5) a
 hivatkozó rögzíti.
+
+> **A `prof` reviewer H-4 findingje:** a korábbi sorrend
+> (path prefix → `Accept-Language` → `?lang=`) **az `Accept-Language`
+> fejlécet elsődlegessé tette**, ami (a) **mindig** jelen van (a
+> böngészők küldik) → **a `?lang=` sosem érvényesülne**, és (b)
+> **ellentmondott a README 4.3-nek**. A fenti sorrend a `?lang=`
+> elsőbbségét adja — **és ezt a `05` – frontend-terv §3.2-nek is
+> követnie kell** (a nyelvválasztó süti **ne** írhassa felül az
+> explicit `?lang=`-ot).
 
 ### 6.2 Mi fordítódik, mi nem
 

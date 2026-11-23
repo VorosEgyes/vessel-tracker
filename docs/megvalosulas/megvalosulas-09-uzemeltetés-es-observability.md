@@ -125,24 +125,43 @@ find "${BACKUP_DIR}" -maxdepth 1 -name 'full-*' -mtime +28 -exec rm -rf {} +
 # infra/restore-drill.sh — a heti visszaallitasi proba
 set -euo pipefail
 
+# A STAGING kompozban fut (a prof H-7 / preshaz P-C-3 findingje):
+# a production lemezen a restore_test DB a teljes mentes merete
+# (~2-3 GB) lenne, a position pedig ~15-25 GB -> a drill hetente
+# karosithatna a productiont.
+COMPOSE=infra/compose/staging.yml
+
 # 1. egy eldobható DB
-docker compose -f infra/compose/production.yml exec -T postgres \
+docker compose -f "$COMPOSE" exec -T postgres \
   createdb -U postgres restore_test
 
 # 2. a legutolso teljes mentes visszatoltes
 LATEST=$(ls -dt /srv/app/backups/full-* | head -1)
-docker compose -f infra/compose/production.yml exec -T postgres \
+docker compose -f "$COMPOSE" exec -T postgres \
   pg_restore --clean --if-exists --no-owner --dbname=restore_test \
   < "${LATEST}/base.tar.gz"
 
 # 3. az ellenorzes: a sorszamok egyeznek-e
-docker compose -f infra/compose/production.yml exec -T postgres \
+docker compose -f "$COMPOSE" exec -T postgres \
   psql -U postgres -d restore_test -tAc \
   "SELECT count(*) FROM vessel;"
+
+# 4. a restore_test DB torlese (a lemez felszabaditasa)
+docker compose -f "$COMPOSE" exec -T postgres \
+  dropdb -U postgres restore_test
 ```
 
 > **A próba eredménye a `job_run` táblába** (`job_name='restore-drill'`)
-> → **a `09` §5 watchdogja figyeli**.
+> → **a `09` §5 watchdogja figyeli** — **a STAGING DB `job_run`-ját**
+> (a production érintetlen marad).
+
+> **A `prof` reviewer H-7 és a `preshaz` reviewer P-C-3 findingje:**
+> az eredeti alakban a drill a **production** compose-on futott → a
+> `restore_test` DB a **production lemezén** foglal helyet (a teljes
+> mentés mérete) → **a 2 GB-os VPS-en a `position` (~15–25 GB) mellett
+> ez elfoghatja a lemez nagy részét**. **A javítás: a staging** (a
+> `07` §6.1 szerint a staging a `release/*` deploy-k célpontja) +
+> **a `restore_test` DB törlése a drill után** (a 4. lépés).
 
 ### 3.3 A visszaállítás katasztrófája esetén
 
@@ -167,9 +186,16 @@ docker compose -f infra/compose/production.yml exec -T postgres \
 | **A feldolgozás sikeressége** | `job_run.status` | a `failed`/`partial` sorok száma > 0 |
 | **A pozíciófedettség** | a `vessel_last_position` nézet | a hajók > 20%-ának nincs 1 óránál régebbi pozíciója |
 | **A partíció-méret** | `pg_total_relation_size` | egy partíció > 5 GB |
-| **A lekérdezési latencia** | `pg_stat_statements` | a p95 > 1 s |
+| **A lekérdezési latencia** | `pg_stat_statements` | a `mean_exec_time` > 100 ms |
 | **A hibák** | `data_quality_event` | a nyitott `critical` események száma > 0 |
 | **A vevőhálózat** | `ais_receiver_site.last_seen_at` | egy aktív vevő > 30 perce nem ad heartbeatot |
+
+> **A `prof` reviewer M-8 findingje:** a `pg_stat_statements` **a teljes
+> lekérdezés átlagát** adja → **a p95 NEM ebből jön** → **a határ
+> megváltozott**: a `mean_exec_time > 100 ms`. Az **alkalmazásszintű p95**
+> a `03` §9 szerint a `duration_ms`-ből mérhető (a `X-Request-ID`-s
+> logból) → **a F-NF-01 (800 ms) mérhető** így.
+
 
 **A `pg_stat_statements` extension** a `0001_extensions.sql`-ben (a custom
 image-ben) — **a latencia-méréshez kell**.
@@ -185,7 +211,7 @@ központi DB**, tehát a vevő oldali metrikák:
 | **a PPM** | az `ais_stats_hourly.ppm` | a **|ppm| > 15** → a kristály driftel (a mérésben −6,1) |
 | **a jelerősség** | az `ais_stats_hourly.level_min`/`level_max` | a **szint tartósan 0** → az antenna/szűrő problémája |
 | **az üzenetszám** | az `ais_stats_hourly.msg` | **a napi 0 üzenet** → a vevő leállt |
-| **a heti lehúzás** | a NAS `ais-data/` fájlok dátuma | **a fájl 8 napnél régebbi** → a lehúzás elmaradt |
+| **a heti lehúzás** | a NAS `ais-data/` fájlok dátuma | **a fájl 4 napnél régebbi** → a lehúzás elmaradt |
 
 > **A `level_min`/`level_max` a v0.71-ben 0** (a jelerősség nem kerül
 > a DB-be — a `04` – parser-terv C-6 findingje) → **ez a két metrika
@@ -299,7 +325,7 @@ async def notify(messages: list[str]) -> None:
 
 | # | A riasztás | A határ | A sürgősség | **A csatorna** |
 |---|---|---|---|---|
-| A1 | a heti lehúzás elmaradt | a legutóbbi fájl 8 napnél régebbi | **kritikus** (a 3. héten az adat elveszik) | Telegram |
+| A1 | a heti lehúzás elmaradt | a legutóbbi fájl **4 napnál régebbi** | **kritikus** (a 3. héten az adat elveszik) | Telegram |
 | A2 | a feldolgozás hibás | `job_run.status` = `failed`/`partial` | kritikus | Telegram |
 | A3 | a vevő nem ad heartbeatot | 30 perc | kritikus (a nyers adat a leállás pillanatáig megvan) | Telegram |
 | A4 | a nyitott `critical` esemény | > 0 | magas | Telegram |
@@ -327,9 +353,12 @@ if [ -z "$LATEST" ]; then
   echo "HIBA: egyetlen lehuzott fajl sincs" >&2
   exit 1
 fi
+# a hatar 4 nap (a prof C-7 / preshaz P-C-1 findingje): a lehuzas heti,
+# igy a 8 napos hatar gyakorlatilag sosem lep tul — a 4 nap a heti
+# ritmus + 3 nap tartalek, es a 2. heti kimaradast AZONNAL jelzi
 AGE_DAYS=$(( ( $(date +%s) - $(stat -c %Y "$LATEST") ) / 86400 ))
-if [ "$AGE_DAYS" -gt 8 ]; then
-  echo "HIBA: a legutolbi lehuzas ${AGE_DAYS} napos (a hatar: 8)" >&2
+if [ "$AGE_DAYS" -gt 4 ]; then
+  echo "HIBA: a legutolbi lehuzas ${AGE_DAYS} napos (a hatar: 4)" >&2
   exit 1
 fi
 ```
@@ -426,6 +455,44 @@ journalctl -u ais-receiver -f --since "1 hour ago"
 | **a CPU** | az Astro statikus build (a build nem a VPS-en fut, a CI-ban) | a `web` a statikus fájlokat szolgálja ki |
 | **a `statement_timeout`** | 5 s | a `03` – API-terv §9 |
 
+**A havi partíció mérete (a `preshaz` reviewer P-H-2 findingje)** — a
+mérésből számolva:
+
+| A számítás | Az érték |
+|---|---|
+| a pozíciók a mérésben | ~900 000 pozíció/nap |
+| **egy hónap** | **~27 millió pozíció** |
+| **egy havi partíció** | **~27 millió sor ≈ 5 GB** |
+
+> **Ez a `02` §13.2 riasztási határát („egy partíció > 5 GB") **az
+> első hónapban eléri** → **vagy napi partíció kell, vagy a határ
+> emelendő**. **A döntés: a havi partíció marad, de a `position`
+> partíció a TTL helyett a méret alapján is hasad** → a `drop_expired_partitions`
+> heti fut → **egy partíció ~1,3 GB** (a heti adag) → **a határ alatt marad**.
+
+**A `COPY` és a `statement_timeout` (a `preshaz` reviewer P-H-3
+findingje)** — a `COPY` **egy** utasítás, nem `executemany`:
+
+| A mód | A `statement_timeout` (5 s) |
+|---|---|
+| a `COPY` egy 27 millió soros fájlból | **ELBUKIK** (egy utasítás > 5 s) |
+| **a `COPY` 5 millió soros darabokban** | ✅ (a `09` §8.1 szerint: **a `COPY` batchelt**) |
+| az `INSERT` `executemany`-val, 2 000 sor/batch | ✅ |
+
+**A heti mentés lemezigénye (a `preshaz` reviewer P-H-5 findingje):**
+
+| A szükséges hely | Az érték |
+|---|---|
+| az élő DB | ~15–25 GB (a `position`) |
+| **a heti mentés fájlja** | **~2–3 GB** (a `pg_basebackup` tömörítve) |
+| **a WAL-archivum** (a PITR-hez, 7 nap) | **~a DB mérete** |
+| **a drill** (a stagingben) | a `restore_test` DB mérete → **a staging lemezén** |
+
+> **A skálázási trigger (a §8.3) ezért nem elég a „VPS lemez > 85%"**:
+> **a heti mentés idejére duplán kell hely** → **a `09` §8.3
+> trigger-táblázata kap egy sort: „a heti mentés idejére van hely"
+> (a mentés + a WAL-archivum együtt)**.
+
 ### 8.2 A nyers adat mennyisége (a mérésből)
 
 | | A mérés | A 30 napos |
@@ -443,11 +510,32 @@ journalctl -u ais-receiver -f --since "1 hour ago"
 | a `position` partíciója | > 5 GB | a `drop_expired_partitions` gyakorisága |
 | a `pool_size` kimerül | a `pool_timeout` | a `pgbouncer` |
 | a VPS lemez | > 85% | a tárhely bővítése |
+| **a heti mentés idejére van hely** | **a DB + a mentés + a WAL-archivum együtt** | a tárhely bővítése **vagy** a mentés idejének áthelyezése |
 
-> **A 3 site a F1-ben** → a nyers forgalom **3×os** → **a feldolgozás
-> a heti lehúzás után** (a ~27 millió üzenet) → **ez már nem fér el egy
-> éjszakába** → **a feldolgozás párhuzamosítása** (a `position`-re
-> `COPY`, a `04` – parser-terv §9).
+**A 3 site (az F1) kapacitása (a `preshaz` reviewer P-C-2 findingje):**
+
+| A számítás | Az érték |
+|---|---|
+| 1 site, 30 nap (a mérés) | ~27 millió üzenet |
+| **3 site, 30 nap** | **~81 millió üzenet** |
+| a feldolgozás egy site-ra (a mérésből) | **~7,5 óra** |
+| **3 site egyszerre** | **~22,5 óra** → **egy éjszakát sem bír** |
+| **a `COPY`-vel** (a `04` §9 — ~10× gyorsabb) | **~2,2 óra** |
+| **a site-ok szekvenciális indítása** (a `09` §7.3) | **hetente 1 site** → **~45 perc/hét** |
+
+**A megoldás — mindkettő egyszerre:**
+
+1. **a `COPY` a `position`-re** (a `04` – parser-terv §9) → a 22,5 óra
+   → **~2,2 óra**;
+2. **a site-ok szekvenciális indítása** (a `09` §7.3 lépései) →
+   **a heti lehúzás nem egyszerre, hanem site-onként** → **a heti
+   lehúzás a `bud01`-gyel kezdődik** (a mérési időszak folytatása).
+
+> **A mérési protokoll (a `04` §8) **a 3 site-ra is érvényes** legyen**:
+> a `msg/hajó` arány site-onként mérendő → **a F1 küszöb (a 3 site,
+> az 50%-os lefedettség) a teljes hálózatra vonatkozik**.
+
+
 
 ---
 
@@ -490,9 +578,20 @@ hónap végén a `09` §10 metrikája**.
 | Q2 | **A riasztások csatornája** | **Telegram** (a `02` §13.2 szerint) — de a `watchdog.py` **a projekt kulcsát** használja, nem a Hermesét | nyitva |
 | Q3 | **A Sentry bevezetése R1-ben?** | **igen** (a `SENTRY_DSN` a `07` §2.2-ben) — a `CRITICAL` szintű hibák oda mennek | nyitva |
 | Q4 | **A restore-drill heti kötelező-e vagy havi?** | **heti** (a `02` §13.1: „*a mentés mindig visszaállítással ellenőrzött*") | **lezárva** (a `02` szerint) |
-| Q5 | **A vevő heartbeatja hogyan érkezik a DB-be?** | a `ais_receiver_site.last_seen_at` a **feldolgozás** során frissül (a heti lehúzásból) → **R1-ben a heartbeat napi gradiensnyi, nem 30 perces** | **nyitva — a `02` §13.2 határa 30 perc, de a heti lehúzás ezt nem tudja biztosítani** |
-| Q6 | **A `position` 90 napos TTL-e a VPS lemezén elég-e?** | **~15–25 GB** (a mérésből) — a VPS lemezének mérete **ismeretlen** | nyitva — **Miklós döntése** |
-| Q7 | **A watchdog ütemezése** | **óránként** (a host cron) — a `job_run` 24 órás ellenőrzés napi szinten elég | nyitva |
+| Q5 | **A vevő heartbeatja hogyan érkezik a DB-be?** | a `ais_receiver_site.last_seen_at` a **feldolgozás** során frissül (a heti lehúzásból) → **a határ környezetfüggő: R1-ben 10 nap, R2-ben (élő MQTT) 30 perc** (a §4.1) | **lezárva** (a `prof` reviewer C-5 findingje) |
+| Q6 | **A `position` 90 napos TTL-e a VPS lemezén elég-e?** | **~15–25 GB** (a mérésből) — a VPS lemezének mérete **ismeretlen** → **ez a tervezés BLOKKOLÓJA** (a `preshaz` reviewer P-L-1 findingje: a TTL a lemez mérete nélkül nem tervezhető meg) | **nyitva — **Miklós döntése** (a blokkoló)** |
+| Q7 | **A watchdog ütemezése** | **óránként** (a host cron — a `07` §6.1a telepíti) — a `job_run` 24 órás ellenőrzés napi szinten elég | **lezárva** (a `preshaz` reviewer P-C-5 findingje) |
+
+**A release-enkénti metrikák (a `release-terv` 11. fejezete):**
+
+| A metrika | A forrás | A küszöb |
+|---|---|---|
+| a fordítások átnézettsége | a `content_text` riport | 100% (a F-NF-16) |
+| az ENI-azonosítás aránya | a mérési riport | a mérési időszakban a mérés adata; R1-ben a kézi import |
+| a lefedettség | a geográfiai korridor-riport | ≥ 50% (a F1) |
+| **a flake-ek száma** | a CI összesítője (a `@pytest.mark.flaky`) | **a release előtt: 0 új flake** (a `08` §8.2) |
+| az ENI-duplikátumok száma | a mérési query | 0 (a `vessel_identifier_active_uniq`) |
+| a p95 a katalógusoldalon | az alkalmazás-monitorozás | < 800 ms (a F-NF-01) |
 
 ---
 

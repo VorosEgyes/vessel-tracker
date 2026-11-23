@@ -89,6 +89,72 @@ def current_user(request) -> AppUser | None:
     return AppUser(**row) if row else None
 ```
 
+### 2.1a A DB-szerepkör (a `prof` reviewer C-4 findingje)
+
+**A `02` – DDL-terv §9 szerint** a `session_token_hash` **nem** a
+`public_api` GRANT listáján — *„az `app_user` password_hash-e és
+session-hash-e … így nem publikus"*.
+
+→ **a `current_user` a `public_api` kapcsolattal NEM futhat.**
+
+**A megoldás: egy szűk `admin_api` szerepkör** — a `02` v1.6
+migrációja:
+
+```sql
+-- A 0009_admin_role.sql migrációban
+CREATE ROLE admin_api LOGIN PASSWORD :'admin_password';
+
+GRANT USAGE ON SCHEMA public TO admin_api;
+GRANT SELECT ON app_user TO admin_api;         -- a session azonosítása
+GRANT SELECT, UPDATE ON app_user TO admin_api; -- a session írása (a belépés)
+```
+
+**A `public_api` változatlan marad** → a hajóadatok továbbra sem
+olvashatók közvetlenül a publikus kapcsolatból.
+
+**A `current_user` az `admin_api` kapcsolatot használja** → a
+`db.fetchone` a `db.admin` poolon fut:
+
+```python
+row = db.admin.fetchone(   # az admin_api szerepkör
+    "SELECT id, email, role, locale, unit_system FROM app_user "
+    "WHERE session_token_hash = :h AND session_expires_at > now() "
+    "AND status = 'active'",
+    {"h": token_hash},
+)
+```
+
+> **A döntés:** a `06` a **szűk `admin_api` szerepkör** mellett dönt
+> (a `public_api` kivételes bővítése helyett) → **a `02` v1.6
+> migrációja ezt hozza létre**.
+
+### 2.1b Az egy-session korlát (a `prof` reviewer H-3 findingje)
+
+**A `02` v1.5 sémája egyetlen `session_token_hash` oszlopot tartalmaz**
+→ **egy felhasználónak egyszerre csak egy sessione van** →
+**a második belépés az elsőt kiléptezi**.
+
+**Ez R1-ben elfogadható**, de **a szerkesztő ezt ne lássa meglepetésként**:
+
+| A helyzet | A viselkedés |
+|---|---|
+| a szerkesztő a számítógépen dolgozik, majd **a telefonján** is bejelentkezik | **a számítógép sessionje kilép** |
+| **egy másik szerkesztő** bejelentkezik | **érintetlen** (a `session` a felhasználónként van) |
+
+**A több eszközös munka** a `session_token_hash` → **többsoros
+`app_user_session` tábla** átalakítást igényelne (a `02` v1.7) →
+**R1-ben nem** → **de a `06` §4.1 (a belépés) figyelmeztet**, ha a
+session az elején már volt:
+
+```
+Már voltál bejelentve egy másik eszközön. Az új bejelentés
+kiléptezi azt a sessiont. Folytatod?  [Igen] [Nem]
+```
+
+> **A `prof` reviewer H-11 findingje:** a `06` §8 (a nyitott
+> kérdések) **ne tartalmazza** a DB-szerepkör-problémát → **a
+> §2.1a lezárja** → **a nyitott kérdések listája a §2.1a-ra hivatkozik**.
+
 ### 2.2 A szerepek
 
 | Szerep | A `role` | Amit tehet |
@@ -344,7 +410,72 @@ a felhasználó fel kell bontja a fájlt.
 | **A kérelmek** | `/szerkeszto/keresek` | F-ADM-08 |
 | **A visszajelzések** | `/szerkeszto/visszajelzesek` | F-ADM-04 |
 | **A fordítások** | `/szerkeszto/forditasok` | F-ADM-05 |
+| Képernyő | Útvonal | A F-ADM |
+|---|---|---|
+| **A hajólista** | `/szerkeszto/hajok` | F-ADM-01 |
+| **A hajó szerkesztése** | `/szerkeszto/hajok/{id}` | F-ADM-01, F-ADM-02, F-ADM-03 |
+| **A konfliktusok** | `/szerkeszto/konfliktusok` | F-ADM-09 |
+| **A kérelmek** | `/szerkeszto/keresek` | F-ADM-08 |
+| **A visszajelzések** | `/szerkeszto/visszajelzesek` | F-ADM-04 |
+| **A fordítások** | `/szerkeszto/forditasok` | F-ADM-05 |
 | **Az import** | `/szerkeszto/import` | F-ADM-07 |
+| **Az AIS-import** | `/szerkeszto/import/ais` | F-ADM-07 |
+| **A fordítási hiánylista** | `/szerkeszto/forditasok/hianyok` | F-NF-16 |
+| **Az előnézet** | `/szerkeszto/elonezet/hajok/{id}` | F-ADM-06 |
+
+**Az AIS-import (a `bori` reviewer B-C-4 findingje)** — **a szerkesztő
+nem üres lappal indul**:
+
+**A mérési adat** (a `bud01` vevő) SQLite-ban van
+(`ais_message`, `ais_position`, `ais_static`, `ais_state`) → **a
+szerkesztő közvetlenül olvassa**:
+
+```
+/szerkeszto/import/ais
+  Forrás:  db/fixtures/ais/manifest.json   (vagy a Pi ais.db)
+  Talált hajók: 78  (a MMSI-k alapján)
+  Névvel azonosított: 76
+  ENI-vel azonosított: 1
+  Importálható: 78        [Importálás]
+```
+
+**A leképezés** (a `02` – DDL-terv §5.3 alapján):
+
+| Az AIS-adat | A `vessel` / `vessel_i18n` / `vessel_identifier` |
+|---|---|
+| a `mmsi` | a `vessel_identifier` (`identifier_type='mmsi'`) |
+| a `callsign` (a `ais_static`-ból) | a `vessel_identifier` (`identifier_type='callsign'`) |
+| a `name` (a `ais_static`-ból) | a `vessel_i18n.name` (`lang='en'`, a hivatalos latin név) |
+| a `ship_type` (a `ais_static`-ból) | a `vessel_type` (az UNECE-kód → a `vessel_type` seed) |
+| a `length`/`width`/`draught` | a `vessel.length_m` / `width_m` / `draught_max_m` (`origin='ais'`) |
+| a `imo` | a `vessel_identifier` (`identifier_type='imo'`) |
+| a `destination` (a `ais_static`-ból) | a `vessel.destination` |
+| a `eta` (a `ais_static`-ból) | a `vessel.eta` |
+
+**Az `origin` mindig `'ais'`** → a F-ADM-03 szerint a forrás **rögzített**,
+a `vessel_data_origin` pedig az AIS-szal → **a konfliktus a kézzel
+módosításkor keletkezik** (lásd a B-H-4 blokk).
+
+**A fordítási hiánylista (a `prof` reviewer M-5 findingje)** — a
+`/szerkeszto/forditasok/hianyok` képernyő **a `content_key` × a
+hiányzó `lang` szerint** listázza a `published` státuszú, de **lefordítatlan**
+szövegeket → **ez méri a F-NF-16-ot (a 100% átnézett fordítás)**.
+
+**A konfliktusok képernyő — a valós forrás (a `bori` reviewer B-H-4
+findingje):**
+
+> **R1-ben a képernyő üres** — a hajóadatok **egyetlen forrásból**
+> (az AIS-ből) jönnek → **nincs konfliktus**.
+>
+> **A konfliktus akkor keletkezik, amikor a szerkesztő kézzel
+> felülírja az AIS-adatot** → a `vessel_data_origin.value_snapshot`
+> az AIS értékét tartja meg, az `is_current` az új, szerkesztett értéket
+> jelöli → **a konfliktus képernyő az ilyen eltéréseket mutatja**
+> (a `02` – DDL-terv §6.3 `vessel_data_origin_conflicts` nézete).
+>
+> **Ez a F-ADM-09 valós értelmezése** — nem a két forrás közötti
+> eredeti ellentérés, hanem **a szerkesztői felülírás**.
+
 | **Az előnézet** | `/szerkeszto/elonezet/hajok/{id}` | F-ADM-06 |
 
 ### 4.2 A hajó szerkesztő képernyője
@@ -362,10 +493,28 @@ a felhasználó fel kell bontja a fájlt.
 │ Szélesség [11,5]│ 🇬🇧 Name    [TEST CARG…] │  Üzemeltető · 11-02 │
 │ Merülés  [6,2 ] │                        │  ⚠ ellentérés        │
 │ Üzemeltető [Kft]│ Leírás                  │                     │
-│ …               │ [szövegszerkesztő]     │ Bizonyosság:         │
+│ Célállomás [—]  │ [szövegszerkesztő]     │ Bizonyosság:         │
 │                  │                        │  AIS-azonosított    │
 └──────────────────┴────────────────────────┴─────────────────────┘
 ```
+
+
+**A „Célállomás" mező (a `bori` reviewer B-C-3 findingje)** — a
+`vessel.destination` oszlopba ír:
+
+| A mező | A forrás | A megjegyzés |
+|---|---|---|
+| **a célállomás** | a `vessel.destination` | a mérésben **100%-ban üres** (a `04` – parser-terv szerint a FI 10-ből jönne) → **a szerkesztő kézzel adja meg** |
+
+> **Miért kell:** a fuvarozók legfontosabb kérdése a célállomás
+> (a funkcióleírás US-04-je: *„a folyamatban lévő útját és várható
+> érkezését akarom látni"*). **Ha nincs a mező, a felhasználó soha nem
+> látja.**
+>
+> **A `03` – API-terv `VesselDetail`-je** a `destination` mezőt
+> tartalmazza → **a `05` – frontend-terv §8.1 blokk-listájában a
+> „Üzemeltető blokk" mellett új blokk: „Utazási adatok"** (a
+> célállomás, az indulási idő, az `eta` — ha van).
 
 **A „Mentés" gomb** a `PATCH`-et küldi — **csak a módosított mezőkkel**
 (a diff alapján).
@@ -521,6 +670,23 @@ triggerével karbantartott.
 soronkénti `INSERT` 1000 sorra > 10 másodperc). A `psycopg` +
 `executemany` vagy a `COPY` a megoldás.
 
+**A tömeges import limitje (a `bori` reviewer B-H-3 és a `prof`
+reviewer M-10 findingje):**
+
+| A limit | Az érték | Miért |
+|---|---|---|
+| **a sorok száma** | **50 000 sor** | a mérési adat 30 napja ~3 500 hajó → a teljes mérés importálható |
+| **a fájlméret** | **20 MB** | a 2 GB-os VPS (a `09` – üzemeltetés-terv §8.1) |
+| **a feldolgozás** | **a szerveroldalon, batchenként** (2 000 sor/batch) | **nem** a böngésző memóriájában |
+
+**A böngésző csak a fájlt küldi el** (`multipart/form-data`) → **a
+validáció és a beszúrás a szerveren történik** → **a `09` §8.3
+szerint a `statement_timeout` (5 s) **batchre** vonatkozik, nem a
+teljes importra.
+
+**Az AIS-import (a `04` – parser-terv §9 alapján)** a `COPY`-t használja
+→ **egy külön út**, a JSON-formátum limitje nem érvényes rá.
+
 ---
 
 ## 8. A nyitott kérdések
@@ -534,6 +700,13 @@ soronkénti `INSERT` 1000 sorra > 10 másodperc). A `psycopg` +
 | Q5 | A kérelmek (`claims`) külön táblát kapjanak? | **nem** — a `feedback` táblában van (`category='data_correction'`) | nyitva |
 | Q6 | A szerkesztői felület a saját nyelvén működjön, vagy mindhármon egyszerre? | **mindhármon egyszerre** (a forrás + a fordítás) | **lezárva** |
 | Q7 | A CSV import a `position`/`vessel_identifier` adatait is kezelje? | **nem** — az import a statikus vessel-adatokra vonatkozik | nyitva |
+| Q8 | **Milyen DB-szerepkörrel olvassa a `session`-t?** | **a szűk `admin_api` szerepkör** (a `02` – DDL-terv v1.6) — a `public_api` nem olvashatja az `app_user`-t | **lezárva** (a `prof` reviewer C-4 findingje — a §2.1a) |
+| Q9 | **A több eszközös munkát hogyan?** | **R1-ben egy session** (a `02` v1.5 sémája egy `session_token_hash` oszlop) → a második belépés kiléptezi az elsőt | **lezárva** (a `prof` reviewer H-3 findingje — a §2.1b; a több eszközös munka a `session_token_hash` → `app_user_session` átalakítás, **R2**) |
+| Q10 | **A célállomás mező a szerkesztőben?** | **igen** — a `vessel.destination` (a mérésben 100%-ban üres) | **lezárva** (a `bori` reviewer B-C-3 findingje — a §4.2) |
+
+**A sorozat állapota** — a terv-sorozat táblázata a
+[`README.md`](README.md)-ben (a `docs/megvalosulas/README.md`) → **a
+státusz egy helyen legyen** (a `prof` reviewer L-3 findingje).
 
 ---
 

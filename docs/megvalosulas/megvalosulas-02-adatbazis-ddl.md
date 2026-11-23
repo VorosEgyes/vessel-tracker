@@ -1,7 +1,13 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.5 (a swarm review 1. köre után — 113 finding, 10 blokkoló
-javítva; a DDL futtatva és tesztelve; **+ a `home_river_section_id` és a
+**Verzió:** 1.6 (a swarm review 1. köre után — 113 finding, 10 blokkoló
+javítva; **+ az `admin_api` szűk szerepkör** a `06` – szerkesztői-terv
+§2.1a szerint — a `public_api` **nem** olvashatja az `app_user`-t, ezért
+a szerkesztői session-ellenőrzés külön szerepet kap; **+ a CI-ben a
+`pg_cron` NEM** (a `07` §4.2 stock image) és a **p95 helyett a
+`mean_exec_time`** a `pg_stat_statements`-ből, a **vevő-heartbeat
+határa környezetfüggő** (R1-ben 10 nap, R2-ben 30 perc) — a `prof`
+reviewer H-4/M-8/C-5 findingjei szerint; a DDL futtatva és tesztelve; **+ a `home_river_section_id` és a
 `home_basin_id` oszlopok** a `03` – API-terv `prof` reviewer C-1
 findingje szerint — a `?section=`/`?basin()` katalógus-szűrő adatforrása;
 **+ a teljes referenciaadat-seed** a `bud01` mérésből — a `vessel_type`
@@ -33,12 +39,19 @@ szolgálja ki** — nem előzi meg őket, és nem tartalmaz R2+ elemet (a
 `position` R1-ben sima buffer, lásd §7).
 
 > **A séma futtatva van.** A teljes DDL **valódi PostgreSQL 17-en** lefutott
-> és funkcionálisan tesztelve lett (§12): **71 tábla, 150 index, 121 FK,
-> 3 particionált tábla, 28 trigger**; **16 funkcionális teszt** — a
-> partial unique index-ek, a CHECK constraint-ek, az upsert, a
+> és funkcionálisan tesztelve lett (§12): **71 tábla, 157 index, 124 FK,
+> 375 CHECK, 3 particionált tábla, 85 trigger**; **21 funkcionális teszt** —
+> a partial unique index-ek, a CHECK constraint-ek, az upsert, a
 > partíció-TTL, az audit-trigger, a mezőnkénti konfliktus, az
-> azonosító-szinkron, a szerepvédelem — mind működik, a downgrade
+> azonosító-szinkron, a szerepvédelem, **a DB-szerepkörök** (a
+> `public_api` nem olvassa az `app_user`-t, az `admin_api` a sessiont
+> olvassa, de a `password_hash`-ot nem) — mind működik, a downgrade
 > minden objektumot eldob.
+>
+> **A legutóbbi validáció (2026-11-23, a v1.6 sémával — az
+> `admin_api` szűk szerepkörrel): 21/21 zöld.** A validáció **a
+> GRANT-hiányt is feltárta**: az `admin_api`-nak `GRANT USAGE ON SCHEMA
+> public` is kell, különben a táblákat nem látja → **javítva**.
 >
 > **Az 1. körű swarm review 113 findingje** (3 reviewer + verifier)
 > feldolgozva — **a 10 blokkoló mind javítva** (§12.4a). A validáció
@@ -2175,7 +2188,7 @@ SELECT cron.schedule('drop-water-level-partitions', '23 3 * * 1',
 DO $$
 DECLARE r text;
 BEGIN
-    FOREACH r IN ARRAY ARRAY['anon','public_api','app_user_role','editor','admin','etl','api_client']
+    FOREACH r IN ARRAY ARRAY['anon','public_api','admin_api','app_user_role','editor','admin','etl','api_client']
     LOOP
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
             EXECUTE format('CREATE ROLE %I NOLOGIN', r);
@@ -2194,6 +2207,7 @@ BEGIN
     LOOP
         EXECUTE format('REVOKE ALL ON TABLE public.%I FROM anon', r.tablename);
         EXECUTE format('REVOKE ALL ON TABLE public.%I FROM public_api', r.tablename);
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM admin_api', r.tablename);
     END LOOP;
 END;
 $$;
@@ -2216,6 +2230,36 @@ GRANT SELECT ON vessel, vessel_i18n, vessel_alias, vessel_identifier,
     country, waterway, waterway_i18n, river_section, river_section_i18n,
     gauge, gauge_i18n, water_level, data_source
     TO public_api;
+
+-- **Az `admin_api`** (a `06` – szerkesztői-terv §2.1a) — a szerkesztői
+-- felület DB-kapcsolata. **A `public_api` NEM olvashatja az
+-- `app_user`-t** (a session-hash nem publikus) → **külön szűk szerep**.
+--
+-- **A `USAGE` a `public` sémára KELL** — különben a szerep nem látja
+-- az egyáltalán a táblákat („relation does not exist") → ez a
+-- validátor füsttesztje fogta meg (a prof C-4 findingje).
+GRANT USAGE ON SCHEMA public TO admin_api;
+GRANT USAGE ON SCHEMA public TO public_api;
+--
+-- A `06` §2.1a szerint: a `session_token_hash` és a `session_expires_at`
+-- olvasható, a `password_hash` **nem**.
+GRANT SELECT (id, email, role, locale, unit_system, status,
+               session_token_hash, session_expires_at)
+    ON app_user TO admin_api;
+-- a belepes a sessiont IRJA (a 06 §2.1 create_session)
+GRANT UPDATE (session_token_hash, session_expires_at)
+    ON app_user TO admin_api;
+
+-- A `admin_api` a hajodata olvasasa mellett a **szerkesztoi
+-- muveleteket** is vegezi (a F-ADM-02) → a hajok, a forrasok, a
+-- nevek es a forditasok szinten kezelhetoek.
+GRANT SELECT, UPDATE ON vessel, vessel_i18n, vessel_identifier,
+    vessel_data_origin, vessel_type, vessel_type_i18n, content_text
+    TO admin_api;
+GRANT SELECT ON operator, operator_i18n, country, waterway_i18n,
+    vessel_verification, vessel_last_position,
+    vessel_data_origin_current, vessel_data_origin_conflicts
+    TO admin_api;
 
 -- **A NÉZETEKRE** a gronzás **külön kell** — a `GRANT SELECT ON
 -- <table>` nem terjed ki a nézetekre (a PostgreSQL a nézetet a
@@ -3085,9 +3129,9 @@ tartalmazza (`status = 'success'` csak a sikeres visszaállítás után).
 | A feldolgozás sikeressége | `job_run.status` | a `failed`/`partial` sorok száma > 0 |
 | A pozíciófedettség | a `position` tábla és a `vessel_last_position` nézet alapján | a hajók > 20%-ának nincs 1 óránál régebbi pozíciója |
 | A partíció-méret | `pg_class` (`pg_total_relation_size`) | egy partíció > 5 GB |
-| A lekérdezési latencia | `pg_stat_statements` | a p95 > 1 s |
+| A lekérdezési latencia | `pg_stat_statements` | a `mean_exec_time` > 100 ms (az alkalmazásszintű p95 a `duration_ms`-ből — a `03` §9) |
 | A hibák | `data_quality_event` | a nyitott `critical` események száma > 0 |
-| A vevőhálózat | `ais_receiver_site.last_seen_at` | egy aktív vevő > 30 perce nem ad heartbeatot |
+| A vevőhálózat | `ais_receiver_site.last_seen_at` | **R1-ben 10 nap, R2-ben (élő MQTT) 30 perc** (a `09` §4.1) |
 
 **A riasztási mechanizmus (R1-ben):** a `pg_cron` **a `job_run` táblát
 tölti**, a riasztás pedig egy **külső watchdog** (a 09 – Üzemeltetés
@@ -3103,7 +3147,7 @@ latencia-méréshez kell (a custom image-ben).
 | Környezet | A `pg_cron` | A partíció-létrehozás | Megjegyzés |
 |---|---|---|---|
 | **local (compose)** | **igen** (a custom image) | **manuálisan** a `0008` migrációban | a fejlesztő nem futtat cron-migrációt |
-| **teszt (CI)** | **igen** | a `0008` migráció fut | a CI a teljes migrációs láncot játssza le |
+| **teszt (CI)** | **nem** | a `0008` migráció fut a `strip_cron` preprocesszort használva | **a CI a stock PostGIS image-et használja** (a `07` §4.2) → **nincs benne `pg_cron`** → **a `0008` a preprocesszortól változatlan formában fut** → **a cron-függvények a CI-ban nem futnak** (a `09` §9 smoke tesztje a custom image-ben ellenőrzi) |
 | **production** | **igen** | **a `pg_cron` heti job-ja** | a `0008_partitions.sql` a létrehozó függvényt is telepíti |
 
 **A `0008_partitions.sql` két dolgot tesz:**
