@@ -13,15 +13,15 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 | 04 | [AIS-parser specifikáció](megvalosulas-04-ais-parser.md) | A NMEA frame-validáció, a 6 bites dekódolás, az üzenettípus-dispatch, a normalizált rekord (a `02` és a `04` közötti közös szerződés), a dedup, a mérési protokoll | **v1.0 — a mérés után**; 1. körű swarm review: **64 finding** (3 reviewer: `prof` 27 · `bori` 18 · `preshaz` 19), a verifier audit szerint **61 valós, 11 blokkoló** — **mind javítva**; a terv **a `bud01` mérés valós adataihoz** igazítva (a nem hajó üzenettípusok = a forgalom 27,3%-a, a SQLite architektúra, a mért ~900 000 üzenet/nap, a nem mérhető hibás arány) |
 | 05 | [frontend-arkitektúra](megvalosulas-05-frontend-arkitektura.md) | Az Astro SSR, az i18n routing (a F-INTL-01…08), a SEO (a `hreflang`, a JSON-LD, a sitemap), a komponensmodell, a hajóadatlap blokkjai | **v0.1 — draft** |
 | 06 | [szerkesztői felület](megvalosulas-06-szerkesztoi-felulet.md) | A session-alapú hitelesítés, a `/api/admin/v1/` végpontok, a mezőnkénti eredet szerkesztése, a konfliktuskezelés (a F-ADM-09), az üzemeltetői önbevallás (a F-ADM-08), a tömeges import (a F-ADM-07), a fordítási hiánylista | **v0.1 — draft** |
-| 07 | CI/CD és környezetek | A pipeline, a deploy, a környezet-változók | **nincs meg** |
-| 08 | teszt-stratégia | A teszt-piramis, a kilépési feltételek mechanizmusa | **nincs meg** |
-| 09 | üzemeltetés és observability | A mentés, a monitor, a naplózás | **nincs meg** |
+| 07 | [CI/CD és környezetek](megvalosulas-07-ci-cd-es-kornyezetek.md) | A pipeline (a `ci.yml`/`build.yml`/a deploy-workflow-ok), a build (a `justfile`, a Docker image-ek), a környezet-változók, a migrációk, a deploy és a rollback, a titkok, a smoke teszt | **v0.1 — draft** (a `01` – stack-terv §4.2/§6.1 alapján; a `pg_cron` custom image, a heti lehúzás a `command=` korlátozással) |
+| 08 | teszt-stratégia | A teszt-piramis, a kilépési feltételek mechanizmusa | **nincs meg** (a 07 – CI/CD terv a CI-ban futó teszteket előírja) |
+| 09 | üzemeltetés és observability | A mentés, a monitor, a naplózás | **nincs meg** (a 07 – CI/CD terv a deploy utáni smoke tesztet előírja) |
 
 ## Olvasási sorrend
 
 1. **01** (ez a sorozat alapja) → 02 → 03 → 05 → 06
 2. **04** párhuzamosan a 02-vel (a mérési adatokra vár — az R1-0 alatt készülnek)
-3. **07** a 01-re épül, **08** és **09** a végső sprintre
+3. **07** a 01-re épül (a v0.1 draft kész), **08** és **09** a végső sprintre
 
 ## A terv-sorozat és a release-terv kapcsolata
 
