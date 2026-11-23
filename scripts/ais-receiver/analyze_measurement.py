@@ -110,7 +110,10 @@ def _in_duna_corridor(lat, lon):
 
 
 def analyze(path: str) -> dict:
-    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    # A "immutable=1" NEM hoz letre -wal/-shm fajlokat a lehuzott
+    # DB mellett -> a heti takaritas (a NAS-on) tiszta marad.
+    # (A sima "mode=ro" a WAL-mod miatt MEGIS létrehozza őket.)
+    db = sqlite3.connect(f"file:{path}?immutable=1", uri=True)
     tables = _tables(db)
     result: dict = {
         "file": path,
