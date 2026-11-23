@@ -1,14 +1,18 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.4 (a swarm review 1. köre után — 113 finding, 10 blokkoló
+**Verzió:** 1.5 (a swarm review 1. köre után — 113 finding, 10 blokkoló
 javítva; a DDL futtatva és tesztelve; **+ a `home_river_section_id` és a
 `home_basin_id` oszlopok** a `03` – API-terv `prof` reviewer C-1
-findingje szerint — a `?section=`/`?basin=` katalógus-szűrő adatforrása;
+findingje szerint — a `?section=`/`?basin()` katalógus-szűrő adatforrása;
 **+ a teljes referenciaadat-seed** a `bud01` mérésből — a `vessel_type`
 a 89 hajótípussal és a magyar nevekkel, a `language`, a `data_source`,
 a `country`, a `waterway`, a `river_section`, a `basin`, a `cargo_type`
-és az `operator` a referenciákkal)
-**Dátum:** 2026-11-22
+és az `operator` a referenciákkal; **+ a `position.msg_type` és
+`position.msg_subtype`**, a `position.nav_status` CHECK a szöveges
+értékkészlettel, és a `data_quality_event.reason` → `detail`
+pontosítás — **a `04` – AIS-parser-terv 1. körű swarm review-jának
+(64 finding) séma-korrekciói**)
+**Dátum:** 2026-11-23
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
 [`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra + scope) ·
@@ -892,11 +896,45 @@ CREATE INDEX convoy_member_vessel_idx ON convoy_member (vessel_id);
 CREATE TABLE position (
     vessel_id       bigint NOT NULL REFERENCES vessel(id) ON DELETE CASCADE,
     ts              timestamptz NOT NULL,
+    -- az uzenet teljes azonositoja: az AIS `type` mezője (1-27) +
+    -- a DAC/FID. A FI 10 a 6-os/8-as `msg_type` (a DAC 200, FID 10),
+    -- a Class B a 21-es (a DAC 200, FID 21) → a `msg_type` ONMAGABAN
+    -- nem eleg: a `msg_subtype` külonboztesti a belvízi FI 10-et a
+    -- 8-as szabalyos uzenettől (a 04-es terv C-3 findingje).
+    msg_type        smallint,
+    msg_subtype     smallint,
     geom            geometry(Point,4326),
     sog_mps         numeric(5,2),
     cog_deg         numeric(5,2),
     heading_deg     numeric(5,2),
-    nav_status      text,
+    nav_status      text
+                    -- a szoveges AIS navigacios allapot (a 04-es terv
+                    -- szerint a Pydantic-modell `Optional[str]`):
+                    -- 'under way using engine', 'at anchor',
+                    -- 'not under command', 'restricted manoeuvrability',
+                    -- 'constrained by her draught', 'moored',
+                    -- 'aground', 'engaged in fishing',
+                    -- 'under way sailing', 'reserved (HSC)',
+                    -- 'reserved (WIG)', 'power-driven vessel towing astern',
+                    -- 'power-driven vessel pushing ahead',
+                    -- 'power-driven vessel towing alongside',
+                    -- 'reserved for future amendment of navigational status
+                    -- for ships carrying DG, HS, or MP, or IMO hazard or
+                    -- pollutant category C, high speed craft',
+                    -- 'power-driven vessel towing astern',
+                    -- 'undefined'
+                    CHECK (nav_status IS NULL OR nav_status IN (
+                      'under way using engine', 'at anchor',
+                      'not under command', 'restricted manoeuvrability',
+                      'constrained by her draught', 'moored',
+                      'aground', 'engaged in fishing',
+                      'under way sailing', 'reserved (HSC)',
+                      'reserved (WIG)',
+                      'power-driven vessel towing astern',
+                      'power-driven vessel pushing ahead',
+                      'power-driven vessel towing alongside',
+                      'reserved for future amendment of navigational status',
+                      'undefined')),
     rot_deg         numeric(5,2),
     ais_accuracy_m  numeric(6,1),
     lat_e7          integer,
@@ -1463,6 +1501,11 @@ CREATE TABLE data_quality_event (
     severity    text NOT NULL DEFAULT 'warning'
                 CHECK (severity IN ('info','warning','error','critical')),
     detected_at timestamptz NOT NULL DEFAULT now(),
+    -- **A `reason` NEM külön oszlop** — a hiba nemét a `severity`
+    -- hordozza, a konkrét okot (pl. 'parser_error: checksum mismatch')
+    -- a `detail` szabad szövegben. (A 04-es terv C-4 findingje:
+    -- a `reason='parser_error'` írás `column does not exist` hibával
+    -- elhalna.)
     detail      text,
     resolved_at timestamptz
 );

@@ -1,12 +1,28 @@
 # Implementációs terv – 04: AIS-parser specifikáció
 
-**Verzió:** 0.1 (terv-draft, swarm review előtt)
-**Dátum:** 2026-11-19
+**Verzió:** 1.0 (a 1. körű swarm review után — **64 finding**
+(3 reviewer: `prof` 27 · `bori` 18 · `preshaz` 19), a verifier audit
+szerint **61 valós, 11 blokkoló** — **mind javítva**)
+**Dátum:** 2026-11-23
+
+> **Ez a terv a MÉRÉS UTÁN készült.** A bud01 vevő 2026-11-22 19:19
+> óta fut, és a mérés első órája **öt ponton ellentmondott** a
+> v0.1-es draftnak (a `docs/measurement_2026-11-22.md`):
+>
+> | A v0.1 állítása | A mérés |
+> |---|---|
+> | a nyers adat Parquet + gzip archívumban | **SQLite** (a v0.71 sémája) + heti lehúzás |
+> | ~2 millió üzenet/nap | **~900 000/nap** (átlag ~10,4/mp, csúcs ~100–300/mp) |
+> | a hibás üzenetek aránya mérhető | **nem mérhető** (a vevő csak a sikeres dekódolásokat tárolja) |
+> | a `river_km` a fairway-mezőből jön | **a fairway-mező a magyar szakaszon üres** |
+> | a Msg 4/9/11 eldobandó | **a Msg 4/20/23 a NAVTEX/MSK-forrás** (a mért forgalom 27,3%-a) |
+>
+> **A javítások a tervet a méréshez igazítják — nem fordítva.**
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
 [`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (stack + struktúra) ·
-[`megvalosulas-02-adatbazis-ddl.md`](megvalosulas-02-adatbazis-ddl.md) (a séma — a parser ide ír) ·
-[`megvalosulas-03-api-specifikacio.md`](megvalosulas-03-api-specifikacio.md) (a normalizált rekord a kimenete) ·
+[`megvalosulas-02-adatbazis-ddl.md`](megvalosulas-02-adatbazis-ddl.md) (a séma **v1.5** — a parser ide ír) ·
+[`megvalosulas-03-api-specifikacio.md`](megvalosulas-03-api-specifikacio.md) (a normalizált rekord a kimenete, **v0.4**) ·
 [`../../docs/ais-vevo-terv.md`](../../docs/ais-vevo-terv.md) (a vevőhálózat) ·
 [`../../docs/ingest-terv.md`](../../docs/ingest-terv.md) (az adatút) ·
 [`../../docs/r1-adat-terv.md`](../../docs/r1-adat-terv.md) ·
@@ -30,18 +46,45 @@ nyers NMEA (UDP/5000 vagy MQTT)
    → [a] frame-szintű validáció (a szabályos NMEA-körvonal, a
       ellenőrzőösszeg, a mondatszám, a számozott sorok összefűzése)
    → [b] AIS-üzenet dekódolása (a 6 bites payload)
-   → [c] üzenettípus-dispatch (Msg 1/3/5/18/24 + Inland FI 10)
+   → [c] üzenettípus-dispatch:
+        a HAJÓ-üzenetek (Msg 1/2/3/5/18/24 + Inland FI 10)
+        ÉS a NEM-HAJÓ üzenetek (Msg 4/20/21/23) külön kategóriaként
+        (a §4.7 — a bud01 mérés: a mért forgalom 27,3%-a a nem hajó
+        üzenettípusok)
    → [d] normalizálás (a közös rekord)
    → [e] dedup (a msg_hash)
    → [f] írás a DB-be (a position upsert, a vessel upsert)
+   → [g] mezőnkénti eredet (a vessel_data_origin — a F-DET-15)
 ```
 
 **Amit a parser NEM csinál:**
 - **nem** dönt a fantom-hajóról (a szűrő a 01-es terv §5.5 szerinti
   négy szabály — a parser csak a **geometriai** ellenőrzés adatait
-  szolgáltatja);
+  szolgáltatja); **a navigációs lámpákat és a bázisállomásokat is
+  kizárja** (a MMSI-tartomány + a név-minta alapján — a `bori` B-C-4
+  findingje: a felhasználó nem látja a 106 lámpát „hajóként");
 - **nem** kezeli a forrásjogokat (a `data_source` a konfigurációból jön);
+- **nem** hoz létre `content_key`-t (a súgók és a rendszerüzenetek
+  szerkesztői tartalom — a `bori` B-M-5 findingje);
+- **nem** számítja a bizonyossági badge-et (a `vessel_verification`
+  nézet a service szintjén — a `bori` B-M-1 findingje);
+- **nem** tölti ki a `destination`-t (a mérésben 100%-ban üres → **a
+  szerkesztői felület adja**, a `06` terv — a `bori` B-C-2 findingje);
 - **nem** ütemez (az APScheduler / `pg_cron` a felelőse).
+
+**Amit a parser KÖTELESEN elvégez:**
+- a **`vessel.operating_area`** kitöltése (a `duna`/`balaton`) — a pozíció
+  földrajzi elhelyezkedéséből (a folyó-korridor vs. a Balaton-medence)
+  → **ez a F-CAT-01 (a területválasztó) és a `03` – API-terv kötelező
+  `area` paraméterének az alapja** (a `bori` B-H-7 findingje);
+- a **`vessel.flag_country_code`** kitöltése — a MMSI-prefixből (a
+  `country` tábla segítségével) → **a felhasználó megkülönbözteti a
+  magyar és a nemzetközi hajót** (a `bori` B-H-5 findingje; a mérésben
+  **67 magyar és 11 nemzetközi** hajó);
+- a **`callsign` normalizálása** (a `@` kitöltés levágva, a trim, és a
+  **kis/nagybetű egységesítése**) → a keresés **case-insensitive**
+  (a `bori` B-H-2 findingje: a mérésben **76 hajónak van hívójele**
+  — a hívójel a **másodlagos keresési kulcs** az ENI után).
 
 ---
 
@@ -56,6 +99,12 @@ nyers NMEA (UDP/5000 vagy MQTT)
 | Belvízi támogatás | teljes | részleges | teljes |
 | Mezők nevei | **sematikus** (`msg_type`, `mmsi`, `lat`, `lon`) | **neves** (`MessageType8Dac200Fid10` → `vin`, `shiptype`, `length`, `beam`, `draught`) | **sematikus** (a 02-es séma oszlopneveivel egyezik) |
 | Karbantartás | aktív | aktív | **a mink** |
+
+**A licenc pontosítása** (a `prof` M-8 findingje): a fenti táblázat **a
+dekóderek** licencéről szól, **nem a projektéről** — a projekt licencét a
+README szabja meg. A **saját dekóder** MIT-licencű, **de a projekt
+licenc-döntése független** a dekódertől (a GPLv3-as `aiscat` használata
+terítette volna a teljes kódra).
 
 **A döntés: saját dekóder** (a 01-es terv §5.3).
 
@@ -100,6 +149,34 @@ A parser kimenete **közvetlenül a 02-es séma oszlopneveivel** egyezik:
 
 **Az `mmsi` az összekötő kulcs** — az AIS-ből mindig jön, a `vessel`
 tábla elsődleges azonosítója.
+
+**A `nav_status` értékkészlete** (a `prof` L-2 findingje) — a 02-es
+`position.nav_status` CHECK-ja (a v1.5):
+
+| Kód | Jelentés |
+|---|---|
+| 0 | under way using engine |
+| 1 | at anchor |
+| 2 | not under command |
+| 3 | restricted manoeuvrability |
+| 4 | constrained by her draught |
+| 5 | moored |
+| 6 | aground |
+| 7 | engaged in fishing |
+| 8 | under way sailing |
+| 9 | reserved (HSC) |
+| 10 | reserved (WIG) |
+| 11 | power-driven vessel towing astern |
+| 12 | power-driven vessel pushing ahead |
+| 13 | power-driven vessel towing alongside |
+| 14 | reserved for future amendment of navigational status |
+| 15 | undefined |
+
+**A `msg_type` és a `msg_subtype`** (a `prof` L-3 findingje): a
+`msg_type` az AIS `type` mezője (1–27); **a DAC/FID a `msg_subtype`-
+ben van** (a 02-es v1.5 `position.msg_subtype smallint`) → **a FI 10
+a 6-os/8-as `msg_type` + a `msg_subtype=10`** (a DAC 200), a Class B a
+21-es + a `msg_subtype=21`.
 
 ---
 
@@ -276,7 +353,7 @@ kitöltő karakter).
 | `callsign` | 7×8 bit | a hívójel (7 karakter) |
 | `name` | 20×6 bit | a hajó neve (20 karakter) |
 | `draught_qp` | 1 bit | a merülés pontossága |
-| `eta` | 4×5 bit | az ETA (óra:perc) |
+| `eta` | 4×5 bit | az ETA (óra:perc) — a `vessel` statikus adata (a `position`-ben nincs ilyen oszlopa) |
 | `draught_reference` | 2 bit | a merülés referencia (0 = nincs, 1 = **RNW**) |
 
 **A `river_km` (a fairway hectometre) — a pozícióból jön, nem a
@@ -290,10 +367,53 @@ pozícióüzenet** 60–87. bitjén (a `lon`/`lat` után).
 > `river_km` a **pozíció** üzenetben van (a szokásos pozíció
 > kiterjesztése, a 60–87. bit). A terv megfogalmazása pontosítandó.
 
+**A feldolgozatlan FI 10 mezők** (a `prof` M-3/M-4/M-5 findingjei) —
+**a v1-ben feldolgozatlanok**, de **dokumentáltan**:
+
+| A mező | A sorsa |
+|---|---|
+| `hazard` (3 bit, a veszélyes áru) | **eldobva** — a `vessel`-ben nincs ilyen oszlop; a `cargo_type`-ra utalhatna, de a mérésben **egyetlen hajó sincs veszélyes árujelöléssel** |
+| `category` (3 bit) | **eldobva** — ugyanaz, mint a `hazard` |
+| `dist_to_starboard` / `dist_to_port` (13 bit, a parttól mért távolság) | **eldobva** — a `position` sémában nincs ilyen oszlop; a korridor-ellenőrzés a `river_km`-ből / a geo-illesztésből jön |
+| a **GNSS antenna helye** (a Msg 18 **két helyen**: a 110–141. és a 256–263. bit) | **eldobva** — a 02-es sémában nincs antennas hely oszlop → **a Q3 nyitva marad a 02-ben** |
+
+**A `draught` (11 bit, 0,1 m) és a `draught_max_m`** (a `prof` M-5/M-6
+findingjei):
+- a FI 10 `draught` a **jelenlegi merülés** → a `vessel.draught_max_m`
+  (a **legnagyobb** merülés — a hajó a legnagyobb merülésével a
+  legmélyebb vízben jár);
+- a **`draught = 0` → `NULL`** (a „nincs megadva") — a mérésben a
+  `GONDOLA` 0,0;
+- **a `position.draught_m`** (a pillanatnyi merülés) **mindig NULL**
+  marad R1-ben (a parser nem tölti) → a terv ezt kimondja;
+- **ellenőrző szabály:** a `draught > 6 m` **figyelmeztetés** (a Duna
+  hajóinál a merülés ritkán > 4 m) → **ez a dekódolási hibák szűrője**
+  (a mérésben a `CITADELLA` 7,0 m — ez gyanús).
+
 **A `draught_reference = 1` → `'RNW'`** — a 02-es terv
 `CHECK (draught_reference IN ('RNW','lake_operator','unknown'))`
 értékei. A **Balatoni** hajóknál nincs RNW → `NULL` (a `position`-ben
 a `draught_reference` nem szerepel, a `vessel`-ben igen).
+
+**A `river_km` három forrása — a mérési adat alapján** (a `prof` C-5
+findingje):
+
+| A forrás | Honnan | A magyar szakaszon |
+|---|---|---|
+| **a pozíció `fairway_distance` mezője** | a Msg 1/3 60–87. bitje | **gyakorlatilag üres** — a bud01 vevő 37 494 üzenetében **egyetlen** pozícióüzenetben sem volt kitöltve |
+| **a navigációs lámpák neveiből** | a `992438xxx` MMSI-k neve (`1592.4_R_FL` = 1592,4 km) | **ez működik** — a lámpák a folyó középvonalán vannak |
+| **geometriai illesztés** a folyó középvonalára | a pozíció `lat`/`lon`-ja + a lámpák pozíciói | **ez is működik** — a mérési dokumentum így számolja a 69,8%-os lefedettséget |
+
+> **A döntés:** a `river_km` **elsődleges forrása a geometriai
+> illesztés** (a lámpák pozíciói + a pozíció `lat`/`lon`-ja) — ez a
+> magyar szakaszon **mindig** elérhető, és a mérési adat szerint
+> **a 69,8%-os lefedettséget** ebből számítjuk. A `fairway_distance`
+> mező **másodlagos** (a nemzetközi hajóknál jelen van, ott pontosabb).
+> A **Q1 státusza: „félig lezárva"** → a három forrás dokumentálva.
+
+**A `fairway_code` kikerült** a normalizált rekordból (a `prof` M-1
+findingje) — a `river_section.fairway_code` a **szakaszhoz** tartozik,
+nem a pozícióhoz → **a Q2 lezárva**.
 
 ### 4.6 A Class B üzenetek (Msg 18, 24)
 
@@ -336,6 +456,81 @@ a hosszt és a szélességet tartalmazza.
 szerint a kishajók és vitorlások nincsenek a katalógusban, de a
 személyhajók és a kompok igen).
 
+**A méretadatok kiemelése** (a `bori` B-H-6 findingje): a hossz, a
+szélesség és a merülés a **legjobban kitöltött** statikus adatok (a
+mérésben **66 a 78 neves hajóból**, 85%!) → a felhasználó számára a
+**legfontosabb** statikus adatok (a komp mérete → befér-e a kikötőbe?).
+A `length`/`beam` **0,1 m-es** pontossága a tároláshoz jó, a UI-on a
+kerekített érték (39×7 m) a hasznos.
+
+**A mentő- és kiszolgáló hajók** (a `bori` B-H-4/B-M-3 findingje): a
+`vessel_type` referencia (a `02` v1.4 seed) a **8450** (kisegítő hajó,
+kikötői szolgálat) és az **51** (tengeri mentő) típusokat is tartalmazza
+→ **a UI megkülönbözteti** őket (a mérésben 3 + 2 hajó — a
+`SZENT FLORIAN`, a `KITUZO III.`/`V.`, a `CSEPEL`, a `BALATONAKARATTYA`).
+
+**A hivatalos név vs. a fordított név** (a `bori` B-H-3 findingje): a
+`vessel_i18n.name` a **hivatalos latin név** (a mérésben 175 hajóból
+van) → a **lefordított** név a `content_key`-ből jön
+(`vessel.name.<mmsi>`) → **a szerkesztői felület fordítja**. A parser
+**csak** a hivatalos nevet írja.
+
+---
+
+### 4.7 A nem hajó üzenettípusok (a bud01 mérés alapján)
+
+> **A `prof` reviewer C-1 findingje után.** A terv a mérés előtti
+> architektúrát írta le: a mérésben a **37 494** üzenet **27,3%-a**
+> (a 21-es 18,7%, a 4-es 5,5%, a 20-as 1,5%, a 23-as 1,4%, a 15-ös 0,2%)
+> **nem hajó üzenet** — és a terv **egyetlen szóval sem** említette őket.
+
+| `type` | Jelentés | A mérésben | A kezelés |
+|---|---|---|---|
+| **21** | **belső forgalmi adat (Class B, DAC 200/FID 21)** | **7 016 (18,7%)** | **a `position`-be kerül** — a Class B pozíciók (`lat`/`lon`/`sog`) a **Balatoni katalógushoz** szükségesek (a README 2.10: a kishajók nincsenek a katalógusban, de a **személyhajók és a kompok igen**) |
+| **4** | bázisállomás | 2 070 (5,5%) | **a NAVTEX/MSK-forrás** — a `data_quality_event`-be? **nem**: a §4.7.1 szerint |
+| **20** | belső forgalmi adat (MSK) | 559 (1,5%) | a bázisállomásoktól jön → **a NAVTEX-adat** |
+| **23** | belső forgalmi adat (MSK, új) | 519 (1,4%) | a bázisállomásoktól jön → **a NAVTEX-adat** |
+| **15** | egyéb (interrogálás) | 60 (0,2%) | **eldobandó**, de **a számlálóba** kerül (a mérési protokoll metrikája) |
+
+#### 4.7.1 A Msg 4 / 20 / 23: a NAVTEX-forrás (a korábbi „eldobandó" **hamis** volt)
+
+**A terv korábbi Q5-je** a Msg 4-et „eldobandónak" jelölte („*a belső
+AIS-átvitelben nem relevánsak*"). **Ez a méréssel ellentmond.**
+
+**A mérés tényе:** a `2430003`, `2430006` és `2430007` MMSI-k
+**kizárólag** a 4-es, 20-as és 23-as üzenettípust küldik — **pozíció-
+(1/2/3) és statikus (5) üzenet nélkül**. Ezek **nem hajók**: a **Duna
+navigációs infrastruktúrájának állomásai**, és a **NAVTEX/MSK
+forgalmat** adják tovább.
+
+**A döntés (a prof C-1 és a bori B-C-4 alapján):**
+- a **Msg 4/20/23** → **a `data_quality_event`-be** kerülnek
+  (`severity='info'`, `detail='basestation: NAVTEX/MSK relay'`) — **a
+  `position`/`vessel` táblába NEM**;
+- **a bázisállomások nem hajók** → a fantom-szűrő (a 01-es terv §5.5)
+  kizárja őket (a `2430003/6/7` MMSI-tartomány + a **név-találgatás
+  nélküli**, pozíció nélküli jelleg);
+- **a 767 FI 10 üzenet (a 8-as típus) a hajóktól jön** → a §4.5 szerint
+  kezelendő (az ENI-adatok útja) — **nem** a bázisállomásoktól.
+
+> **A `bori` reviewer B-C-4 findingje:** a felhasználó **nem látja** a
+> bázisállomásokat és a **106 navigációs lámpát** (`992438xxx`) a
+> katalógusban — a lámpáknak **van nevük** (`1592.4_R_FL` = 1592,4 km,
+> piros villogó lámpa), tehát **számokra hasonlítanak**, és a katalógus
+> „hajóként" mutatná őket. A fantom-szűrő **MMSI-tartomány + név-minta**
+> alapján zárja ki őket (`^\d+\.\d+_[GRW]`).
+
+#### 4.7.2 A Msg 21 (a Class B) — a `position`-be megy
+
+**A Class B pozícióüzenet** (`lat`/`lon`/`sog`/`cog` a 38–105. biten)
+**a szokásos `position` upsert** flow-ba kerül, **a `vessel` upsert** pedig
+a statikus adatokból (a Msg 24) — **a Class B hajók ugyanúgy a
+katalógusba kerülnek**, mint a Class A-k.
+
+**A Class B-re nincs külön dekódoló** — a pozíció-resz (a 70–105. bit)
+**a szokásos 8 bites pozíció formátumú**, a navigációs adatok
+(a 38–69. bit) kiegészítik a `nav_status`-t és a `heading`-et.
+
 ---
 
 ## 5. A normalizált rekord (a közös szerződés)
@@ -373,10 +568,16 @@ class NormalizedAisMessage(BaseModel):
     cog_deg: Optional[float] = None
     heading_deg: Optional[float] = None
     rot_deg: Optional[float] = None
-    nav_status: Optional[int] = None
+    # **A `nav_status` a 02-es sémában `text`** (a prof C-2 findingje:
+    # a korábbi `int` nem illeszkedett) → itt is `Optional[str]`, a
+    # 02-es CHECK ertekkeszletevel.
+    nav_status: Optional[str] = None
     ais_accuracy_m: Optional[float] = None
     river_km: Optional[float] = Field(default=None, description="a fairway hectometre")
-    fairway_code: Optional[str] = None
+    # **A `fairway_code` kikerult** (a prof M-1 findingje): a
+    # `river_section.fairway_code` a SZAKASZHOZ tartozik, nem a
+    # poziciohoz → a `position` tablanak nincs ilyen oszlopa.
+    # A Q2 ezzel lezarva.
 
     # a statikus meretek
     vessel_type_code: Optional[str] = None
@@ -387,16 +588,64 @@ class NormalizedAisMessage(BaseModel):
         default=None, description="a merules referenciaja (a FI 10 flag-je)")
 
     # a diszpoziciok
-    msg_type: int
+    msg_type: int = Field(description="az AIS type mezője (1-27)")
+    # **A `msg_subtype` a DAC/FID** (a prof C-3 findingje) — a 02-es
+    # `position.msg_subtype smallint` oszlopra megy (a `02` v1.5).
+    # A FI 10 a 6-os/8-as `msg_type` (a DAC 200, FID 10), a Class B a
+    # 21-es (a DAC 200, FID 21) → a `msg_type` ONMAGABAN nem eleg.
     msg_subtype: Optional[int] = None
+    # **A `repeat` a normalizalt rekordban marad** (a dedup/ismetlodes
+    # logikaja hasznalja) — **a `position` tablaba NEM kerul** (a 02-es
+    # `position` nincs ilyen oszlopa) → a prof C-3 findingje.
     repeat: Optional[int] = None
-    is_static: bool = Field(description="True a statikus uzenetekre (Msg 5, 18, 24, FI 10)")
+
+    # **Az `is_static` NEM oszlop** (a 02-es semaban nincs) — a
+    # statikus jelleg SZAMITOTT: `msg_type IN (5, 24)` vagy a FI 10
+    # (a 6-os/8-as `msg_type` + a DAC 200) → a prof C-3 findingje.
+    @property
+    def is_static(self) -> bool:
+        return self.msg_type in (5, 24) or (
+            self.msg_type in (6, 8) and self.msg_subtype == 10)
 ```
+
+**A `vessel_type_code` KÖTELEZŐ** (a `K-3` finding — a 02-es
+`vessel.vessel_type_code text NOT NULL REFERENCES vessel_type(code)`):
+
+```python
+    # **KÖTELEZŐ** — a 02-es `vessel.vessel_type_code` NOT NULL + FK.
+    # A Msg 1/2/3 (a pozicio) NEM tartalmaz `shiptype`-ot → a tipus
+    # a `vessel` upsertkor a **statikus** uzenetbol (a Msg 5/24 vagy a
+    # FI 10) jon, a poziciouzenetbol nem.
+    # A fallback: az `UNKNOWN` tipus (a 02-es v1.4 seedje) — a
+    # `shiptype = 0` es a `shiptype` hianya esetén is.
+    vessel_type_code: str = Field(
+        description="a vessel_type.code (a 89 tipus egyike; a "
+                    "'UNKNOWN' a fallback)")
+```
+
+**A `shiptype` → `vessel_type.code` lookup** (a `prof` H-2 findingje):
+az `ais_type_code` (a 8000–8519-es belvízi ERI, az 1–99-es SOLAS)
+→ a `vessel_type.ais_type_code` → a `vessel_type.code`
+(a `02` v1.4 seedje: **89 típus, a magyar nevekkel**). A **hiányzó**
+kód → az `UNKNOWN` (`ais_type_code = NULL`).
 
 **A `source_kind`:** a `position.source_kind` a 02-es terv szerint
 `'ais' | 'derived' | 'manual'` — a parser mindig `'ais'`-t ír; a
 `'derived'` a **bárka** pozíciója (a konvoj vezetőjéből származtatva —
 az a 01-es terv §5.5 3. pontja).
+
+**A mezőnkénti eredet** (a `prof` H-3 findingje, a F-DET-15): a
+statikus AIS-adatok (a **név**, a **méret**, a **hívójel**, az **ENI**)
+a `vessel_data_origin`-ba mennek, `origin='ais'`-szal, a
+`value_snapshot` az eredeti értékkel. **A `confidence` a parser
+művelete** (a mérésben a statikus adatok `confidence=1.0` →
+a `vessel_data_origin_conflicts` nézet konfliktust jelez, ha egy másik
+forrás más értéket ad).
+
+**A `vessel_data_origin` a `vessel_data_origin_current` nézetből
+olvasható** (a 02-es terv §6.3a) → **a felhasználó a badge-et a
+service-től kapja** (a `bori` B-M-1 findingje: **a parser nem számít
+badge-et**).
 
 ---
 
@@ -409,20 +658,51 @@ A 02-es terv szerint a `msg_hash` a `raw_nmea` + `received_at` +
 (a DB-beli generálás nem lehetséges: a `timestamptz::text` nem
 immutable — a V-N-5 finding).
 
+**A törzsadatok a migráció seedjéből jönnek** (a `preshaz` P-M-4
+findingje): a `vessel_type` (a 89 hajótípus, a magyar nevekkel), a
+`language`, a `country`, a `waterway`, a `river_section`, a `basin`, a
+`cargo_type` és az `operator` — **a `02` v1.4 DDL-jének végén** (a
+`00014_seed_reference.sql`). → **a lookup erre a seedre támaszkodik**;
+a **hiányzó** `ais_type_code` (nem seedelt kód) → az `UNKNOWN` típus
+(`ais_type_code = NULL`).
+
+**A `shiptype` → `vessel_type.code` lookup** (a `prof` H-2 findingje):
+az `ais_type_code` (a **8000–8519-es belvízi ERI** sorozat, illetve az
+**1–99-es SOLAS** kódok) → a `vessel_type.ais_type_code` →
+a `vessel_type.code`. A mérésben előforduló kódok: **8444** (15 hajó),
+**8443** (14), **8440** (11), **8000** (8), **60** (8), **69** (7),
+**80** (3), **8450** (3), **51** (2), **0** (1), **90** (1), **8430** (1),
+**8460** (1), **8220** (1) → **mind a 89 típus seedben van**.
+
 ```python
 import hashlib
 
-def compute_msg_hash(raw_nmea: str, received_at: datetime,
+def compute_msg_hash(raw_nmea: list[str], received_at: datetime,
                      source_code: str) -> bytes:
     """A nyers uzenet dedup-kulcsa.
+
+    A `raw_nmea` **LISTA** — a v0.71-es AIS-catcher a `nmea` mezot
+    tombkent adja (a JSON-ben: `"nmea":["!AIVDM,1,1,,A,..."]`), a
+    3 soros uzenetet pedig **3 elembol allo** (a `prof` H-1 findingje:
+    a `str` tipus a `hashlib`-en elhasalna).
+
+    A hash elemei a 02-es §6.1 szerint: `raw_nmea` + `received_at`
+    (epoch) + `source_id` — a **sorokat sorrendben, `\n`-nel
+    osszefuzve** (igy a 3 soros uzenet egyetlen hash-t ad).
 
     A `received_at` epoch-milliSzekundumban megy (a timezone
     függetlenség miatt) — a `datetime.timestamp()` a local time
     felhasznalja, ezert a `timestamp()` helyett a `tz-aware`
     konverzio kell.
+
+    **A visszafuttathatosag kulcsa:** a `received_at` a **vevo ideje**
+    (a `ais_message.received_at` oszlopból olvasva) → a backfill
+    **ugyanazt a hash-t** allitja elo, mint a valos idejü
+    feldolgozas → **a backfill idempotens** (a `preshaz` P-H-1
+    findingje).
     """
     epoch_ms = int(received_at.timestamp() * 1000)
-    payload = f"{raw_nmea}|{epoch_ms}|{source_code}"
+    payload = "\n".join(raw_nmea) + f"|{epoch_ms}|{source_code}"
     return hashlib.sha256(payload.encode("utf-8")).digest()
 ```
 
@@ -439,13 +719,26 @@ szűri (a vevő újraküldi, az MQTT retry), nem a fizikait.
 | **Két vevő, ugyanaz a hajó** | a Duna egy szakaszon belül 2 vevőt is lát | **NEM** eldobandó — a `position` upsert a `(vessel_id, ts)`-en, a későbbi írás győz |
 | **A fizikai „ismétlődés"** | ugyanaz a pozíció kétszer | a `position` upsert eldobja (a `ts` azonos) |
 
+**A `repeat` flag** (a `prof` H-5 findingje): a `repeat=1` azt jelenti,
+hogy a vevő **már küldött egy ilyen üzenetet** → a parser **előnyben
+részesíti a `repeat=0`-t** a dedupnál, és a `position` upsert a
+`(vessel_id, ts)`-en **a `repeat=0` írás győz**. A `repeat` a
+normalizált rekordban marad, **a `position` táblába nem kerül** (a 02-es
+sémában nincs ilyen oszlopa).
+
+**A dedup korlátja** (a `prof` L-1 findingje): a `msg_hash` a
+`received_at` **millisecondszresolutionját** használja → **a hálózati
+retry** (a vevő újraküldi az üzenetet **más** időbélyeggel) **NEM
+szűrődik**. A második védvonal: a `position` upsert a `(vessel_id, ts)`-en
+**az eleve eldobja** a fizikai ismétlődést.
+
 ---
 
 ## 7. A hibakezelés
 
 | Hiba | Hatás | Jelzés |
 |---|---|---|
-| A checksum nem egyezik | az üzenet **eldobandó** | `data_quality_event` (`reason='parser_error'`) |
+| A checksum nem egyezik | az üzenet **eldobandó** | `data_quality_event` (`severity='warning'`, `detail='parser_error: checksum mismatch'`) |
 | A számozott sorok nem folytonosak | az üzenet **eldobandó** | `data_quality_event` |
 | A payload > 82 karakter (több sor nélkül) | az üzenet **eldobandó** | `data_quality_event` |
 | Ismeretlen karakter a payloadban | az üzenet **eldobandó** | `data_quality_event` |
@@ -456,36 +749,126 @@ szűri (a vevő újraküldi, az MQTT retry), nem a fizikait.
 **A `data_quality_event` írása** az `ingest` folyamatban történik — a
 02-es terv szerint a `job_run_id`-vel köthető (a P1-26 finding).
 
+**A `job_run` élettörtje** (a `prof` H-9 és a `preshaz` P-M-2 findingje):
+a parser indulásakor egy `job_run` sor (`job_name='ingest'`,
+`status='running'`, `started_at=now()`) → a végén `status='success'`
+(illetve `'partial'`/`'failed'`), a `rows_in`/`rows_out` kitöltve, az
+`ended_at=now()`-val. **A valós idejű feldolgozás és a backfill külön
+`job_run`** (`job_name='ingest-realtime'` / `'ingest-backfill'`) → a
+backfill **újrafuttatható**, és a `partial` státusz jelzi, hogy a
+hónap nem teljes (a `preshaz` P-H-8 findingje: a hónap közepén
+megszakadt backfill **a `ts` alapján** ír → a következő futás
+kitölti; a félig üres partíció a **90 napos TTL** miatt megy el).
+
+**A `detail` a technikai szöveg** (a parser logja); a **felhasználó** a
+`03` – API-terv szerint a `content_key`-ből kapja a lokalizált
+hibaüzenetet → **a parser nem lokalizál** (a `preshaz` P-M-3 findingje).
+
 **A hibák aránya a mérés során** (a `ais-vevo-terv.md` 5. fejezete):
 a go/no-go feltétel. A hibás üzenetek aránya **< 0,1%** kell legyen.
+
+**A két hibafajta szétválasztása** (a `prof` H-4 és a `preshaz` P-C-2
+findingje) — **ez a go/no-go kritérium értelmezhetősége**:
+
+| A hibafajta | Hol mérhető | A határ |
+|---|---|---|
+| **a vevő oldali hibák** (a hibás checksum, a hibás NMEA) | **sehol** — a vevő eldobja, **a DB-be nem jut** | **nem mérhető** |
+| **a parser oldali hibák** (a saját dekódolás hibája) | a `data_quality_event` / az összes feldolgozott üzenet | **< 0,1%** |
+
+**A helyettesítő metrika** (a vevő érzékenysége): a **`msg/hajó` arány**
+(a mérés: 37 494 üzenet / 199 hajó = **188 üzenet hajónként**).
+
+**A futás szintjén** (a `preshaz` P-H-2 findingje): ha a DB megszakad
+a backfill közben, a lemez betelik vagy a hálózat kiesik → a `job_run`
+`status='failed'`/`'partial'` + az `error_text` → **a backfill
+újrafuttatható** (a dedup miatt idempotens — a `preshaz` P-H-1
+findingje: a `received_at` a **vevő ideje**, a `ais_message.received_at`
+oszlopból olvasva → a backfill **ugyanazt a hash-t** állítja elő).
 
 ---
 
 ## 8. A mérési protokoll (a go/no-go)
 
-A `ais-vevo-terv.md` 5. fejezete: **30 nap, 1 próbavevő, a
-legforgalmasabb szakaszon.**
+> **A `preshaz` reviewer P-C-1/C-2/C-3 findingjei után — a terv a
+> MÉRÉS ELŐTTI architektúrát írta le.** A bud01 vevő 2026-11-22
+> 19:19-től fut, és a mérés első órájának adata (a
+> `docs/measurement_2026-11-22.md`) **mindenben eltér** a tervtől.
+> **Ez a fejezet a valós folyamatot írja le.**
 
-### 8.1 A mérés célpontjai
+### 8.0 A tényleges architektúra (a 8.1-es mérés előtt)
 
-| # | Célpont | A mérés kérdése |
-|---|---|---|
-| 1 | **Az üzenetek száma** | a README 5. fejezetének becslését igazolja-e? |
-| 2 | **Az üzenettípusok megoszlása** | a Msg 1/3/5/18/24 + FI 10 aránya |
-| 3 | **A hibás üzenetek aránya** | < 0,1% (a parser megbízhatósága) |
-| 4 | **A dekódolható statikus adatok aránya** | hány hajóból van ENI/név/méret |
-| 5 | **A pozíciók minősége** | a `river_km` a folyó-korridoron belül van-e? |
-| 6 | **A ghost hajók aránya** | a négy szűrőszabály után hány marad |
+```
+Pi (bud01, Raspberry Pi 4)
+  └─ AIS-catcher v0.71  →  SQLite (/var/lib/ais/ais.db, RETENTION 35 nap)
+       (a service: ais-receiver.service, boot után auto-indul)
+  └─ heti lehúzás (cron, hétfő 04:17)
+       └─ scp a NAS-ra → /opt/data/martin/work/ais-data/ais-YYYYMMDD-HHMM.db
+NAS (Artemis)
+  └─ a nyers *.db fájlok (a bind mounton)
+Központi (a VPS)
+  └─ a parser (a saját dekóder)  →  Postgres
+       (a position havonta partícionált, 90 napos TTL)
+```
 
-### 8.2 A mérés kimenete
+**A Parquet + gzip archívum NEM létezik** (a régi terv ezt írta) —
+a nyers adat **SQLite**, és a heti lehúzás **az SQLite fájlt** másolja.
+A parser a **központi** oldalon fut, **a SQLite `ais_message.nmea`
+oszlopából** olvas (a `nmea` **tömb** — a `prof` H-1 findingje).
 
-A mérési időszak alatt a nyers üzenetek **egy fájlba** kerülnek
-(a `raw archive` a `ais-vevo-terv.md` szerint Parquet + gzip), és a
-**replay** a parser teljesítményét is méri.
+### 8.1 A mérés célpontjai (a mérhető metrikákkal)
 
-**A fixture-ök:** a mérési időszakból **50 reprezentatív üzenet**
-(részletenként 10) — ezek a `db/fixtures/ais/` mappába kerülnek, és
-a parser **elfogadási tesztje** ez (a 01-es terv §5.7).
+| # | Célpont | A mérhető metrika | A határ |
+|---|---|---|---|
+| 1 | **Az üzenetek száma** | a mért érték vs. a README 5.1 becslése | — |
+| 2 | **Az üzenettípusok megoszlása** | a 12 típus aránya (a **nem hajó** üzenettípusok is) | — |
+| 3 | **A hibás üzenetek aránya** | **a PARSER hibái** (`data_quality_event` / az összes feldolgozott üzenet) — **a vevő hibái nem mérhetők** (a v0.71 csak a sikeres dekódolásokat tárolja) | **< 0,1%** |
+| 3b | **A vevő érzékenysége** (a helyettesítő metrika) | a **`msg/hajó` arány** (a mérés: 37 494 / 199 = **188 üzenet hajónként**) | — |
+| 4 | **A dekódolható statikus adatok aránya** | a **névvel** rendelkező hajók aránya (a mérés: **78 a 199-ből = 39,2%**) **és külön** az ENI-arány (**1 a 199-ből = 0,5%**) | — |
+| 5 | **A pozíciók minősége** | a pozíciók hány százaléka van a **folyó-korridoron** (a **földrajzi** becsléssel — a `fairway_distance` a magyar szakaszon üres, a C-5 finding) | — |
+| 6 | **A ghost hajók aránya** | a négy szűrőszabály után hány marad | — |
+| 7 | **A felhasználói lefedettség** (új, a `bori` B-M-2 findingje) | hány hajót találunk meg a **nevével/hívójelével** | — |
+| 8 | **A frissesség** (új, a `bori` B-M-2 findingje) | a katalógus hány százaléka friss (a pozíció az utolsó 24 órában) | — |
+
+> **A go/no-go ENI-kritérium** (az `ais-vevo-terv.md` 5.2: „*az
+> **ENI-arány ≥ 50%*") **a jelenlegi, városi helyen nem értelmezhető**:
+> a mérésben **0,5%**. A budapesti városi szakasz **nem a szűkvízi
+> forgalmat** méri → **a szűkvízi szakaszokon kell mérni** (a
+> `K-4` finding — a F-CAT-08 szerinti 3 site pontosan ezt a hármat
+> jelenti).
+
+### 8.2 A mérés kimenete és a feldolgozási lánc
+
+A nyers adat a Pi-n SQLite-ban van (35 nap retention) → hetente a NAS-ra
+kerül → a központi feldolgozás a `*.db` fájlokat olvassa.
+
+**A feldolgozás három lépése (a `preshaz` P-C-5 findingje):**
+1. a **vevő** fut folyamatosan a Pi-n (a v0.71) → SQLite;
+2. a **heti lehúzás** (a cron, hétfő 04:17) → a NAS-ra;
+3. a **feldolgozás** (a parser) → a központi Postgres-be.
+
+**A backfill becslése (a mérési adatból):** a 30 napos adat **~27
+millió üzenet** (a mérés: ~900 000/nap) → Pythonban, ~1 ms/üzenet →
+**~7,5 óra egyprocesszben** → **egy éjszaka**. Az `asyncio` + a
+`psycopg` pool párhuzamosítható.
+
+**A fixture-ök:** a mérési időszakból **típus szerint stratifikált**
+üzenetek — **minden a mérésben előforduló üzenettípusból legalább
+egy** (a 12-ből), és a **21-es típusból legalább 5** (a 18,7%-os
+gyakorisága miatt) → a `db/fixtures/ais/` mappába kerülnek, és a
+parser **elfogadási tesztje** ez (a 01-es terv §5.7). **Nem kell a 30
+napra várni**: a mérés első 48 órájából már készíthető (a `preshaz`
+P-H-5 findingje).
+
+**A `pyais` a teszt-referencia** (a `preshaz` P-H-7 findingje, a Q6
+lezárása): a fixture-ök dekódolását a `pyais`-szal **ellenőrizzük**
+(a MIT licenc → a tesztben használható) → **a számszerű mezők
+egyezése** a mérőszám. A `pyais` **nem** fut a termelésben.
+
+**A részleges partíció** (a `preshaz` P-H-8 findingje): a backfill a
+`ts` alapján ír → **a hónap közepén megszakadt futás a következő
+futással kitölti** (a dedup miatt) → **a félig üres partíció a 90 napos
+TTL miatt megy el**; a `job_run.status='partial'` jelzi, hogy a hónap
+nem teljes.
 
 ### 8.3 A parser elfogadási tesztje
 
@@ -501,6 +884,13 @@ a parser **elfogadási tesztje** ez (a 01-es terv §5.7).
 | 8 | A Msg 18 `length`/`beam` | a méretek helyesek |
 | 9 | A negatív szélesség (`lon_e7 < 0`) | a előjel helyes |
 | 10 | Az `mmsi = 0` | eldobva (a hibás üzenet) |
+| 11 | A **21-es típus** (a Class B pozíció) | a `position`-be megy (a Class B hajók a katalógusban vannak — §4.7.2) |
+| 12 | A **20-as/23-as** (a MSK/NAVTEX) | a `data_quality_event`-be (`severity='info'`), **nem** a `position`-be (§4.7.1) |
+
+**A hibás checksum a fixture-ben kézzel kell** (a `prof` M-9 findingje):
+a **vevő** eldobja a hibás checksumú üzenetet → **soha nem jut el a
+parserhez** → a teszt a parser **saját** hibakezelését méri, nem a
+vevőét.
 
 **A fixture-ök a mérés után jönnek** — a tesztek addig **szintetikus
 üzenetekkel** futnak (a nemzetközi specifikáció példái).
@@ -516,14 +906,49 @@ a parser **elfogadási tesztje** ez (a 01-es terv §5.7).
 | Az üzenetfolyam feldolgozása | **> 1000 üzenet/másodperc** | a vevőnkénti 100–200 üzenet/mp sokszorosa |
 | A memória | **a stream-enkénti 1 üzenet** | nincs pufferelés |
 
-**A mérési adat (a README 5. fejezete alapján):** a Duna Budapest
-szakaszán **~2 millió üzenet/nap** → **~23 üzenet/másodperc átlagban**,
-de csúcsidőben (a reggeli átkelés) **tízszeres**.
+**A mérési adat (a bud01 vevő, 2026-11-22 19:19–21:52) — a
+`prof` C-6 és a `preshaz` P-C-3 findingje után.** A korábbi terv a
+**README 5.1 becslését** használta; **a mérés a valóság**:
 
-**A 23 üzenet/mp nem igényel semmilyen optimalizálást** — a
-`asyncio` + egy `psycopg` connection pool elegendő. A **parser nem a
-szűk keresztmetszet** — a szűk keresztmetszet az **adatbázis írás**
-(upsert).
+| Metrika | A README becslése | **A mérés** |
+|---|---|---|
+| Üzenet/nap | ~2 000 000 | **~900 000** (a teljes órával ~1 056 000) |
+| Üzenet/mp (átlag) | ~23 | **~10,4** |
+| Üzenet/mp (**csúcs**) | „tízszeres" | **~100–300** (a reggeli átkelés) |
+| A 30 napos adat | ~60 millió | **~27 millió** |
+| A nyers SQLite mérete | ? | **~4 MB/óra** → **~3,4 GB** (35 nap) |
+| A `position` a Postgresben | ? | **~27 millió sor/hó** (90 napos TTL → ~81 millió) |
+
+**A teljesítménycél:** a mérés **átlagban** 10,4/mp — a **csúcsot**
+kell bírnia (**~300/mp**), és a mérés **a csúcsot** mérje (a
+másodpercenkénti maximumot), **ne az átlagot** (a `prof` M-7 findingje).
+
+**A 300 üzenet/mp nem igényel optimalizálást** — az `asyncio` + egy
+`psycopg` connection pool elegendő. A **parser nem a szűk keresztmetszet**
+— a szűk keresztmetszet az **adatbázis írás** (upsert).
+
+**A `statement_timeout` és a batch mérete** (a `preshaz` P-M-1
+findingje): a 03-as terv 5 s-os `statement_timeout`-t ad → a
+`executemany` batch **egyben** 5 s alatt kell lefusson → **~2000
+sor/batch** (a `psycopg` ~1000 sor/mp).
+
+**A `position` upsert** a `(vessel_id, ts)`-en — a 02-es sémával
+egyezik; a `msg_hash` **egyedi** indexe a `ais_message_raw`-on szűri a
+duplikátumokat.
+
+**A tárhely** (a `preshaz` P-H-4 findingje):
+
+| Hely | Adat | Méret |
+|---|---|---|
+| Pi SD (35 nap) | a nyers SQLite | **~3,4 GB** (a mérés: 4 MB/óra) |
+| NAS (a lehúzott fájlok) | heti ~600 MB × 52 | **~30 GB/év** — **a törlés kell** |
+| Postgres (a központi) | a `position` (90 napos TTL) | **~81 millió sor** → **~15–25 GB** |
+
+**A működési figyelő** (a `preshaz` P-C-4 findingje — a tervben nem
+volt): a heti lehúzás sikerességét a NAS-on a `ais-data/` mappa dátumai
+ellenőrzik; a vevő életjele az `ais_stats_hourly` táblából jön (a v0.71
+kitölti: `msg`, `vessels`, `level_min`/`level_max`, `ppm`) → **az üres
+óra = a vevő leállt**.
 
 ---
 
@@ -537,6 +962,11 @@ szűk keresztmetszet** — a szűk keresztmetszet az **adatbázis írás**
 | **Integráció** | a parser → a DB → a `vessel_last_position` nézet | a `validate_ddl.py` mintájára |
 | **Regresszió** | a mérési időszak teljes replayje | a mérési fájl + a teljesítmény-mérés |
 
+**A futás közbeni mérés** (a `preshaz` P-H-3 findingje): a `job_run`
+`started_at`/`ended_at` → a teljes feldolgozási sebesség (a ~27 millió
+üzenet / az idő); a soronkénti mérés (a `rows_in`/`rows_out` különbsége
+percenként) → **a 7,5 órás backfill figyelése**.
+
 **A `property` teszt a legfontosabb** — a 6 bites kódolás kézi
 implementálásánál a legkisebb hiba is elcsúszik egy bittel. A
 `hypothesis` generálja a véletlen biteket és ellenőrzi, hogy a
@@ -549,11 +979,15 @@ dekódolás → visszaalakítás az eredetit adja.
 | # | Kérdés | Alapértelmezés | Állapot |
 |---|---|---|---|
 | Q1 | A `river_km` a **pozíció** üzenetből jön (a szokásos pozíció kiterjesztése), nem a FI 10-ből — a 02-es terv megfogalmazása pontosítandó | **a pozíció üzenetből** | **lezárva** (§4.5) |
-| Q2 | A `fairway_code` a pozíció üzenetben van-e? | a 02-es `position` séma **nem** tartalmaz `fairway_code` oszlopot — a `river_section.fairway_code` a szakaszhoz tartozik, nem a pozícióhoz | nyitva |
+| Q2 | A `fairway_code` a pozíció üzenetben van-e? | **nincs hová írni** → **kikerült a normalizált rekordból** (a `prof` M-1 findingje) | **lezárva** |
 | Q3 | A **GNSS antenna helye** (a pozícióüzenet 148–167. bitje és a statikus üzenetek antennahelye) a `position` sémában nincs | **eldobva** — a `vessel_data_origin` a statikus adatokra vonatkozik | nyitva (a 02-es tervben) |
 | Q4 | A `draught_reference` a `vessel`-ben van (a statikus FI 10-ből) — a `position`-ben nincs | **így** — a `position` a pillanatnyi merülés, a hivatkozás a statikus adathoz tartozik | **lezárva** |
-| Q5 | A Msg 4 (bázisállomás) és a Msg 9/11 (SAR) kezelése | **eldobva** — a belső AIS-átvitelben nem relevánsak | **lezárva** |
-| Q6 | A `pyais` használható-e **teszt-összehasonlításra** (a saját dekóder helyett)? | **igen** — a MIT licenc és a `pyais` a mezőneveket másképp adja, de a **számértékek** összehasonlíthatók | nyitva (a mérés után) |
+| Q5 | A Msg 4 (bázisállomás) és a Msg 9/11 (SAR) kezelése | **a Msg 4/20/23 a NAVTEX/MSK-forrás** (a mérés) → a `data_quality_event`-be (`severity='info'`), **nem** a `position`-be; a Msg 9/11 (SAR) **eldobandó** | **lezárva** (§4.7.1) — **a korábbi „eldobandó" indoklás hamis volt** |
+| Q6 | A `pyais` használható-e **teszt-összehasonlításra** (a saját dekóder helyett)? | **igen** — a MIT licenc és a `pyais` a mezőneveket másképp adja, de a **számértékek** összehasonlíthatók → **a fixture-ök dekódolását a `pyais`-szal ellenőrizzük** | **lezárva** (a `preshaz` P-H-7 findingje) |
+| Q7 | Melyik ** telephelyen** mérünk? | a bud01 a **városi** szakaszon (a Dunától 2,88 km) → a lefedettség itt mérhető, a **szűkvízi** forgalom nem → **a szűkvízi szakaszokon is kell mérni** (a F-CAT-08 szerinti 3 site) | **nyitva** (a `K-4` finding) — **Miklós döntése** |
+| Q8 | A `destination` (a célállomás) honnan jön? | **a szerkesztői felületről** (a `06` terv) — az AIS-ből nem (a mérés: 100%-ban üres) | **lezárva** (a `bori` B-C-2 findingje) |
+| Q9 | A `nav_status` a sémában `text` vagy `smallint`? | **`text`** (a 02-es sémában már az, és a UI-on olvashatóbb) | **lezárva** — **Miklós döntése** |
+| Q10 | A `msg_subtype` (a DAC/FID) bekerüljön-e a sémába? | **igen**, `smallint` — a FI 10 és a Class B megkülönböztetéséhez | **lezárva** — **Miklós döntése** |
 
 ---
 
