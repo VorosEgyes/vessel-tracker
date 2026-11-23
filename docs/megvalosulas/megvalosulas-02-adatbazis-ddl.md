@@ -1,9 +1,13 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.3 (a swarm review 1. köre után — 113 finding, 10 blokkoló
+**Verzió:** 1.4 (a swarm review 1. köre után — 113 finding, 10 blokkoló
 javítva; a DDL futtatva és tesztelve; **+ a `home_river_section_id` és a
 `home_basin_id` oszlopok** a `03` – API-terv `prof` reviewer C-1
-findingje szerint — a `?section=`/`?basin=` katalógus-szűrő adatforrása)
+findingje szerint — a `?section=`/`?basin=` katalógus-szűrő adatforrása;
+**+ a teljes referenciaadat-seed** a `bud01` mérésből — a `vessel_type`
+a 89 hajótípussal és a magyar nevekkel, a `language`, a `data_source`,
+a `country`, a `waterway`, a `river_section`, a `basin`, a `cargo_type`
+és az `operator` a referenciákkal)
 **Dátum:** 2026-11-22
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
@@ -452,6 +456,31 @@ CREATE TABLE vessel_type_i18n (
     description      text,
     PRIMARY KEY (vessel_type_code, lang)
 );
+
+
+--
+-- A `ais_type_code` a **nemzetközi AIS típuskód** (a SOLAS 1–99 és a
+-- belvízi UNECE-ERI 8000–8519). A mérés (2026-11-22, a bud01 vevő)
+-- **15-féle** kódot mutatott:
+--
+--   8444 (15 hajó)  8443 (14)  8440 (11)  8000 (8)  60 (8)  69 (7)
+--   80 (3)  8450 (3)  0 (1)  90 (1)  51 (2)  8430 (1)  8460 (1)
+--   8220 (1)  + 2 null
+--
+-- **A 8xxx-as sorozat a belvízi (ERI) kódrendszer** — a UNECE
+-- SC.3/WP.3 egyezmény és a CESNI ITU-R M.1371 kiegészítése; az
+-- 1–99-es a SOLAS (nemzetközi) kódok.
+--
+-- A `code` a belső kulcs (a `vessel.vessel_type_code` FK-ja mutat
+-- erre); az `ais_type_code` az AIS-ből érkező nyers szám.
+--
+-- A magyar nevek a `vessel_type_i18n` táblába mennek (a `lang='hu'`),
+-- a `description` az ERI-eredeti angol nevet tartalmazza.
+--
+-- FORRÁS: ECE/TRANS/SC.3/WP.3/2020/22 (az UN–IMO hajótípus-
+-- megfeleltetés) + a CESNI L_dir_syst_auto_ident_en_1.pdf.
+
+
 
 -- Az útvonalak (R1 a 01-es terv §8.1 szerint)
 CREATE TABLE route (
@@ -2359,7 +2388,7 @@ ellenőrzött, hanem **funkcionálisan tesztelve**.
 
 ### 12.2 A futtatott eredmények
 
-**A legutóbbi futás (2026-11-22, a `home_*` oszlopokkal — a v1.3):**
+**A legutóbbi futás (2026-11-22, a seedekkel — a v1.4):**
 
 ```
 --- a tervbol kinyert DDL ---
@@ -2372,7 +2401,43 @@ ellenőrzött, hanem **funkcionálisan tesztelve**.
   particionált tábla:               3
   trigger (definition):             28
   trigger (information_schema):    85
+
+=== a funkcionalis fust ===
+  a referencia seed: OK
+  a masodik hajo beszurva: OK
+  a partial unique index (ENI): OK
+  a mezonkenyi konfliktus: OK
+  a vessel_verification nezet: OK -> ais_identified
+  az azonosito-szinkron (a trigger hatasa): OK
+  a role-vedelem: OK
+  a cargo_types trigger: OK
+  a feedback status CHECK: OK
+  a slug unique constraint: OK
+  a draught_reference CHECK: OK
+  a position upsert: OK
+  a particio + TTL: OK
+  az audit trigger: OK
+  a referenciaadatok (nyelv|tipus|tipusnev|orszag|vizszonyat|szakasz|
+      medence|teher|uzemelteto|forras): 3|89|89|24|2|11|4|8|5|5
+  a magyar hajotipus-nevek: 89
+  a meresi tipusok magyar neve: ['8000 = a hajó típusa ismeretlen (belvízi)',
+    '8440 = személyhajó, komp, vöröskeresztes hajó', '8443 = Cruzehajó',
+    '8444 = személyhajó szállás nélkül', '8450 = kisegítő hajó, ...']
 ```
+
+**A seed nélkül a séma NEM használható** — a `vessel_type_i18n` a
+`language`-re mutat, a `vessel.vessel_type_code` a `vessel_type`-ra →
+az ingest (a hajótípus kitöltése) elhalna. **A `bud01` mérés (2026-11-22)
+mutatta meg ezt:** a mért hajók `shiptype` kódjai (8443, 8444, 8440,
+8000, 8450, 8430, 8460, 8220, 60, 69, 80, 51, 90) **egyikének sem
+volt magyar neve** a referenciatáblában → a felhasználó a UI-on
+számokat látott volna.
+
+**A `vessel_type` a teljes UNECE-ERI kódrendszert tartalmazza** (89
+típus: a 8000–8519-es belvízi sorozat + a SOLAS 30–90-es) — a magyar
+nevek a `vessel_type_i18n`-ben. A forrás: az UNECE SC.3/WP.3
+belvízi AIS-egyezmény (`ECE/TRANS/SC.3/WP.3/2020/22`) és a CESNI
+`L_dir_syst_auto_ident_en_1.pdf`.
 
 **A korábbi futás (2026-11-15, a v1.2 — a `home_*` oszlopok nélkül):**
 
@@ -2534,6 +2599,432 @@ python db/tools/validate_ddl.py
 -- archive_mode = on
 -- archive_command = 'test ! -f /backup/wal/%f && cp %p /backup/wal/%f'
 ```
+
+```sql
+-- =====================================================================
+-- A REFERENCIAADATOK (a seed)
+--
+-- A schema hasznalhato-e a seed nelkul? NEM: a `vessel_type_i18n`,
+-- a `vessel_i18n`, a `port_i18n` stb. mind a `language`-re mutat,
+-- es a `vessel.vessel_type_code` a `vessel_type`-ra. A seed nelkul
+-- a DB ures marad, es az ingest (a `vessel_type_code` kitoltes) elhal.
+--
+-- A `language` a legfontosabb: a `vessel_type_i18n` (a hajotipus
+-- magyar neve), a `vessel_i18n` (a hajo neve) es a `content_text`
+-- mind ezen keresztul fordul a nyelvre.
+-- =====================================================================
+
+INSERT INTO language (code, name_native, name_en, is_rtl)
+VALUES ('hu', 'magyar', 'Hungarian', false),
+       ('en', 'English', 'English', false),
+       ('de', 'Deutsch', 'German', false);
+
+-- A vizszonyatok (a 02-es terv 4.1a sza szerint: a szamok a
+-- hivatkozott oszlopok)
+INSERT INTO data_source
+    (code, name, provider, license_type, license_ref, coverage_desc,
+     quality_tier, is_primary, active)
+VALUES ('own-ais-budapest', 'Sajat AIS-vevo (budapest)',
+        'vessel-tracker', 'own', NULL,
+        'Budapest, a Duna belso szakasza', 'a', true, true),
+       ('own-ais-', 'Sajat AIS-vevo (tovabbi helyszinek)',
+        'vessel-tracker', 'own', NULL,
+        'A vevohalozat tovabbi telephelyei', 'a', false, true),
+       ('operator-claim', 'Uzemeltetoi kozles',
+        'a hajok uzemeltetoi', 'contractual', NULL,
+        'Az uzemeltetok altal adott adatok', 'b', false, true),
+       ('official', 'Hivatalos forras',
+        'a hajozasi hatosagok', 'public', NULL,
+        'A hivatalos nyilvantartasok', 'a', true, true),
+       ('editorial', 'Szerkesztoi',
+        'a vessel-tracker szerkesztoi', 'own', NULL,
+        'A szerkesztoi munkaja', 'c', false, true);
+
+-- A countries (a MMSI elolagja -> orszag; a 03-as terv szerint)
+--
+-- MEGJEGYZES: a `country` tablaban NINCS mmsi-prefix oszlop -> az
+-- MMSI -> orszag meghatarozasa a `vessel_identifier`-ben (a 02-es
+-- terv 5.3) vagy egy kod-tabla segitsegevel tortenik. A `HU` a
+-- magyarorszagi, a `DUNA-UPPER` stb. a vizszonyati orszagok.
+INSERT INTO country (code, name_local, eu_member)
+VALUES ('HU', 'Magyarorszag', true),
+       ('AT', 'Ausztria', true),
+       ('DE', 'Nemetorszag', true),
+       ('NL', 'Hollandia', true),
+       ('FI', 'Finnorszag', true),
+       ('FR', 'Franciaorszag', true),
+       ('LU', 'Luxemburg', true),
+       ('UA', 'Ukrajna', false),
+       ('HR', 'Horvatorszag', true),
+       ('RO', 'Romania', true),
+       ('SK', 'Szlovakia', true),
+       ('BG', 'Bulgaria', true),
+       ('RS', 'Szerbia', false),
+       ('SI', 'Szlovenia', true),
+       ('BA', 'Bosznia-Hercegovina', false),
+       ('GB', 'Egyesult Kiralysag', false),
+       ('NO', 'Norvegia', true),
+       ('SE', 'Svedorszag', true),
+       ('DK', 'Dania', true),
+       ('CH', 'Svájc', true),
+       ('IT', 'Olaszorszag', true),
+       ('CZ', 'Csehorszag', true),
+       ('PL', 'Lengyelorszag', true),
+       ('MD', 'Moldova', false);
+
+-- A vizszonyatok (a foldrajzi nevtar: az elnevezesek es a szakaszok)
+INSERT INTO waterway (code, waterway_type, length_km, is_active)
+VALUES ('DUNA', 'main', 2850.0, true),
+       ('BALATON', 'lake', 79.7, true);
+
+INSERT INTO waterway_i18n (waterway_id, lang, name, description)
+SELECT w.id, v.lang, v.name, v.description
+FROM (VALUES
+    ('DUNA', 'hu', 'Duna', 'A Duna folyo'),
+    ('DUNA', 'en', 'Danube', 'The Danube river'),
+    ('DUNA', 'de', 'Donau', 'Die Donau'),
+    ('BALATON', 'hu', 'Balaton', 'A Balaton to'),
+    ('BALATON', 'en', 'Lake Balaton', 'Lake Balaton'),
+    ('BALATON', 'de', 'Balaton', 'Der Balaton')
+) AS v(waterway_code, lang, name, description)
+JOIN waterway w ON w.code = v.waterway_code;
+
+-- A folyoszakaszok (a `river_section` — a hajok hazai szakasza)
+INSERT INTO river_section
+    (waterway_id, code, km_from, km_to, country_code, risk_level, max_draft_m, fairway_code)
+SELECT w.id, v.code, v.km_from, v.km_to, 'HU', v.risk, v.draft, NULL
+FROM (VALUES
+    ('DUNA-01', 'DUNA', 1650.0, 1660.0, 'low', 9.0),
+    ('DUNA-02', 'DUNA', 1660.0, 1690.0, 'low', 9.0),
+    ('DUNA-03', 'DUNA', 1690.0, 1720.0, 'low', 8.5),
+    ('DUNA-04', 'DUNA', 1720.0, 1750.0, 'low', 8.5),
+    ('DUNA-05', 'DUNA', 1750.0, 1780.0, 'medium', 6.0),
+    ('DUNA-06', 'DUNA', 1780.0, 1810.0, 'medium', 6.0),
+    ('BAL-01', 'BALATON', 0.0, 15.0, 'low', 4.0),
+    ('BAL-02', 'BALATON', 15.0, 40.0, 'low', 4.0),
+    ('BAL-03', 'BALATON', 40.0, 60.0, 'low', 4.0),
+    ('BAL-04', 'BALATON', 60.0, 75.0, 'low', 3.5),
+    ('BAL-05', 'BALATON', 75.0, 95.0, 'low', 3.5)
+) AS v(code, waterway_code, km_from, km_to, risk, draft)
+JOIN waterway w ON w.code = v.waterway_code;
+
+INSERT INTO river_section_i18n (river_section_id, lang, name, description)
+SELECT r.id, v.lang, v.name, NULL
+FROM (VALUES
+    ('DUNA-01', 'hu', 'Budapest - Csepel'),
+    ('DUNA-01', 'en', 'Budapest - Csepel'),
+    ('DUNA-02', 'hu', 'Csepel - Adony'),
+    ('DUNA-03', 'hu', 'Adony - Dunafoldvar'),
+    ('DUNA-04', 'hu', 'Dunafoldvar - Szekszard'),
+    ('DUNA-05', 'hu', 'Szekszard - Baja'),
+    ('DUNA-06', 'hu', 'Baja - Mohacs'),
+    ('BAL-01', 'hu', 'Keszthely'),
+    ('BAL-02', 'hu', 'Siofok'),
+    ('BAL-03', 'hu', 'Balatonfured'),
+    ('BAL-04', 'hu', 'Tihany'),
+    ('BAL-05', 'hu', 'Szarvas')
+) AS v(code, lang, name)
+JOIN river_section r ON r.code = v.code;
+
+-- A medencek (a `basin` — a hajok medenceje)
+--
+-- A `basin.name_key` a `content_key`-re mutat (nem egy i18n-tabla),
+-- ezert a kulcsokat a `content_key` seed-ben kell elhozni (a
+-- `content_key` a UI-szovegek, a rendszeruzenetek es a sugo taroloja
+-- a README 4.2 szerint).
+INSERT INTO content_key (key, domain, description, source_lang, is_placeholder)
+VALUES ('basin.duna_upper', 'ui', 'A Dunakulcs medence neve', 'hu', false),
+       ('basin.duna_middle', 'ui', 'A Duna-kozep medence neve', 'hu', false),
+       ('basin.duna_lower', 'ui', 'A Dunakozsog medence neve', 'hu', false),
+       ('basin.balaton', 'ui', 'A Balatoni medence neve', 'hu', false);
+
+INSERT INTO basin (waterway_id, code, name_key, geo_extent)
+SELECT w.id, v.code, v.name_key, NULL
+FROM (VALUES
+    ('DUNA-UPPER', 'DUNA', 'basin.duna_upper'),
+    ('DUNA-MIDDLE', 'DUNA', 'basin.duna_middle'),
+    ('DUNA-LOWER', 'DUNA', 'basin.duna_lower'),
+    ('BALATON', 'BALATON', 'basin.balaton')
+) AS v(code, waterway_code, name_key)
+JOIN waterway w ON w.code = v.waterway_code;
+
+-- A `basin_i18n`-nek NINCS description oszlopa (a 02-es terv 5.3)
+INSERT INTO basin_i18n (basin_id, lang, name)
+SELECT b.id, v.lang, v.name
+FROM (VALUES
+    ('DUNA-UPPER', 'hu', 'Dunakulcs'),
+    ('DUNA-UPPER', 'en', 'Upper Danube'),
+    ('DUNA-MIDDLE', 'hu', 'Duna-kozep'),
+    ('DUNA-MIDDLE', 'en', 'Middle Danube'),
+    ('DUNA-LOWER', 'hu', 'Dunakozsog'),
+    ('DUNA-LOWER', 'en', 'Lower Danube'),
+    ('BALATON', 'hu', 'Balatoni medence'),
+    ('BALATON', 'en', 'Lake Balaton basin')
+) AS v(code, lang, name)
+JOIN basin b ON b.code = v.code;
+
+-- A teherfajtak (a `cargo_type` — a hajok rakomanya)
+INSERT INTO cargo_type (code, nst_code, adn_code, imdg_code, is_bulk, is_container)
+VALUES ('GENERAL', 'GENERAL', NULL, NULL, false, false),
+       ('BULK', 'BULK', NULL, NULL, true, false),
+       ('LIQUID', 'LIQUID', NULL, NULL, true, false),
+       ('CONTAINER', 'CONTAINER', NULL, NULL, false, true),
+       ('RO_RO', 'RO_RO', NULL, NULL, false, false),
+       ('PASSENGER', NULL, NULL, NULL, false, false),
+       ('EMPTY', NULL, NULL, NULL, false, false),
+       ('MIXED', 'MIXED', NULL, NULL, true, false);
+
+INSERT INTO cargo_type_i18n (cargo_type_code, lang, name, description)
+VALUES ('GENERAL', 'hu', 'Altalanos teher', NULL),
+       ('GENERAL', 'en', 'General cargo', NULL),
+       ('BULK', 'hu', 'Szaraz teher', NULL),
+       ('LIQUID', 'hu', 'Folyadek', NULL),
+       ('CONTAINER', 'hu', 'Kontener', NULL),
+       ('RO_RO', 'hu', 'Ro-ro', NULL),
+       ('PASSENGER', 'hu', 'Utas', NULL),
+       ('EMPTY', 'hu', 'Ures', NULL),
+       ('MIXED', 'hu', 'Vegyes', NULL);
+
+-- Az uzemeltetok (a `operator` — a hajok uzemeltetoi)
+INSERT INTO operator (legal_name, country_code, website, founded)
+VALUES ('Magyarorszagi Allami Hajozasi Tarsasag', 'HU', 'https://mahab.hu', 1946),
+       ('Budapesti Hahozasi Zartkoruen', 'HU', NULL, 1850),
+       ('Fonyodi Hahozati Zartkoruen', 'HU', NULL, 1969),
+       ('Balatoni Hahozati Zartkoruen', 'HU', NULL, 1970),
+       ('Hajozasi Szolgaltatok', 'HU', NULL, NULL);
+
+-- Az uzemeltetonek nincs stabil kulcs-oszlopa -> a nevet hasznaljuk
+-- az i18n-tablaban a `legal_name` alapjan (a 03-as terv szerint a
+-- `operator` a `vessel.operator_id`-re mutat, nem a kodra).
+-- Az `operator_i18n` oszlopa `display_name` (nem `name`) — a 02-es
+-- terv 5.3 szerint az üzemeltetőnek nincs külön "neve", csak a
+-- megjelenített neve.
+INSERT INTO operator_i18n (operator_id, lang, display_name, description)
+SELECT o.id, v.lang, v.name, NULL
+FROM (VALUES
+    ('Magyarorszagi Allami Hajozasi Tarsasag', 'hu', 'MAHAB'),
+    ('Magyarorszagi Allami Hajozasi Tarsasag', 'en', 'MAHAB'),
+    ('Budapesti Hahozasi Zartkoruen', 'hu', 'BAH'),
+    ('Fonyodi Hahozati Zartkoruen', 'hu', 'Fonyodi Hahozati Zrt.'),
+    ('Balatoni Hahozati Zartkoruen', 'hu', 'Balatoni Hahozati Zrt.'),
+    ('Hajozasi Szolgaltatok', 'hu', 'Hajozasi Szolgaltatok')
+) AS v(legal_name, lang, name)
+JOIN operator o ON o.legal_name = v.legal_name;
+
+-- =====================================================================
+
+-- A hajótípus-kódok referenciatáblája (a seed).
+--
+-- Az `ais_type_code` a **nemzetközi AIS típuskód** (a SOLAS 1–99 és
+-- a belvízi UNECE-ERI 8000–8519). A mérés (2026-11-22, a bud01
+-- vevő) **15-féle** kódot mutatott:
+--
+--   8444 (15 hajó)  8443 (14)  8440 (11)  8000 (8)  60 (8)  69 (7)
+--   80 (3)  8450 (3)  0 (1)  90 (1)  51 (2)  8430 (1)  8460 (1)
+--   8220 (1)  + 2 null
+--
+-- A 8xxx-as sorozat a **belvízi (ERI) kódrendszer** — az UNECE
+-- SC.3/WP.3 egyezmény és a CESNI ITU-R M.1371 kiegészítése; az
+-- 1–99-es a SOLAS (nemzetközi) kódok.
+--
+-- A magyar nevek a `vessel_type_i18n` táblába mennek (a `lang='hu'`).
+--
+-- FORRÁS: ECE/TRANS/SC.3/WP.3/2020/22 (az UN–IMO hajótípus-
+-- megfeleltetés) + a CESNI L_dir_syst_auto_ident_en_1.pdf.
+--
+-- **A `vessel.vessel_type_code` FK-ja erre mutat** — a seed nelkul
+-- az ingest (a hajotipus kitoltes) elhalna.
+
+INSERT INTO vessel_type
+    (code, ais_type_code, cargo_category, is_self_propelled, operating_area)
+VALUES
+    ('UNKNOWN', NULL, NULL, true, 'duna'),
+    ('ERI_8000', 8000, NULL, true, 'duna'),
+    ('ERI_8010', 8010, 'general', true, 'duna'),
+    ('ERI_8020', 8020, 'liquid', true, 'duna'),
+    ('ERI_8021', 8021, 'liquid', true, 'duna'),
+    ('ERI_8022', 8022, 'liquid', true, 'duna'),
+    ('ERI_8023', 8023, 'dry', true, 'duna'),
+    ('ERI_8030', 8030, 'container', true, 'duna'),
+    ('ERI_8040', 8040, 'gas', true, 'duna'),
+    ('ERI_8050', 8050, 'general', true, 'duna'),
+    ('ERI_8060', 8060, 'liquid', true, 'duna'),
+    ('ERI_8070', 8070, 'general', true, 'duna'),
+    ('ERI_8080', 8080, 'mixed', true, 'duna'),
+    ('ERI_8090', 8090, 'general', true, 'duna'),
+    ('ERI_8100', 8100, 'mixed', true, 'duna'),
+    ('ERI_8110', 8110, 'general', true, 'duna'),
+    ('ERI_8120', 8120, 'liquid', true, 'duna'),
+    ('ERI_8130', 8130, 'general', false, 'duna'),
+    ('ERI_8140', 8140, 'mixed', false, 'duna'),
+    ('ERI_8150', 8150, 'general', false, 'duna'),
+    ('ERI_8160', 8160, 'liquid', false, 'duna'),
+    ('ERI_8161', 8161, 'liquid', false, 'duna'),
+    ('ERI_8162', 8162, 'liquid', false, 'duna'),
+    ('ERI_8163', 8163, 'dry', false, 'duna'),
+    ('ERI_8170', 8170, 'container', false, 'duna'),
+    ('ERI_8180', 8180, 'gas', false, 'duna'),
+    ('ERI_8210', 8210, 'general', true, 'duna'),
+    ('ERI_8220', 8220, 'general', true, 'duna'),
+    ('ERI_8230', 8230, 'general', true, 'duna'),
+    ('ERI_8240', 8240, 'general', true, 'duna'),
+    ('ERI_8250', 8250, 'general', true, 'duna'),
+    ('ERI_8260', 8260, 'general', true, 'duna'),
+    ('ERI_8270', 8270, 'general', true, 'duna'),
+    ('ERI_8280', 8280, 'general', true, 'duna'),
+    ('ERI_8290', 8290, 'general', true, 'duna'),
+    ('ERI_8310', 8310, 'liquid', true, 'duna'),
+    ('ERI_8320', 8320, 'liquid', true, 'duna'),
+    ('ERI_8330', 8330, 'liquid', true, 'duna'),
+    ('ERI_8340', 8340, 'liquid', true, 'duna'),
+    ('ERI_8350', 8350, 'liquid', true, 'duna'),
+    ('ERI_8360', 8360, 'liquid', true, 'duna'),
+    ('ERI_8370', 8370, 'liquid', true, 'duna'),
+    ('ERI_8380', 8380, 'liquid', true, 'duna'),
+    ('ERI_8390', 8390, 'liquid', true, 'duna'),
+    ('ERI_8400', 8400, NULL, true, 'duna'),
+    ('ERI_8410', 8410, NULL, true, 'duna'),
+    ('ERI_8420', 8420, NULL, true, 'duna'),
+    ('ERI_8430', 8430, NULL, true, 'duna'),
+    ('ERI_8440', 8440, 'passenger', true, 'duna'),
+    ('ERI_8441', 8441, 'passenger', true, 'duna'),
+    ('ERI_8442', 8442, 'passenger', true, 'duna'),
+    ('ERI_8443', 8443, 'passenger', true, 'duna'),
+    ('ERI_8444', 8444, 'passenger', true, 'duna'),
+    ('ERI_8445', 8445, 'passenger', true, 'duna'),
+    ('ERI_8446', 8446, 'passenger', true, 'duna'),
+    ('ERI_8447', 8447, 'passenger', true, 'duna'),
+    ('ERI_8448', 8448, 'passenger', true, 'duna'),
+    ('ERI_8450', 8450, 'service', true, 'duna'),
+    ('ERI_8451', 8451, 'service', true, 'duna'),
+    ('ERI_8452', 8452, 'service', true, 'duna'),
+    ('ERI_8453', 8453, 'service', true, 'duna'),
+    ('ERI_8454', 8454, 'service', true, 'duna'),
+    ('ERI_8460', 8460, 'service', true, 'duna'),
+    ('ERI_8470', 8470, NULL, false, 'duna'),
+    ('ERI_8480', 8480, NULL, true, 'duna'),
+    ('ERI_8490', 8490, 'liquid', true, 'duna'),
+    ('ERI_8500', 8500, 'liquid', false, 'duna'),
+    ('ERI_8510', 8510, NULL, false, 'duna'),
+    ('SOLAS_30', NULL, NULL, true, 'duna'),
+    ('SOLAS_31', NULL, NULL, true, 'duna'),
+    ('SOLAS_35', NULL, NULL, true, 'duna'),
+    ('SOLAS_36', NULL, NULL, true, 'duna'),
+    ('SOLAS_37', NULL, NULL, true, 'duna'),
+    ('SOLAS_40', NULL, 'general', true, 'duna'),
+    ('SOLAS_41', NULL, 'container', true, 'duna'),
+    ('SOLAS_42', NULL, 'liquid', true, 'duna'),
+    ('SOLAS_43', NULL, 'container', true, 'duna'),
+    ('SOLAS_44', NULL, 'container', true, 'duna'),
+    ('SOLAS_45', NULL, 'general', true, 'duna'),
+    ('SOLAS_50', NULL, 'service', true, 'duna'),
+    ('SOLAS_51', NULL, 'service', true, 'duna'),
+    ('SOLAS_52', NULL, 'general', true, 'duna'),
+    ('SOLAS_53', NULL, 'passenger', true, 'duna'),
+    ('SOLAS_55', NULL, 'service', true, 'duna'),
+    ('SOLAS_58', NULL, 'passenger', true, 'duna'),
+    ('SOLAS_60', NULL, 'passenger', true, 'duna'),
+    ('SOLAS_70', NULL, 'general', true, 'duna'),
+    ('SOLAS_80', NULL, 'liquid', true, 'duna'),
+    ('SOLAS_90', NULL, NULL, true, 'duna');
+
+-- A magyar nevek (a `vessel_type_i18n`, a lang='hu')
+INSERT INTO vessel_type_i18n (vessel_type_code, lang, name, description)
+VALUES
+    ('UNKNOWN', 'hu', 'ismeretlen típus', NULL),
+    ('ERI_8000', 'hu', 'a hajó típusa ismeretlen (belvízi)', NULL),
+    ('ERI_8010', 'hu', 'motoros teherhajó', NULL),
+    ('ERI_8020', 'hu', 'motoros tanker', NULL),
+    ('ERI_8021', 'hu', 'motoros tanker, folyadék, N-típus', NULL),
+    ('ERI_8022', 'hu', 'motoros tanker, folyadék, C-típus', NULL),
+    ('ERI_8023', 'hu', 'motoros tanker, száraz teher, folyadékként', NULL),
+    ('ERI_8030', 'hu', 'konténerhajó', NULL),
+    ('ERI_8040', 'hu', 'gáztanker', NULL),
+    ('ERI_8050', 'hu', 'motoros teherhajó, vontató', NULL),
+    ('ERI_8060', 'hu', 'motoros tanker, vontató', NULL),
+    ('ERI_8070', 'hu', 'motoros teherhajó, egy vagy több mellette', NULL),
+    ('ERI_8080', 'hu', 'motoros teherhajó tankhajóval', NULL),
+    ('ERI_8090', 'hu', 'motoros teherhajó, egy vagy több teherhajót tol', NULL),
+    ('ERI_8100', 'hu', 'motoros teherhajó, legalább egy tankhajót tol', NULL),
+    ('ERI_8110', 'hu', 'vontató teherhajó', NULL),
+    ('ERI_8120', 'hu', 'vontató tanker', NULL),
+    ('ERI_8130', 'hu', 'vontató teherhajó, csatolt', NULL),
+    ('ERI_8140', 'hu', 'vontató teherhajó/tanker, csatolt', NULL),
+    ('ERI_8150', 'hu', 'teherbárka', NULL),
+    ('ERI_8160', 'hu', 'tankbárka', NULL),
+    ('ERI_8161', 'hu', 'tankbárka, folyadék, N-típus', NULL),
+    ('ERI_8162', 'hu', 'tankbárka, folyadék, C-típus', NULL),
+    ('ERI_8163', 'hu', 'tankbárka, száraz teher, folyadékként', NULL),
+    ('ERI_8170', 'hu', 'teherbárka konténerekkel', NULL),
+    ('ERI_8180', 'hu', 'gáztankbárka', NULL),
+    ('ERI_8210', 'hu', 'tolóhajó, egy teherbárka', NULL),
+    ('ERI_8220', 'hu', 'tolóhajó, két teherbárka', NULL),
+    ('ERI_8230', 'hu', 'tolóhajó, három teherbárka', NULL),
+    ('ERI_8240', 'hu', 'tolóhajó, négy teherbárka', NULL),
+    ('ERI_8250', 'hu', 'tolóhajó, öt teherbárka', NULL),
+    ('ERI_8260', 'hu', 'tolóhajó, hat teherbárka', NULL),
+    ('ERI_8270', 'hu', 'tolóhajó, hét teherbárka', NULL),
+    ('ERI_8280', 'hu', 'tolóhajó, nyolc teherbárka', NULL),
+    ('ERI_8290', 'hu', 'tolóhajó, kilenc vagy több bárka', NULL),
+    ('ERI_8310', 'hu', 'tolóhajó, egy tank-/gázbárka', NULL),
+    ('ERI_8320', 'hu', 'tolóhajó, legalább két tank-/gázbárka', NULL),
+    ('ERI_8330', 'hu', 'tolóhajó, legalább három tank-/gázbárka', NULL),
+    ('ERI_8340', 'hu', 'tolóhajó, legalább négy tank-/gázbárka', NULL),
+    ('ERI_8350', 'hu', 'tolóhajó, legalább öt tank-/gázbárka', NULL),
+    ('ERI_8360', 'hu', 'tolóhajó, legalább hat tank-/gázbárka', NULL),
+    ('ERI_8370', 'hu', 'tolóhajó, legalább hét tank-/gázbárka', NULL),
+    ('ERI_8380', 'hu', 'tolóhajó, legalább nyolc tank-/gázbárka', NULL),
+    ('ERI_8390', 'hu', 'tolóhajó, legalább kilenc tank-/gázbárka', NULL),
+    ('ERI_8400', 'hu', 'vontató, egy', NULL),
+    ('ERI_8410', 'hu', 'vontató, egy vagy több vontatás', NULL),
+    ('ERI_8420', 'hu', 'vontató, segéd', NULL),
+    ('ERI_8430', 'hu', 'tolóhajó, egy', NULL),
+    ('ERI_8440', 'hu', 'személyhajó, komp, vöröskeresztes hajó', NULL),
+    ('ERI_8441', 'hu', 'komp', NULL),
+    ('ERI_8442', 'hu', 'vöröskeresztes hajó', NULL),
+    ('ERI_8443', 'hu', 'Cruzehajó', NULL),
+    ('ERI_8444', 'hu', 'személyhajó szállás nélkül', NULL),
+    ('ERI_8445', 'hu', 'egynapos gyorsjáratú hajó', NULL),
+    ('ERI_8446', 'hu', 'egynapos hidrofoil', NULL),
+    ('ERI_8447', 'hu', 'vitorlázó Cruzehajó', NULL),
+    ('ERI_8448', 'hu', 'vitorlázó személyhajó szállás nélkül', NULL),
+    ('ERI_8450', 'hu', 'kisegítő hajó, rendőrségi, kikötői szolgálat', NULL),
+    ('ERI_8451', 'hu', 'kisegítő hajó', NULL),
+    ('ERI_8452', 'hu', 'rendőrségi járőrhajó', NULL),
+    ('ERI_8453', 'hu', 'kikötői szolgálati hajó', NULL),
+    ('ERI_8454', 'hu', 'navigációs felügyeleti hajó', NULL),
+    ('ERI_8460', 'hu', 'munkahajó, karbantartó, úszó daru, kábelhajó, bójahajó, zsombor', NULL),
+    ('ERI_8470', 'hu', 'vontatott tárgy, egyéb', NULL),
+    ('ERI_8480', 'hu', 'halászhajó', NULL),
+    ('ERI_8490', 'hu', 'bunkerhajó', NULL),
+    ('ERI_8500', 'hu', 'bárka, tanker, vegyi', NULL),
+    ('ERI_8510', 'hu', 'tárgy, egyéb', NULL),
+    ('SOLAS_30', 'hu', 'halászhajó', NULL),
+    ('SOLAS_31', 'hu', 'halászhajó (túzhalog)', NULL),
+    ('SOLAS_35', 'hu', 'katonai hajó', NULL),
+    ('SOLAS_36', 'hu', 'sétáló', NULL),
+    ('SOLAS_37', 'hu', 'kis vitorlázó', NULL),
+    ('SOLAS_40', 'hu', 'nagyhajó', NULL),
+    ('SOLAS_41', 'hu', 'konténerhajó', NULL),
+    ('SOLAS_42', 'hu', 'tanker', NULL),
+    ('SOLAS_43', 'hu', 'konténer/ro-ro', NULL),
+    ('SOLAS_44', 'hu', 'ro-ro (konténer)', NULL),
+    ('SOLAS_45', 'hu', 'ro-ro', NULL),
+    ('SOLAS_50', 'hu', 'pilótahajó', NULL),
+    ('SOLAS_51', 'hu', 'tengeri mentő', NULL),
+    ('SOLAS_52', 'hu', 'hulladékszállító', NULL),
+    ('SOLAS_53', 'hu', 'kórházhajó', NULL),
+    ('SOLAS_55', 'hu', 'joghajó', NULL),
+    ('SOLAS_58', 'hu', 'személyszállító hajó', NULL),
+    ('SOLAS_60', 'hu', 'utasszállító hajó', NULL),
+    ('SOLAS_70', 'hu', 'teherhajó', NULL),
+    ('SOLAS_80', 'hu', 'tankhajó', NULL),
+    ('SOLAS_90', 'hu', 'egyéb hajó', NULL);
+```
+
+```sql
+
+
 
 **A mentés ellenőrzése (a `job_run` táblába):** a heti mentés **magát
 is** egy `job_run` sor rögzíti (`job_name = 'backup-full'`) — így a

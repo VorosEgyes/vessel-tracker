@@ -109,6 +109,23 @@ def strip_cron(sql: str) -> str:
     return sql
 
 
+def psql_tuples(sql: str) -> list[str]:
+    """Egy lekérdezes a fejlec nelkul (a psql -t -A flagokkal).
+
+    A -t (tuples only) es -A (unaligned) egyutt kikapcsolja a
+    fejlecet, az elvalaszto sort es a gyakorlo sort — a kimenet
+    tiszta adat (soronkent egy elem, a tabulaktorral elvalasztva).
+    """
+    env = dict(os.environ)
+    env.update({"PGHOST": str(PGDATA), "PGUSER": "postgres",
+                "PGDATABASE": "postgres"})
+    cmd = [str(PSQL), "-v", "ON_ERROR_STOP=1", "-t", "-A", "-F", "|", "-c", sql]
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    if r.returncode != 0:
+        return []
+    return [l.strip() for l in r.stdout.strip().splitlines() if l.strip()]
+
+
 def psql(sql: str | None = None, args: list[str] | None = None,
          stdin_text: str | None = None) -> subprocess.CompletedProcess:
     env = dict(os.environ)
@@ -226,22 +243,24 @@ def smoke_test() -> None:
     print("=== a funkcionalis fust ===")
 
     # a referencia seed
+    #
+    # **A DDL sajat seedjet hasznaljuk** (a language, a data_source,
+    # a country, a waterway, a vessel_type, a basin, a cargo_type es
+    # az operator mar bent van) — csak a TESZTHAJOT es a kikotot
+    # adjuk hozza, mert az ingest-et (a vessel_type_code kitoltes)
+    # ezen keresztul teszteljuk.
     r = psql(stdin_text="""
-INSERT INTO language (code, name_native, name_en) VALUES
-    ('hu','Magyar','Hungarian'), ('de','Deutsch','German'), ('en','English','English');
-INSERT INTO data_source (code, name, provider, license_type)
-    VALUES ('own-bud','Budapest own receiver','self','own');
-INSERT INTO country (code, name_local, eu_member) VALUES ('HU','Magyarország', true);
-INSERT INTO waterway (code, waterway_type, length_km) VALUES ('Duna','main', 1432.0);
-INSERT INTO vessel_type (code, un_code_28, ais_type_code, is_self_propelled, operating_area)
-    VALUES ('INLAND_CARGO', '8421', 70, true, 'duna');
-INSERT INTO vessel_type_i18n (vessel_type_code, lang, name) VALUES ('INLAND_CARGO','hu','Belvízi teherhajó');
 INSERT INTO port (code, port_type, waterway_id, country_code, river_km)
-    VALUES ('PT-0147','public_port',1,'HU',1642.5);
-INSERT INTO port_i18n (port_id, lang, name) VALUES (1,'hu','Budapest');
+    SELECT 'PT-0147','public_port', w.id,'HU',1642.5
+    FROM waterway w WHERE w.code='DUNA';
+INSERT INTO port_i18n (port_id, lang, name)
+    SELECT p.id, 'hu', 'Budapest' FROM port p WHERE p.code='PT-0147';
 INSERT INTO vessel (mmsi, eni, slug, vessel_type_code, operating_area, flag_country_code, length_m, draught_max_m)
-    VALUES (244660000, '12345678', 'test-hajo', 'INLAND_CARGO','duna','HU', 110.0, 6.20);
-INSERT INTO vessel_i18n (vessel_id, lang, name) VALUES (1,'hu','TESZTHAJO');
+    VALUES (244660000, '12345678', 'test-hajo',
+            (SELECT code FROM vessel_type WHERE ais_type_code=8444 LIMIT 1),
+            'duna','HU', 110.0, 6.20);
+INSERT INTO vessel_i18n (vessel_id, lang, name)
+    SELECT v.id, 'hu', 'TESZTHAJO' FROM vessel v WHERE v.slug='test-hajo';
 
 -- A felhasznalok (a seed: a dedikalt 'system' aktor az audit-hoz,
 -- a V-N-6 javitasa; es egy 'editor' a role-vedelem tesztjehez).
@@ -266,7 +285,7 @@ INSERT INTO vessel_identifier (vessel_id, identifier_type, value, is_primary, or
     # a masodik hajo (kulon ENI-vel) — a duplikalt ENI teszt kulon all
     r = psql(stdin_text="""
 INSERT INTO vessel (mmsi, eni, slug, vessel_type_code, operating_area, flag_country_code)
-    VALUES (244660001, '11111111', 'test-hajo-2', 'INLAND_CARGO','duna','HU');
+    VALUES (244660001, '11111111', 'test-hajo-2', 'ERI_8444','duna','HU');
 """)
     if r.returncode != 0:
         print("  HIBA: a masodik hajo beszurasa:",
@@ -277,7 +296,7 @@ INSERT INTO vessel (mmsi, eni, slug, vessel_type_code, operating_area, flag_coun
     # a partial unique index: a harmadik hajo ugyanazzal az ENI-vel elbukik
     r = psql(stdin_text="""
 INSERT INTO vessel (mmsi, eni, slug, vessel_type_code, operating_area, flag_country_code)
-    VALUES (244660002, '11111111', 'test-hajo-3', 'INLAND_CARGO','duna','HU');
+    VALUES (244660002, '11111111', 'test-hajo-3', 'ERI_8444','duna','HU');
 """)
     if r.returncode == 0:
         print("  HIBA: a partial unique index NEM mukodott (duplikalt ENI bejutott)")
@@ -380,7 +399,7 @@ INSERT INTO feedback (category, body, status, handled_at)
     # a slug egyediseg (a mély link, F-CAT-07)
     r = psql(stdin_text="""
 INSERT INTO vessel (mmsi, eni, slug, vessel_type_code, operating_area, flag_country_code)
-    VALUES (244660002, '87654321', 'test-hajo', 'INLAND_CARGO','duna','HU');
+    VALUES (244660002, '87654321', 'test-hajo', 'ERI_8444','duna','HU');
 """)
     if r.returncode == 0:
         print("  HIBA: a slug unique constraint NEM mukodott")
@@ -451,6 +470,44 @@ UPDATE vessel SET length_m = 111.0 WHERE id = 1;
     # a fuggveny letezik
     out = psql(sql="SELECT proname FROM pg_proc WHERE proname IN ('set_updated_at','audit_row_change','drop_expired_partitions','sync_vessel_sort_name','sync_vessel_identifiers','sync_vessel_from_identifiers') ORDER BY proname;")
     fns = [l for l in out.stdout.strip().splitlines() if l and not l.startswith('(') and '---' not in l and l != 'proname']
+    # --- a referenciaadatok seed ellenorzese (a 2026-11-22, a
+    # meresi adat utan) ---
+    # A schema a seed nelkul hasznalhatatlan: a `vessel_type_i18n`
+    # a `language`-re mutat, es a `vessel.vessel_type_code` a
+    # `vessel_type`-ra -> az ingest (a tipus kitoltes) elhal.
+    r = psql_tuples("""
+SELECT
+  (SELECT count(*) FROM language),
+  (SELECT count(*) FROM vessel_type),
+  (SELECT count(*) FROM vessel_type_i18n),
+  (SELECT count(*) FROM country),
+  (SELECT count(*) FROM waterway),
+  (SELECT count(*) FROM river_section),
+  (SELECT count(*) FROM basin),
+  (SELECT count(*) FROM cargo_type),
+  (SELECT count(*) FROM operator),
+  (SELECT count(*) FROM data_source);
+""")
+    if r:
+        print("  a referenciaadatok (nyelv|tipus|tipusnev|orszag|vizszonyat|"
+              "szakasz|medence|teher|uzemelteto|forras):", r[0])
+    else:
+        print("  a referenciaadatok: HIBA (a seed nem futott?)")
+
+    r = psql_tuples("SELECT count(*) FROM vessel_type_i18n "
+                    "WHERE lang='hu' AND name IS NOT NULL AND name != '';")
+    print(f"  a magyar hajotipus-nevek: {r[0] if r else '0'}")
+
+    # a tipus-kod -> a magyar nev mukodik-e (a F-CAT-08)
+    r = psql_tuples("""
+SELECT vt.ais_type_code || ' = ' || vti.name
+FROM vessel_type vt JOIN vessel_type_i18n vti
+  ON vti.vessel_type_code = vt.code AND vti.lang = 'hu'
+WHERE vt.ais_type_code IN (8444, 8443, 8440, 8000, 60, 80, 8450)
+ORDER BY vt.ais_type_code;
+""")
+    print(f"  a meresi tipusok magyar neve: {r}")
+
     print(f"  a DB-fuggvenyek: {fns}")
 
 
