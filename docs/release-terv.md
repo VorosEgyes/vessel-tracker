@@ -54,6 +54,16 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 | 11 | Statikus cikkek/blog (három nyelven) | F-CNT-05 |
 | 12 | Nyilvános JSON API a katalógushoz (v1) | F-API-01 részleges |
 | 13 | SEO: sitemap, kanonikus URL, strukturált adat (`Vessel` / `Boat` séma) | F-NF-04, F-NF-05 |
+| 14 | **A nyelvválasztó a fejlécben**, a választás megmarad a böngészőben | **F-USR-01** |
+| 15 | **A katalógus fiók nélkül is teljes értékű** (nincs bejelentkezés-kötelezettség) | **F-USR-04** |
+| 16 | **A tartalomoldalak is `hreflang`-dal és kanonikus URL-lel** | **F-CNT-06** |
+| 17 | **A kikötőadatlap megmutatja, mely hajók érintik** (a célállomás és a hazai kikötő alapján) | **F-CNT-07** |
+
+> **A 14–17. pont a 2026-11-24-i funkcióelemzésből jött**
+> ([`docs/funkcio-elemzes.md`](funkcio-elemzes.md)) — **a §3.2
+> korábban nem említette ezeket**, pedig **mindegyik R1-es** funkció.
+> **A teljes R1-es funkciólista** (az 56 R1-es F-kód a 12 modulból)
+> **a funkcióelemzésben van, tervenkénti bontásban.**
 
 ### 3.3 Az R1-ben **nincs** benne (szándékosan)
 

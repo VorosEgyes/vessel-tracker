@@ -5,6 +5,12 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 (funkcióleírás) és a [`../docs/release-terv.md`](../docs/release-terv.md)
 (release-terv) **hogyan** oldását adják.
 
+> **A funkciók → tervek megfeleltetés:**
+> [`../docs/funkcio-elemzes.md`](../docs/funkcio-elemzes.md) —
+> **minden F-kód (103 funkció + 20 NFR) felsorolva, ahol van a
+> tervben és mi a státusza.** **A scope ellenőrzéséhez ez a
+> dokumentum** (a `03`–`09` tervek nem hivatkoznak minden F-kódra).
+
 | # | Terv | Tartalom | Státusz |
 |---|---|---|---|
 | 01 | [stack és projektstruktúra](megvalosulas-01-stack-es-struktura.md) | Technológiai stack, monorepo-struktúra, környezetek, az AIS-adatút, az R1-scope | **v1.4** — swarm review 2 körön átesett, a 2. kör 17 új findingje javítva; **+ a `just check` pontosítása** (a `07` §3.1 definiálja) |

@@ -30,6 +30,13 @@ konténer a **build-kor** olvassa a DB-t, és **minden nyilvános oldal
 a build-ben szerveroldalon jön** (a `getStaticPaths` a DB-ből generálja
 a hajólistát, a hajóoldalak a build során renderelődnek).
 
+> **A `F-USR-04` szerint** (a funkcióleírás §4.9) **a katalógus
+> F-IÓK NÉLKÜL is teljes értékű** → **ezért van a statikus kimenet**:
+> nincs session, nincs bejelentkezés, **minden nyilvános oldal
+> bárki számára elérhető** → **a `F-USR-03` (a regisztráció) R2-ben
+> van, a fiók csak a figyelőlista és az értesítések miatt kell
+> (R2)**.
+
 > **A `prof` reviewer C-9 findingje (a 2. kör, BLOKKOLÓ):** az eredeti
 > alakban ez a fejezet **kizárta** az `output: 'static'`-ot (a
 > `output: 'server'`-t írva) → **a `01` §3.2.1 rebuild-mechanizmusa
@@ -132,6 +139,11 @@ apps/web/
 
 ### 3.1 Az Astro i18n konfiguráció
 
+> **A `F-INTL-02` szerint** (a funkcióleírás §4.12) **a nyelv az
+> URL-prefixben van** (`/de/hajos/…`) — **SEO- és megoszthatósági
+> célból** → **ez a `path prefix` a `03` – API-terv §6.1 nyelvi
+> sorrendjének első eleme** (a `?lang=` felett).
+
 ```js
 // astro.config.mjs
 export default defineConfig({
@@ -160,6 +172,11 @@ de **nincs automatikus átirányítás** — a látogató böngészőnyelve
 alapján csak **első látogatáskor** ajánlunk nyelvet (a F-INTL-03).
 
 ### 3.2 A nyelv kiválasztása (a middleware)
+
+> **A `F-USR-01` szerint** (a funkcióleírás §4.9) **a nyelvválasztó a
+> fejlécben van, és a választás megmarad a böngészőben** → **a
+> `site_lang` süti 1 évig él** (`maxAge`) → **a `F-INTL-03` szerint
+> a böngésző nyelve csak az első látogatáskor számít**.
 
 ```ts
 // src/middleware.ts
@@ -387,7 +404,13 @@ prefixszel — a `site` a `astro.config.mjs`-ből (`SITE_URL` env).
 
 ### 4.2 A `hreflang` (a F-INTL-04)
 
-**Minden oldalon**, mindhárom nyelvre + `x-default`:
+> **A `F-CNT-06` szerint** (a funkcióleírás §4.8) **minden
+> TARTALOMOLDALON** (a kikötők, a szakaszok, a cikkek, a
+> közlemények) is kell a nyelvválasztó + a `hreflang` + a kanonikus
+> URL → **nem csak a hajóoldalakon**.
+
+**Minden oldalon** (a hajóoldalak **és** a tartalomoldalak),
+mindhárom nyelvre + `x-default`:
 
 ```astro
 <link rel="alternate" hreflang="hu" href={alts.hu} />

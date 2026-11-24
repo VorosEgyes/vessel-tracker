@@ -36,7 +36,61 @@ if ! cat > "$TMP"; then
     exit 1
 fi
 
+# --- a TAKARITAS (a 2026-11-24) ---
+# A NAS lemezen a lehuzott fajlok gyulnek (~109 MB/lehuzas a
+# 37 oras meresben) -> a fajlokat TOROLNI kell.
+#
+# A "command=" korlatozas miatt a Pi csak EZT a scriptet futtathatja ->
+# a takaritas itt, a fogadon belul tortenik (nem kell kulon cron).
+#
+# KET szabaly:
+#
+# 1. a ${RETENTION_DAYS} naposnál régebbi fajlok torolése
+#    (a Pi oldalon a DB RETENTION 35 napot tart -> a NAS-on is 35)
+#    → a 09 §7.3
+#
+# 2. a NAPI lehuzasok: a boot utani lehuzas MINDEN boot utan megy
+#    (a Pi naponta bekapcsol) -> azonos napon tobb fajl is lehet
+#    -> **csak a legutolbi marad**, a regiek torlodnek (a fajlnev
+#    a STAMP-et tartalmazza: ais-YYYYMMDD-HHMM.db)
+#
+# A 2. szabaly fontos: a heti lehuzas eleg (a Pi a heti cronban is
+# futtatja a biztonsagi hatos), a napi fajlok csak a lemezet hogyak.
+KEEP_PER_DAY="${KEEP_PER_DAY:-1}"
+RETENTION_DAYS="${RETENTION_DAYS:-35}"
+
+# --- 1. a regek torlese ---
+DELETED=$(sudo -n find "$DEST_DIR" -maxdepth 1 -name 'ais-*.db' -type f \
+  -mtime "+${RETENTION_DAYS}" -print -delete 2>/dev/null | wc -l)
+if [ "${DELETED:-0}" -gt 0 ]; then
+    echo "$(date '+%F %T') a ${RETENTION_DAYS} naposnál régebbi fajlok torlove: ${DELETED}"
+fi
+
+# --- 2. az azonos napon csak a legutolbi fajl marad ---
+DUPS=$(sudo -n find "$DEST_DIR" -maxdepth 1 -name 'ais-*.db' -type f \
+  -printf '%f\n' 2>/dev/null | sed -E 's/^ais-([0-9]{8})-.*/\1/' \
+  | sort | uniq -c | awk '$1 > 1 {print $2}')
+for DAY in $DUPS; do
+    OLDER=$(sudo -n find "$DEST_DIR" -maxdepth 1 -name "ais-${DAY}-*.db" -type f \
+      -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +$((KEEP_PER_DAY + 1)) | cut -d' ' -f2-)
+    for F in $OLDER; do
+        sudo -n rm -f "$F" 2>/dev/null && echo "$(date '+%F %T') a ${DAY} nap regi fajlja torolve: $(basename "$F")"
+    done
+done
+
+
 # --- a fajl atvitele ---
+#
+# A 2026-11-24-es teszt: egy URES stdin (a hiba vagy a lehuzas hiany)
+# egy 0 bajtos fajlt hozott letre a NAS-on -> ezt nem szabad elmenteni
+# (a heti ellenorzo a 0 bajtos fajlt is "lehuzott"-nak venné).
+FILE_SIZE=$(wc -c < "$TMP")
+if [ "${FILE_SIZE}" -lt 1024 ]; then
+    echo "HIBA: a befolyt adat ures vagy túl kicsi (${FILE_SIZE} B) — a fajl nem lett elmentve" >&2
+    rm -f "$TMP"
+    exit 1
+fi
+
 if ! sudo -n cp "$TMP" "$DEST"; then
     echo "HIBA: a masolas nem sikerult: $DEST" >&2
     rm -f "$TMP"

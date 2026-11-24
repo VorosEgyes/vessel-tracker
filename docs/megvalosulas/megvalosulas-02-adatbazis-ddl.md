@@ -633,6 +633,11 @@ CREATE TABLE vessel (
     -- de a magyar szakaszon a fairway-mezo ures) → **a keszitok adja
     -- meg kezzel** (a 06 §4.2).
     destination             text,
+    -- A CELALLOMAS KIKOTOJE (a F-CNT-07 szerint: "a kikotoadatlap
+    -- megmutatja, mely hajok erintik" — a funkcioleiras 6.1 szerint
+    -- az "erintett kikotok" forrasa az "AIS - cel UN/LOCODE")
+    -- -> a hajo celallomasanak UN/LOCODE-ja a `port` tabla egy sora
+    destination_port_id     bigint REFERENCES port(id),
     -- A VARHATO ERKEZES (a FI 10 `eta` mezeje — a 04 v1.0 §4.5)
     destination_eta         timestamptz,
     build_year              smallint,
@@ -1231,6 +1236,37 @@ SELECT DISTINCT ON (vessel_id)
        now() - ts AS age
 FROM position
 ORDER BY vessel_id, ts DESC;
+
+-- A kikoto es a hajok kapcsolata (a F-CNT-07 szerint: "a kikotoadatlap
+-- megmutatja, mely hajok erintik")
+--
+-- A funkcioleiras 6.1 szerint az "erintett kikotok" forrasa az
+-- "AIS - cel UN/LOCODE" -> a hajo `destination_port_id`-je a cel
+-- kikotore mutat. A nezeten keresztul a kikotoadatlap megkeresi:
+--   - a celallomas alapjan (a `destination_port_id`)
+--   - a hazai kikotonek alapjan (a `home_port_id`)
+--
+-- Az R1-ben a funkcioleiras szerint a kikotoadatlap "uzemeltetoket"
+-- mutat (a hajok neve helyett) -> a nezet a `vessel.operator_id`-t
+-- is adja.
+CREATE VIEW port_vessel AS
+SELECT p.id                AS port_id,
+       p.code              AS port_code,
+       p.unlocode          AS port_unlocode,
+       p.port_type,
+       v.id                AS vessel_id,
+       v.slug              AS vessel_slug,
+       v.sort_name         AS vessel_name,   -- a hivatalos latin nev (a 02 §5.3)
+       v.operator_id,
+       'destination'::text AS relation
+FROM port p
+JOIN vessel v ON v.destination_port_id = p.id
+UNION ALL
+SELECT p.id, p.code, p.unlocode, p.port_type,
+       v.id, v.slug, v.sort_name, v.operator_id,
+       'home'::text
+FROM port p
+JOIN vessel v ON v.home_port_id = p.id;
 ```
 
 **A szöveges hely összeállítása** (a `03` – API terv végpontja):

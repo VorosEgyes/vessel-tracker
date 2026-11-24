@@ -509,6 +509,9 @@ GET /api/v1/search?q=12345678&area=duna
 
 1. **először pontos azonosító-egyezés** (F-SRCH-02): az `eni`, a `mmsi`,
    az `imo`, a `callsign` a `vessel_identifier`-ben
+   (**a `F-INTL-08` szerint** a hajószámok és az ENI-k **formázása
+   nyelvfüggetlen**, de **kereshetők** → a keresés a **nyelvfüggetlen
+   nyers értékre** támaszkodik, nem a megjelenített formára)
 2. **aztán név-egyezés** (F-SRCH-03): prefix/szubsztring, trigram index,
    ékezet- és kis-nagybetű-független (`unaccent` + `lower`)
 3. **a terület szűkít** (F-SRCH-04, F-SRCH-07): a `duna` keresés **soha**

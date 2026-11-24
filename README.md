@@ -1,11 +1,25 @@
 # Vessel Tracker (Duna és Balaton) – adatbázis terv
 
-**Verzió:** 1.3 (2026-11-14)
+**Verzió:** 1.4 (2026-11-24 — a 37 órás mérés alapján)
 **Hatály:** a készülő weboldal és mobilapplikáció közös, háttérben futó adatbázise
 **Nyelvek:** magyar (hu) · német (de) · angol (en)
 **Területek:** Duna-rendszer és Balaton-tó – elkülönítve (2.10 fejezet)
 
+> **Ez a dokumentum a KIINDULÁSI adatbázis-terv** (a döntési javaslat
+> és a logikai modell). **A konkrét, implementálható séma** — a 71
+> tábla, az indexek, a constraint-ek, a triggerek, a nézetek, a
+> DB-szerepkörök — **a [`docs/megvalosulas/megvalosulas-02-adatbazis-ddl.md`](docs/megvalosulas/megvalosulas-02-adatbazis-ddl.md)
+> tervben van (jelenleg **v1.7**, valódi PostgreSQL-en futtatva és
+> tesztelve). **Két dokumentum, két szerep: itt a „miért", ott a „mi
+> van".**
+
 **Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/ais-vevo-terv.md`](docs/ais-vevo-terv.md) (saját AIS vevőhálózat) · [`docs/pi-eloallitas.md`](docs/pi-eloallitas.md) (Pi előállítás: AIS + ADS-B) · [`docs/ingest-terv.md`](docs/ingest-terv.md) (adatút: Pi-től az adatbázisig) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
+
+**v1.4 változás (2026-11-24):** **a `river_km` forrása a mérés
+szerint háromféle lehet** (a `04` – parser-terv v1.0 §4.5) → **a fairway
+mező a magyar szakaszon üres** → **a `river_km` a geo-illesztésből vagy a
+`river_section`-ből jön** → **a „hol van" szöveges hely gyakran üres**
+→ **a SOLAS hajóosztályok `ais_type_code`-ot kaptak** (a `02` v1.7).
 
 **v1.3 változás:** a **saját AIS vevőhálózat** mint elsődleges adatbeszerzési mód rögzítése (új `ais_receiver_site` tábla), és a **Balaton-katalógus hatókörének szűkítése** (kishajók és vitorlások kihagyása).
 
@@ -21,6 +35,7 @@
 |---|---|---|
 | Adatbázis-motor | **PostgreSQL 16 + PostGIS 3.4** | Erős relációs modell, kiforrott geospatial (Pont/LineString), partícionálás, JSONB, szabványos SQL, olcsó üzemeltetés |
 | Földrajzi modell | PostGIS `geometry(Point,4326)` + **folyó-km** (`river_km`) első osztályú attribútumként | A Dunán a „hová tartasz" kérdés a km-hez képest értelmezhető; a GPS-koordináta önmagában nem elég |
+| **A `river_km` forrása** | **a mérés szerint három forrás** (a `04` – parser-terv v1.0 §4.5): **①** az AIS fairway-mező (a magyar szakaszon **üres**), **②** a geo-illesztés a `river_section`-re, **③** a `river_section` az `ais_state`-ből | **a 37 órás mérésben a fairway-mező 100%-ban üres** → a `river_km` a ②/③ forrásból jön → **a `river_km` a mérésben 0 értékű** |
 | Hajóazonosítás | **MMSI** az elsődleges kulcs (minden AIS-hajónál van), **ENI** opcionális (a belvízi AIS Inland FI 10 üzenet első mezője) | Az MMSI sosem hiányzik; az ENI csak Inland AIS felszerelésnél érkezik, de akkor a hajó egész életére szól (2016/1629/EU 18. cikk) |
 | Területi elkülönítés | A `vessel.operating_area` mező választja el a **Dunát** és a **Balatont**, külön azonosító-táblával | A Balaton-hajóknak nincs ENI-jük, a hajószámuk a kulcs; egyetlen „összes hajó" lista félrevezető lenne (lásd 13. fejezet) |
 | Fő nyelvi modell | Fordítás **mellék-táblákban** (`*_i18n`), nem `name_hu/name_de/name_en` oszlopokban | A fordítandó mezők száma és halmaza entitásonként változik; 3 nyelv esetén 40+ táblánál a „nulla vagy három" oszlopminta karbantartási réteget |
@@ -579,7 +594,27 @@ A(z) {vessel} hajó {delay} perc késéssel érkezik a(z) {port} kikötőbe.
 A GPS-pont önmagában nem elég a térképi megjelenítéshez és a szűréshez. Ezért:
 
 1. `geom` PostGIS `Point(4326)` – a tényleges pozíció.
-2. `river_km` – **tranzakció nélküli, denormalizált** érték, amelyet az ingest réteg **az AIS Inland FI 10 „fairway hectometre" mezőjéből** vesz át. A Duna km-számlálása egységes (0 km = Sulina, felfelé nő; Duna Bizottság, WSV Streckenatlas), és az AIS ugyanebben a skálában közli – **így nincs szükség geometriai km-illesztésre**, és a szűrés (`river_km BETWEEN x AND y`) millió soron futó indexen olvasódik. Tartalék eljárásként (a régebbi, nem FI 10-es hajóknál) megmarad a geometriai illesztés, `source_kind = 'derived'` jelöléssel.
+2. `river_km` – **tranzakció nélküli, denormalizált** érték. **A forrása a mérés szerint háromféle lehet** (a `04` – parser-terv v1.0 §4.5 szerint, a 37 órás mérés alapján):
+
+   | # | A forrás | Mikor használatos | A `source_kind` |
+   |---|---|---|---|
+   | ① | **az AIS Inland FI 10 „fairway hectometre" mezője** | **a magyar szakaszon a mérésben 100%-ban ÜRES** | `ais` |
+   | ② | **a geo-illesztés** a `river_section` vonalra | a hajó a korridoron belül van | `derived` |
+   | ③ | **a `river_section` az `ais_state`-ből** (a lámpa neveiből: `1592.4_R_FL`) | a hajószám alapján | `derived` |
+
+   A Duna km-számlálása egységes (0 km = Sulina, felfelé nő; Duna Bizottság, WSV Streckenatlas), és az AIS ugyanebben a skálában közli – **így nincs szükség geometriai km-illesztésre**, és a szűrés (`river_km BETWEEN x AND y`) millió soron futó indexen olvasódik.
+
+   > **A MÉRÉSI KORLÁT (a `docs/measurement_2026-11-22.md`, a 37 óras adat):**
+   > **a fairway-mező (①) a magyar Duna-szakaszon nem érkezik** → **a
+   > `position.river_km` a mérésben 0 értékű** → **a `river_km` a ②/③
+   > forrásból jön**, vagy **egyáltalán nincs** → **a „hol van"
+   > szöveges hely (a F-DET-06) a városi helyen gyakran üres** →
+   > **a `05` – frontend-terv §9 a három forrást kezeli**, és **a hiányzó
+   > helyet a F-DET-16 szerinti „Nincs pozícióadat" jelölés mutatja**.
+   >
+   > **A szűkvízi helyszín (a 2. site) itt más eredményt adhat** → **a
+   > mérési időszak végén dönteni kell, hogy a `river_km` értéke a
+   > magyar szakaszon megtartható-e egyáltalán.**
 3. `river_section_id` – a szakasz, amelybe a pont esik (szintén denormalizált).
 4. `lat_e7` / `lon_e7` – egész számokban tárolt koordináta (1 cm-es pontosság), a hosszú távú tárolás és a kompresszió kedvéért.
 
