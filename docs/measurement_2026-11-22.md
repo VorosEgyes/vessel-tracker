@@ -46,7 +46,61 @@
 > értelmezést igényel** → **a mérőszám definíciója nyitott** (lásd a
 > §6.2-t).
 >
-> ### A tipusok a 28 órában
+> ### A 37 órás adat (2026-11-24 08:28) — a frissített mérés
+
+**A `ais-20261124-0828.db` (109 MB) a NAS-on** — a Pi bootja utáni
+lehúzás (a `09` §9.1 szerinti `ExecStartPost`) működik.
+
+| Metrika | Az első óra | A 28 óra | **A 37 óra** |
+|---|---|---|---|
+| Az üzenetek | 37 494 | 382 968 | **420 790** |
+| A pozíciók | — | 354 740 | **389 832** |
+| A hajók | 199 | 245 | **258** |
+| **A korridor-lefedettség** | 69,8% | — | **64,59%** |
+| A nevet viselő hajók | 78 | — | **213 (82,6%)** |
+| Méretekkel | — | — | **109 (42,3%)** |
+| ENI-vel | 1 | 1 | **1 (0,4%)** |
+| **A `destination`-nel** | 0 | 90 | **~97** |
+| A FI 10 (ENI) üzenetek | 767 | 7 894 | **8 682** |
+| Az álló hajók | 26 | — | **97** |
+| **A fantom-jelöltek** | — | — | **16** |
+
+**A lefedettség 69,8% → 64,59%** — az éjszakai órák kevesebb forgalmat
+hoznak (a nappali 6–10 ezres csúcsok ~18 000 üzenet/óra, az éjszakai
+~6 500) → **a mérőszám a teljes nap átlagja** (a F1 küszöb: 50%).
+
+**A `destination` most már a hajók 60%-ánál megvan** → **a bori B-C-3
+findingje (a „célállomás sosem jön") a mérési adat alapján cáfolódik**:
+a `02` v1.6 `destination` oszlopa és a `06` §4.2 mezője **megalapozott**.
+
+### 🆕 A `shiptype` kérdése (a `04` – parser-tervhez)
+
+**A mérés 7 olyan `shiptype` kódot talált, ami NINCS a `02` v1.6
+seedjében (89 típus):**
+
+| A kód | A hajó | A jelentése |
+|---|---|---|
+| `37` | THETIS | **SOLAS hajóosztály 3** (teherhajó) |
+| `35` | AM31 DUNAUJVAROS | SOLAS hajóosztály 3 |
+| `33` | LUPPA | SOLAS hajóosztály 3 |
+| `79` | TEKOV | SOLAS hajóosztály 7 |
+| `89` | AQUA TEAM | SOLAS hajóosztály 8 |
+| `99` | MARGITSZIGET, MONARCH QUEEN | SOLAS hajóosztály 9 |
+| `156` | PRIMUV | **az ERI 14 bites kódja a hajóosztállyal keverve** |
+
+**A `04` – parser-terv §4.5 szerint** a `shiptype` **14 bites ERI-kód**,
+**de a mérésben a SOLAS-osztályok (30–99) is megjelennek** →
+**a `shiptype` → `vessel_type` lookupnak két kódtervet kell kezelnie:**
+a **8000–8519-es ERI**-t **és** az **1–99-es SOLAS-osztályt** →
+**a hiányzó → az `UNKNOWN`** (a `04` §626-630 szabálya) → **ez a
+lookup helyes, de a `02` seedből a SOLAS-osztályok hiányoznak**.
+
+**A hatás: kicsi** (a 258 hajóból 8 érintett, mind 1–2 hajó) →
+**a seed bővítése a `02` v1.7-ben** (SOLAS-osztályok a magyar nevekkel).
+
+---
+
+### A tipusok a 28 órában
 >
 > | `type` | Jelentés | Darab | Arány |
 > |---|---|---|---|

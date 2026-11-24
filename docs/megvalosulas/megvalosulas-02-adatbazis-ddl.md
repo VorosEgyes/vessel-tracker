@@ -1,6 +1,12 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.6 (a swarm review 1. köre után — 113 finding, 10 blokkoló
+**Verzió:** 1.7 (2026-11-24 — a 37 órás mérési adat alapján:
+**a SOLAS hajóosztályok (`SOLAS_30`…`SOLAS_90`) a saját
+`ais_type_code`-jukat kapták** → **a `shiptype` → `vessel_type`
+lookup megtalálja őket** — a mérésben 7 olyan `shiptype` jelentkezett
+(37, 35, 33, 79, 89, 99, 156), ami korábban `UNKNOWN`-ra esett volna;
+**+ a `destination`/`destination_eta` oszlop** (a bori B-C-3));
+a swarm review 1. köre után — 113 finding, 10 blokkoló
 javítva; **+ az `admin_api` szűk szerepkör** a `06` – szerkesztői-terv
 §2.1a szerint — a `public_api` **nem** olvashatja az `app_user`-t, ezért
 a szerkesztői session-ellenőrzés külön szerepet kap; **+ a CI-ben a
@@ -3019,27 +3025,27 @@ VALUES
     ('ERI_8490', 8490, 'liquid', true, 'duna'),
     ('ERI_8500', 8500, 'liquid', false, 'duna'),
     ('ERI_8510', 8510, NULL, false, 'duna'),
-    ('SOLAS_30', NULL, NULL, true, 'duna'),
-    ('SOLAS_31', NULL, NULL, true, 'duna'),
-    ('SOLAS_35', NULL, NULL, true, 'duna'),
-    ('SOLAS_36', NULL, NULL, true, 'duna'),
-    ('SOLAS_37', NULL, NULL, true, 'duna'),
-    ('SOLAS_40', NULL, 'general', true, 'duna'),
-    ('SOLAS_41', NULL, 'container', true, 'duna'),
-    ('SOLAS_42', NULL, 'liquid', true, 'duna'),
-    ('SOLAS_43', NULL, 'container', true, 'duna'),
-    ('SOLAS_44', NULL, 'container', true, 'duna'),
-    ('SOLAS_45', NULL, 'general', true, 'duna'),
-    ('SOLAS_50', NULL, 'service', true, 'duna'),
-    ('SOLAS_51', NULL, 'service', true, 'duna'),
-    ('SOLAS_52', NULL, 'general', true, 'duna'),
-    ('SOLAS_53', NULL, 'passenger', true, 'duna'),
-    ('SOLAS_55', NULL, 'service', true, 'duna'),
-    ('SOLAS_58', NULL, 'passenger', true, 'duna'),
-    ('SOLAS_60', NULL, 'passenger', true, 'duna'),
-    ('SOLAS_70', NULL, 'general', true, 'duna'),
-    ('SOLAS_80', NULL, 'liquid', true, 'duna'),
-    ('SOLAS_90', NULL, NULL, true, 'duna');
+    ('SOLAS_30', 30, 'fishing', true, 'duna'),
+    ('SOLAS_31', 31, 'towing', true, 'duna'),
+    ('SOLAS_35', 35, 'military', true, 'duna'),
+    ('SOLAS_36', 36, 'passenger', true, 'duna'),
+    ('SOLAS_37', 37, 'passenger', true, 'duna'),
+    ('SOLAS_40', 40, 'general', true, 'duna'),
+    ('SOLAS_41', 41, 'container', true, 'duna'),
+    ('SOLAS_42', 42, 'liquid', true, 'duna'),
+    ('SOLAS_43', 43, 'container', true, 'duna'),
+    ('SOLAS_44', 44, 'container', true, 'duna'),
+    ('SOLAS_45', 45, 'general', true, 'duna'),
+    ('SOLAS_50', 50, 'service', true, 'duna'),
+    ('SOLAS_51', 51, 'service', true, 'duna'),
+    ('SOLAS_52', 52, 'general', true, 'duna'),
+    ('SOLAS_53', 53, 'passenger', true, 'duna'),
+    ('SOLAS_55', 55, 'service', true, 'duna'),
+    ('SOLAS_58', 58, 'passenger', true, 'duna'),
+    ('SOLAS_60', 60, 'passenger', true, 'duna'),
+    ('SOLAS_70', 70, 'general', true, 'duna'),
+    ('SOLAS_80', 80, 'liquid', true, 'duna'),
+    ('SOLAS_90', 90, NULL, true, 'duna');
 
 -- A magyar nevek (a `vessel_type_i18n`, a lang='hu')
 INSERT INTO vessel_type_i18n (vessel_type_code, lang, name, description)

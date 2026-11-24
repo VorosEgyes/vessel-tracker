@@ -237,7 +237,7 @@ központi DB**, tehát a vevő oldali metrikák:
 | A metrika | A forrás | A határ |
 |---|---|---|
 | **a vevő él-e** | a `ais_stats_hourly` (`msg`, `vessels`) | **az üres óra = a vevő leállt** |
-| **a PPM** | az `ais_stats_hourly.ppm` | a **\|ppm − 7\| > 8** → a kristály driftelt (a kalibráció elcsúszott; a mérésben **7**) |
+| **a PPM** | az `ais_stats_hourly.ppm` | a **\|ppm\| > 8** → a kristály driftelt (a kalibráció elcsúszott; a mérésben **−5,1 … −6,6**, a `rtl_test -p` szerint **+7**) |
 | **a jelerősség** | az `ais_stats_hourly.level_min`/`level_max` | a **szint tartósan 0** → az antenna/szűrő problémája |
 | **az üzenetszám** | az `ais_stats_hourly.msg` | **a napi 0 üzenet** → a vevő leállt |
 | **a heti lehúzás** | a NAS `ais-data/` fájlok dátuma | **a fájl 4 napnél régebbi** → a lehúzás elmaradt |

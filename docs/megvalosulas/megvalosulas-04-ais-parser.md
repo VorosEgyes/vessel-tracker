@@ -626,8 +626,37 @@ class NormalizedAisMessage(BaseModel):
 **A `shiptype` → `vessel_type.code` lookup** (a `prof` H-2 findingje):
 az `ais_type_code` (a 8000–8519-es belvízi ERI, az 1–99-es SOLAS)
 → a `vessel_type.ais_type_code` → a `vessel_type.code`
-(a `02` v1.4 seedje: **89 típus, a magyar nevekkel**). A **hiányzó**
+(a `02` v1.6 seedje: **89 típus, a magyar nevekkel**). A **hiányzó**
 kód → az `UNKNOWN` (`ais_type_code = NULL`).
+
+> **A mérési tapasztalat (a `docs/measurement_2026-11-22.md`, a 37 órás
+> adat):** a `shiptype` mező **NEM csak ERI-kódot** tartalmaz:
+>
+> | A `shiptype` | A hajó | A jelentése |
+> |---|---|---|
+> | `37` | THETIS | **SOLAS hajóosztály** (személyhajó/komp) |
+> | `35` | AM31 DUNAUJVAROS | SOLAS (katonai hajó) |
+> | `33` | LUPPA | SOLAS (sócsaró) |
+> | `79` | TEKOV | SOLAS (teherhajó) |
+> | `89` | AQUA TEAM | SOLAS (tanker) |
+> | `99` | MARGITSZIGET | SOLAS (egyéb hajó) |
+> | `156` | PRIMUV | **regionális kód** (az IMO 100–199 tartomány) — a belvízi uszály |
+>
+> **Két kódterv egy mezőben:**
+> - a **SOLAS-osztályok** (1–99) → a `02` v1.6 seed `SOLAS_xx` soraival
+>   egyeztethetők (`ais_type_code` = a saját számuk);
+> - a **regionális kódok** (100–199) → **nincs seedbeli ellenőrlés** →
+>   **az `UNKNOWN`** (a `02` v1.6 `ais_type_code = NULL`).
+>
+> **A `shiptype` sosem 14 bites ERI-kód itt** — a `04` §4.5 a FI 10
+> mezőjéről beszél, **de a SOLAS-osztály (Msg 5/24) mezője 8 bites** →
+> **a lookup mindkettőt kezelje**.
+
+**A `02` v1.6 seed javítása (a mérés alapján):** a SOLAS-osztályok
+(`SOLAS_30`…`SOLAS_90`) korábban `ais_type_code = NULL`-lel voltak
+seedelve → **a lookup nem találta meg őket** → **most a saját
+kódjukat kapják** (`SOLAS_37` → `ais_type_code = 37`) → **a 21 SOLAS
+típus a mérési adatokból elérhető**.
 
 **A `source_kind`:** a `position.source_kind` a 02-es terv szerint
 `'ais' | 'derived' | 'manual'` — a parser mindig `'ais'`-t ír; a
