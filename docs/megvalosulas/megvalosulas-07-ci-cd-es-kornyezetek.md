@@ -445,6 +445,36 @@ javítások) → **a push a registry-be bukott el**:
 > **a build feltételes** (a `just build` szabálya szerint) → **a
 > Dockerfile-ok megjelenésekor a feltétel automatikusan megszűnik.**
 
+#### Az ötödik CI-futás (2026-11-24, a `a4e5522daf` commit után)
+
+# ✅ A CI TELJESEN ZÖLD
+
+| A job | Az eredmény |
+|---|---|
+| a `lint` | ✅ **success** (a `ruff check` + a `ruff format --check`) |
+| a `test` | ✅ **success** (a `check-type-case`, a `db-migrate`, a `test-reversible`, a `test`, a `ddl-validate`, a `ddl-diff`) |
+| a `build` | ✅ **success** (a PostgreSQL custom image) |
+
+# ✅ A BUILD TELJESEN ZÖLD
+
+| A job | Az eredmény |
+|---|---|
+| a `postgres` | ✅ **success** (a build + a GHCR push) |
+| a `api` | ✅ **success** (kihagyva — a Dockerfile még nincs) |
+| a `web` | ✅ **success** (kihagyva — a Dockerfile még nincs) |
+
+**A `Deploy staging` két hibát talált:**
+
+| A hiba | A javítás |
+|---|---|
+| a `pgserver` a deployban is elbukott (a `setup-uv` a Python-verziót nem pinelte) | a **`python-version: "3.12"`** mindkét deploy workflowban |
+| a staging/production VPS nincs beállítva (a `STAGING_HOST` var és a `DEPLOY_SSH_KEY` secret hiányzik) → **a deploy minden main-push-nal elbukott** | a **környezet-ellenőrzés** → **a deploy kihagyva** (exit 0), nem hiba |
+
+> **A tanulság:** **a CI és a Build kapu ZÖLD, de a `Deploy staging`
+> minden main-pushra indult** → **a hiányzó környezet miatt a
+> deploy-nek KIHAGYANDÓ, nem buknia kell.** A `07` §9 szerint a
+> staging a release után áll be.
+
 ### 4.2 A `ci.yml` — a minőségi kapu
 
 **A `01` – stack-terv §3.2 és a `02` – DDL-terv §12 alapján:**

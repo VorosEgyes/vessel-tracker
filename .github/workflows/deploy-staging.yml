@@ -45,7 +45,12 @@ jobs:
           # a cache nem kell.
           # (a pnpm cache a `pnpm/action-setup` utan allithato be)
       - uses: astral-sh/setup-uv@v5
-        with: {version: "0.5"}
+        with:
+          version: "0.5"
+          # **A Python 3.12 KELL** -> a `pgserver` 0.1.4 csak `cp312`
+          # wheel-t ad (a GitHub runner defaultja 3.14-es -> a
+          # `uv sync` elbukik) — a 07 §4.2 ugyanigy a `ci.yml`-ben
+          python-version: "3.12"
       - uses: extractions/setup-just@v1
 
       - run: if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else echo "a frontend meg nincs a repoban -> a pnpm install kihagyva"; fi
@@ -60,6 +65,15 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # **A STAGING KORNYEZET NINCS BEALLITVA** (a `STAGING_HOST`
+          # var es a `DEPLOY_SSH_KEY` secret hianyzik) -> **a deploy
+          # KIHAGYANDO, nem hiba** (a 07 §9: a staging a release
+          # utan all be) -> a job zold marad, nem bukik el minden
+          # main-pushnal.
+          if [ -z "${DEPLOY_HOST:-}" ] || [ -z "${DEPLOY_SSH_KEY:-}" ]; then
+            echo "a staging kornyezet nincs beallitva (a DEPLOY_HOST / DEPLOY_SSH_KEY hianyzik) -> a deploy kihagyva"
+            exit 0
+          fi
           # a kulcs a runner idejere kerul (a 0600 a kovetelmeny)
           install -m 600 /dev/null ~/.ssh/deploy_key
           echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
