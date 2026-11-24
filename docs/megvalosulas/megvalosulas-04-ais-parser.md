@@ -293,30 +293,42 @@ A dekódolt bitsor első **168 bitje** (22 karakter) az üzenet fejléce:
 
 ### 4.3 A dinamikus üzenetek (Msg 1, 2, 3)
 
+**A standard AIS bit-sorrend (a GPSD/`pyais` szerint — a `04` §4.1
+kódolással):**
+
 | Bit | Hossz | Mező | Típus |
 |---|---|---|---|
-| 38–55 | 18 | `lon_e7` | egész, **1/10000 fok**, előjel a 17. bit |
-| 56–73 | 18 | `lat_e7` | egész, **1/10000 fok**, előjel a 17. bit |
-| 74–83 | 10 | `cog_deg` | egész, **1/10 fok** |
-| 84–91 | 8 | `heading_deg` | egész, **1/10 fok** |
-| 92–99 | 8 | `sog_mps` | egész, **1/10 m/s** |
-| 100 | 1 | pozíció pontosság | 0 = 10 m, 1 = < 10 m |
-| 101–103 | 3 | navigációs állapot | 0–15 |
-| 104 | 1 |/manöverjelzés` | 0 = nincs, 1 = van |
-| 105–107 | 3 | tartalék | |
-| 108–115 | 8 | rádióállapot | |
-| 116–127 | 12 | rate of turn | |
-| 128–136 | 9 | nav status (a 2. üzenetben) | |
-| ... | | pozíció (a 2. üzenetben) | |
-| 148–167 | 20 | **GNSS antenna helye** | a `position` `geom`-jének **referenciapontja**! |
+| 0–5 | 6 | `message_type` (1, 2, 3) | egész |
+| 6–7 | 2 | `repeat` | egész |
+| 8–37 | 30 | `mmsi` | egész |
+| 38–41 | 4 | `nav_status` | 0–15 |
+| 42–49 | 8 | a manöverjelzés (a ROT) | előjeles |
+| 50–59 | 10 | `sog_mps` | egész, 1/10 m/s |
+| 60 | 1 | a pozíció pontossága | 0 = 10 m, 1 = < 10 m |
+| 61–88 | 28 | `lon` | előjeles, 1/10000 perc |
+| 89–115 | 27 | `lat` | előjeles, 1/10000 perc |
+| 116–127 | 12 | `cog_deg` | egész, 1/10 fok |
+| 128–136 | 9 | `heading_deg` | egész, 1/10 fok |
+| 137–142 | 6 | az időbélyeg | egész |
+| 143–144 | 2 | a manöver | 0–3 |
+| 145–147 | 3 | a tartalék | |
+| 148 | 1 | a RAIM | |
+| 149–167 | 19 | a rádióállapot | egész |
+
+> **A korábbi táblázat (a 18 bites LAT/LON a 38–55. bittől, a 10
+> bites SOG a 92–99. bittől, a 4 bites rádió) NEM a standard AIS-t
+> írta le** → **a 2026-11-24-i implementáció a `pyais` hivatalos
+> referenciája alapján javította** (a `04` §11 Q6) → **a GPSD
+> referencia-példán a `pyais`-szal és a saját dekódolásunkkal
+> egyezik** (`lat=37.802118`, `lon=-122.341618`, `sog=0.0`,
+> `cog=219.3`, `heading=1`, `status=3`, `second=59`, `radio=2281`).
 
 **A GNSS antenna helye (a 148–167. bit):** a pozíció **nem** a hajó
 középpontjában van, hanem egy antennaszerelésben. Ez a Duna szűk
-szakaszain (a keskeny vízállásnál) **fontos**: a hajó „mélysége" és
-a „szélessége" a pozíció pontosságát is befolyásolja.
+szakaszain (a keskeny vízállásnál) **fontos**.
 
-**A 02-es séma `position` táblájában nincs antennaszerelés-mező** — a
-F-DET-15 mezőnkénti eredete alapján ez egy **saját mezőnkényi
+**A `02` – DDL-terv `position` táblájában nincs antennaszerelés-mező** —
+a F-DET-15 mezőnkénti eredete alapján ez egy **saját mezőnkényi
 eredet** lenne, nem külön oszlop. **A parser eldobja** (a `position`
 tábla nem tartalmazza), de a `vessel_data_origin` **nem** kap ilyet
 (az a statikus adatokra vonatkozik).
@@ -366,20 +378,44 @@ tábla nem tartalmazza), de a `vessel_data_origin` **nem** kap ilyet
 > egy hajó adatai még „érnek"** → **a `vessel_data_origin.observed_at`
 > (a statikus adat érkezési ideje) ezt megadja.**
 
+**A standard AIS bit-sorrend (a GPSD/`pyais` szerint):**
+
 | Bit | Hossz | Mező |
 |---|---|---|
+| 0–5 | 6 | `message_type` (5) |
+| 6–7 | 2 | `repeat` |
+| 8–37 | 30 | `mmsi` |
+| 38–39 | 2 | az AIS-verzió |
 | 40–69 | 30 | `imo` |
-| 70–89 | 20 | hívójel (`callsign`), 6 karakter, `trim` + `@` kitöltés |
-| 90–91 | 2 | hajó- és kargótípus |
-| 92–93 | 2 | a pozíció pontossága (a hajó mérete) |
-| 94–97 | 4 | a GNSS-antenna helye (a hajó orrától, méterben) |
-| 98–107 | 10 | hossz (méter) — **csak a GNSS-antenna elöl** |
-| 108–115 | 8 | szélesség (méter) |
-| 116–127 | 12 | a hajótípus kódja |
-| 128–139 | 12 | ETA (perc) — **a szállító hajóknál** |
-| 140–143 | 4 | a draft (méter, 1/10) |
-| 144–147 | 4 | aDestination |
-| 148–167 | 20 | ETA (perc) |
+| **70–111** | **42** | **a hívójel (`callsign`), 7 karakter** |
+| **112–231** | **120** | **a hajónév (`shipname`), 20 karakter** |
+| 232–239 | 8 | a hajótípus kódja |
+| 240–248 | 9 | a GNSS-antenna a hajó orrától (méterben) |
+| 249–257 | 9 | a GNSS-antenna a hajó fartól (méterben) |
+| 258–263 | 6 | a bal oldali szélesség (méterben) |
+| 264–269 | 6 | a jobb oldali szélesség (méterben) |
+| 270–273 | 4 | az EPFD (a pozíciójavítás típusa) |
+| 274–277 | 4 | a hónap |
+| 278–282 | 5 | a nap |
+| 283–287 | 5 | az óra |
+| 288–293 | 6 | a perc |
+| 294–301 | 8 | a merülés (méter, 1/10) |
+| 302–421 | 120 | a célállomás (`destination`), 20 karakter |
+| 422 | 1 | a DTE |
+| 423 | 1 | a tartalék |
+
+> **A korábbi táblázat (a 20 bites hívójel, a 10 bites hossz, a 8
+> bites szélesség, a 12 bites ETA) NEM a standard AIS-t írta le** →
+> **a 2026-11-24-i implementáció a `pyais` hivatalos referenciája
+> alapján javította** (a `04` §11 Q6) → **a magyar hajó
+> (`MAHAB ORSZAG`) minden mezője egyezik a `pyais`-szal** (a
+> hívójel `HGXC`, a célállomás `BUDAFEST`, a hossz 100 m, a
+> szélesség 10 m, a merülés 4,2 m).
+
+**A szövegmezők (a hívójel, a név, a célállomás) kódolása KÜLÖNBÖZIK
+a számszerű mezőktől:** a szöveg karaktere a `pyais`
+`SIXBIT_ENCODING` szerint értendő (a `T` a 20-as érték), a
+kitöltő az `@` (64) → **a `decode_text_field` külön függvény.**
 
 **A nev és a hívójel (a `vessel_i18n.name`):** a Msg 5 **nem tartalmaz
 nevet**! A nevet az **Inland FI 10 (DAC 200, FID 10)** üzenet hordozza
@@ -443,6 +479,27 @@ a kanonikus** (a 02-es terv §8.2a szinkron).
 > **minőségi metrikát** (a MarineTraffic módszere).
 
 ### 4.5 A belvízi statikus üzenet (Inland FI 10)
+
+> **⚠️ A 2026-11-24-i mérés tanulsága (a vevő nem dekódolja a
+> belvízi FI 10-ot):**
+>
+> **A `bud01` vevő (AIS-catcher v0.71) a 21-es üzenetet az AtoN
+> mezőkkel dekódolja** → **a mérési DB `ais_static` táblájában
+> NINCS `vin` (ENI) oszlop**, és a 93 645 `type=21` üzenet
+> `shipname`-je a **hívójel** (pl. a `1658.8_G`).
+>
+> **KÖVETKEZMÉNYEK:**
+> 1. **a mérési ENI-arány (0,4%) nem a vevőből származik** → **a
+>    belvízi FI 10 `vin` mezőjét (a 7 bites kódolás) a `duna`
+>    parserének kell dekódolnia**, **saját** implementációval (a
+>    `pyais` a DAC 200/FID 10-et nem ismeri);
+> 2. **a 21-es üzenet dekódolása a `pyais` AtoN-szerű értelmezését
+>    követi** (a hívójel a `name` mezőben) → **a `duna` ezt
+>    implementálja** (`decode_aid_to_navigation`) → **a mérési
+>    példán egyezik** (`1658.8_G`, a LAT/LON, az MMSI);
+> 3. **a 7 bites `vin`-kódolás (a `04` §4.5) a következő
+>    implementációs lépés** → **a mérési adat nem tudja validálni**
+>    (a vevő nem tárolja) → **a nyitott kérdések egyike**.
 
 **A formátum:** a 6 bites karakterkódolás **egy karakterrel eltér**:
 a **számok** (`0`–`9`) és a betűk **a 6 bites index helyett 7 bites
@@ -1177,6 +1234,7 @@ dekódolás → visszaalakítás az eredetit adja.
 | Q4 | A `draught_reference` a `vessel`-ben van (a statikus FI 10-ből) — a `position`-ben nincs | **így** — a `position` a pillanatnyi merülés, a hivatkozás a statikus adathoz tartozik | **lezárva** |
 | Q5 | A Msg 4 (bázisállomás) és a Msg 9/11 (SAR) kezelése | **a Msg 4/20/23 a NAVTEX/MSK-forrás** (a mérés) → a `data_quality_event`-be (`severity='info'`), **nem** a `position`-be; a Msg 9/11 (SAR) **eldobandó** | **lezárva** (§4.7.1) — **a korábbi „eldobandó" indoklás hamis volt** |
 | Q6 | A `pyais` használható-e **teszt-összehasonlításra** (a saját dekóder helyett)? | **igen** — a MIT licenc és a `pyais` a mezőneveket másképp adja, de a **számértékek** összehasonlíthatók → **a fixture-ök dekódolását a `pyais`-szal ellenőrizzük** | **lezárva** (a `preshaz` P-H-7 findingje) |
+| Q9 | **Hogyan dekódolható a belvízi FI 10 `vin` (ENI) mezője?** (a 2026-11-24-i mérés: a vevő a 21-est AtoN-ként dekódolja → **a mérési DB-ben nincs ENI** → a mérés nem tudja validálni) | **a `04` §4.5 szerinti 7 bites kódolás** (a `vin` a `?` kitöltőkkel) — **a `pyais` a DAC 200/FID 10-et nem ismeri** → **saját implementáció kell**, **egy referencia-példával validálva** (a `04` §8.3 fixture-ök) | **nyitva** (a `04` §4.5) |
 | Q8 | **Mi a `bud01` vevő `mmsi` oszlopának a normalizálási szabálya?** (a 2026-11-24-i mérés: a tárolt `mmsi` **nem** a `nmea` payloadból számítható → a MID egyezik, a suffix nem; a Class B-nél synthetic 992-es) | **a hajót a MID + a fizikai MMSI suffix alapján azonosítjuk** — a pontos szabály a vevő forrásából kell → **a `duna` saját parserének NEM kell reprodukálnia** (a mi vevőnk a standard AIS-t adja) | **nyitva** (a `04` §5) |
 | Q7 | Melyik ** telephelyen** mérünk? | a bud01 a **városi** szakaszon (a Dunától 2,88 km) → a lefedettség itt mérhető, a **szűkvízi** forgalom nem → **a szűkvízi szakaszokon is kell mérni** (a F-CAT-08 szerinti 3 site) | **nyitva** (a `K-4` finding) — **Miklós döntése** |
 | Q8 | A `destination` (a célállomás) honnan jön? | **a szerkesztői felületről** (a `06` terv) — az AIS-ből nem (a mérés: 100%-ban üres) | **lezárva** (a `bori` B-C-2 findingje) |

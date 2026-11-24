@@ -94,7 +94,7 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 
 | A szint | A terv becslése | **A valós (2026-11-24)** | A megjegyzés |
 |---|---|---|---|
-| **unit** | ~400 | **39** | a `duna/domain/verification.py` (a bizonyossági szint, 20 teszt) + a `duna/ingest/decoder.py` (a 6 bites kódolás, 19 teszt) → **a `domain/` réteg 100%-os coverage** |
+| **unit** | ~400 | **50** | a `duna/domain/verification.py` (a bizonyossági szint, 20 teszt) + a `duna/ingest/decoder.py` (a 6 bites kódolás, a pozíció, a statikus és a 21-es üzenet, 30 teszt) → **a `domain/` és az `ingest/` réteg is 100%-os coverage** |
 | property | ~40 | **5** | a `hypothesis` a dev-függőségek között van → **a 6 bites round-trip teszt** (a GPSD armorra) + **a `pyais` referencia-összevetés** (a `04` §11 Q6) |
 | komponens | ~80 | **0** | a service-ek még nincsenek |
 | integrációs | ~60 | **0** | az API még nincs |
@@ -103,7 +103,7 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 | regresszió | 1 | **0** | a mérési adat megvan, a replay még nincs |
 
 **A mérhető rész működik:**
-- a `just test-unit` → **39 teszt, zöld**;
+- a `just test-unit` → **50 teszt, zöld**;
 - a `just test-domain` → **100% coverage** a `domain/`-en (a 90%-os
   küszöbön — a `08` §8.1);
 - a `just test` → **98%** (a 85%-os küszöbön);
