@@ -288,6 +288,24 @@ fájlok a `nginx`ben, **a szerveroldali szigetek** az
 | **`deploy-staging.yml`** | `workflow_run` (a `ci.yml` sikeres után a `main`-en) | a **staging** deploy |
 | **`deploy-production.yml`** | `workflow_dispatch` (a `release/*` ágra, **manuális jóváhagyással**) | a **production** deploy |
 
+> **A workflow-fájlok a repóban vannak** (a `.github/workflows/`):
+> `ci.yml` · `build.yml` · `deploy-staging.yml` · `deploy-production.yml`
+> (a 2026-11-24-i implementáció).
+>
+> **A `deploy-staging.yml` triggerének egy korlátja:** a GitHub a
+> `workflow_run` triggerrel **nem engedi** a `branches:` szűkítést →
+> **a branch-szűrés a job `if` feltételében van**
+> (`github.event.workflow_run.head_branch == 'main'`).
+>
+> **A `deploy-production.yml` a `release-terv` 9. szerint:**
+> - a trigger `workflow_dispatch` **kézzel** (a `release_branch` és az
+>   `image_tag` inputokkal);
+> - a **`production` GitHub environment** → **a jóváhagyás a deploy
+>   előtt**;
+> - **a release branch ellenőrzése** → a `main` nem a productionon
+>   van → a release branchnek a `main`-ből kell erednie (a `git
+>   merge-base --is-ancestor` ellenőrzés).
+
 > **A production deploy MANUÁLIS** (`workflow_dispatch` +
 > a környezet jóváhagyás) — a `release-terv` 9. fejezete szerint a
 > release branch a `main`-ből indul, és **csak bugfix megy rá** → a

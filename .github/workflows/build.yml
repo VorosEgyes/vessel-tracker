@@ -1,0 +1,109 @@
+# A build — a Docker image-ek (a 07 – CI/CD-terv §4.1, §3.2)
+#
+# A push a main-re + a release/* agra (a 07 §4.1) -> a Docker
+# image-ek buildje es pushja a registry-be (a GHCR-be, a 07 §7.1
+# titkaival).
+name: Build
+
+on:
+  push:
+    branches: [main, "release/*"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}
+
+jobs:
+  # ==================================================================
+  # A PostgreSQL custom image (a 07 §3.2)
+  #
+  # A `pg_cron` a stock PostGIS image-ben NINCS -> a custom image
+  # (a `postgresql-16-cron` apt csomag) -> **a production/staging
+  # smoke tesztje ezt ellenorzi** (a 07 §9).
+  # A `pg_stat_statements` is a `postgresql-contrib` csomagban van
+  # (a 09 §4.1 latencia-metrika).
+  # ==================================================================
+  postgres:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: a build context elokeszitese
+        run: |
+          mkdir -p infra/docker/postgres
+          cp -r infra/docker/postgres/. /tmp/ctx 2>/dev/null || true
+      - uses: docker/build-push-action@v6
+        with:
+          context: infra/docker/postgres
+          file: infra/docker/postgres/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/vessel-tracker-postgres:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/vessel-tracker-postgres:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==================================================================
+  # Az API image (a 07 §3.2)
+  # ==================================================================
+  api:
+    runs-on: ubuntu-latest
+    needs: [postgres]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/vessel-tracker-api:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/vessel-tracker-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==================================================================
+  # A web image (a 07 §3.2)
+  # ==================================================================
+  web:
+    runs-on: ubuntu-latest
+    needs: [postgres]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/vessel-tracker-web:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/vessel-tracker-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

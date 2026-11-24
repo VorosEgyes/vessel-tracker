@@ -1,0 +1,99 @@
+# A production deploy (a 07 – CI/CD-terv §4.1, §6.1)
+#
+# **MANUALIS, JOVAHAGYASSAL** (a `workflow_dispatch` + a GitHub
+# environment) -> a `release-terv` 9. szerint a release branch a
+# main-bol indul, es **csak bugfix megy ra** -> a deploy NEM minden
+# pushra megy.
+#
+# A `release-terv` 9.: a production-on a `main` nincs kozvetlenul ->
+# a release branch-rol deployolunk.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: "A release branch (a main-bol indult, a release-terv 9. szerint)"
+        required: true
+        type: string
+      image_tag:
+        description: "Az image tag (a build.yml altal nyomott sha)"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    # **A jovahagyas itt tortenik** (a GitHub environment kerdezi a
+    # maintainert) -> a production deploy soha nem megy automatikusan
+    environment:
+      name: production
+      url: https://vessel-tracker.example
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_branch }}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22", cache: pnpm}
+      - uses: astral-sh/setup-uv@v5
+        with: {version: "0.5"}
+      - uses: extractions/setup-just@v1
+
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --frozen --extra dev
+
+      # A release-terv 9.: a release branch a main-bol indult ->
+      # a production mindig egy masolat -> **a main nincs kozvetlenul
+      # a production-on** (ez a kovetelmeny, nem a workflow)
+      - name: a release branch ellenorzese
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "HIBA: a release branch nem a main-bol indult!"
+            exit 1
+          fi
+          echo "OK: a release branch a main-bol indult"
+
+      - name: a deploy a production VPS-re
+        env:
+          DEPLOY_HOST: ${{ vars.PRODUCTION_HOST }}
+          DEPLOY_USER: ${{ vars.PRODUCTION_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          # A deploy script: a migracio (a 07 §5.3), a crontabat
+          # (a 07 §6.1a), a smoke teszt (a 07 §9), a rollback
+          # (a 07 §6.2)
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd /opt/duna && IMAGE_TAG=${IMAGE_TAG} ./infra/deploy.sh production"
+          rm -f ~/.ssh/deploy_key
+
+      # A deploy utan a smoke teszt a VPS-en futott (a deploy.sh
+      # reszeben) -> itt csak a vegallapot ellenorzese
+      - name: a smoke teszt eredmenye
+        env:
+          DEPLOY_HOST: ${{ vars.PRODUCTION_HOST }}
+          DEPLOY_USER: ${{ vars.PRODUCTION_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd /opt/duna && ./infra/smoke.sh"
+          rm -f ~/.ssh/deploy_key

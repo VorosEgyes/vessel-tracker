@@ -1,0 +1,102 @@
+# A CI — a minőségi kapu (a 07 – CI/CD-terv §4.2)
+#
+# Minden pushra fut (a main-re és a PR-ekre). A 13 kötelező lépés
+# a 07 §8.1 szerint — a gyorsak (1–10c) minden pushra, a lassuak
+# (11–13) hetente (a release-branch-en).
+name: CI
+
+on:
+  push:
+    branches: [main, "release/*"]
+  pull_request:
+  workflow_dispatch:
+
+# A szalagban csak egy fut egyszerre (a 07 §4.2)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==================================================================
+  # 1–2. a lint es a tipusellenorzes (a 07 §8.1 1–2. lepese)
+  # ==================================================================
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: {version: "0.5"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22", cache: pnpm}
+      # A `just` NINCS elore telepitve a GitHub Actions-en -> a
+      # kanonikus parancsokhoz telepiteni kell (a 07 §4.2)
+      - uses: extractions/setup-just@v1
+      - run: pnpm install --frozen-lockfile
+      - run: just lint
+      - run: just lint-frontend
+      - run: just typecheck
+
+  # ==================================================================
+  # 3–10c. a tesztek es a schema-ellenorzes (a 07 §8.1)
+  # ==================================================================
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ghcr.io/baosystems/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: duna_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/duna_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: {version: "0.5"}
+      - uses: extractions/setup-just@v1
+      # A `--extra dev` kell: a pgserver (a DDL-validacio), a pytest,
+      # a ruff, a mypy -> a `just ddl-validate` a venv-bol indul
+      - run: uv sync --frozen --extra dev
+
+      # A 10c. lepes: a hajotipus-nev lista ellenorzese
+      # (a report_vessels.sh CASE listaja egyezik a 02-es DDL-terv
+      # seedjebel -> a riport es a DB mindig egyezik)
+      - run: just check-type-case
+
+      # A 8. lepes: a migracio-visszafordithatosag
+      - run: just db-migrate
+      - run: just test-reversible
+
+      # A 3–6. lepes: a 4 gyors tesztszint (a coverage flaggel)
+      - run: just test
+
+      # A 7. lepes: a DDL-validacio (a sajat PostgreSQL-en,
+      # a funkcionalis fustteszttel)
+      - run: just ddl-validate
+
+      # A 10b. lepes: a schema-drift ellenorzese (a 02 §11)
+      - run: just ddl-diff
+
+  # ==================================================================
+  # 9–10. az image build es a frontend build (a 07 §8.1)
+  # ==================================================================
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          tags: duna-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
