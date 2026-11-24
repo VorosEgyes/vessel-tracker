@@ -21,6 +21,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from duna.ingest.decoder import (
+    decode_message,
     decode_standard_6bit,
     encode_standard_6bit,
 )
@@ -28,8 +29,11 @@ from duna.ingest.decoder import (
 # A CI-ban 100 pelda (a 08 §4.2) -> a nightlyban 10 000
 MAX_EXAMPLES = int(os.environ.get("HYPOTHESIS_MAX_EXAMPLES", "100"))
 
-# a standard armor karakterei
-STANDARD_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@"
+# a standard armor karakterei (a GPSD szerint): a 0-39 ertek ->
+# `chr(v+48)` (a `0`-`W`), a 40-63 -> `chr(v+56)` (a `` ` ``-`w`)
+STANDARD_ALPHABET = "".join(chr(v + 48) for v in range(40)) + "".join(
+    chr(v + 56) for v in range(40, 64)
+)
 
 
 @settings(max_examples=MAX_EXAMPLES)
@@ -62,3 +66,39 @@ def test_a_bitek_sorszama_a_karakterek_szerint(payload: bytes) -> None:
     if not text:
         return
     assert len(payload_to_bits(text)) == len(text) * 6
+
+
+# ---------------------------------------------------------------------
+# a `pyais` referencia-osszevetes (a 04 §11 Q6)
+# ---------------------------------------------------------------------
+def test_a_pyais_osszevetes_a_gpsd_peldakon():
+    """**A `pyais` a hivatalos referencia-dekoder** (a 04 §11 Q6) →
+    **a GPSD példán a két dekódolás egyezik.**
+
+    A `pyais` a standard AIS armort használja (a 0–39 érték ->
+    `chr(v+48)`, a 40–63 -> `chr(v+56)`) → **a mi dekódolásunk is
+    ezt** → **a `type` és az `MMSI` azonos.**
+    """
+    import pyais
+
+    payload = "15M67FC000G?ufbE`FepT@3n00Sa"
+    reference = pyais.decode(f"!AIVDM,1,1,,A,{payload},0*5C".encode())
+
+    msg = decode_message(payload)
+    assert msg.message_type == reference.msg_type
+    assert msg.mmsi == reference.mmsi
+
+
+def test_a_pyais_osszevetes_tobb_peldan():
+    """Több GPSD/ipartners pelda → a `pyais` referenciaja."""
+    import pyais
+
+    peldak = [
+        "15M67FC000G?ufbE`FepT@3n00Sa",
+        "13HOI:0P0000VOHLCnHQKwvL05Ip",
+    ]
+    for payload in peldak:
+        reference = pyais.decode(f"!AIVDM,1,1,,A,{payload},0*00".encode())
+        msg = decode_message(payload)
+        assert msg.message_type == reference.msg_type, payload
+        assert msg.mmsi == reference.mmsi, payload

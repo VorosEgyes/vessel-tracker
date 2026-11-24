@@ -36,6 +36,10 @@ dev = [
     # PostgreSQL példányt indít -> a `pgserver` a PostgreSQL binariákkal
     # együtt érkezik (a `find_psql()` a venv-ben keresi).
     "pgserver>=0.1.4",
+    # **A `pyais` a REFERENCIA-DEKODER** (a 04 §11 Q6: "a pyais
+    # hasznalhato-e teszt-osszehasonlitasra? -> igen") -> **a sajat
+    # parserunk a pyais-hoz hasonlithato a GPSD referencia-peldakon**
+    "pyais>=3.3",
 ]
 
 [dependency-groups]

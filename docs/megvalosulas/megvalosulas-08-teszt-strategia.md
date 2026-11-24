@@ -94,8 +94,8 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 
 | A szint | A terv becslése | **A valós (2026-11-24)** | A megjegyzés |
 |---|---|---|---|
-| **unit** | ~400 | **41** | a `duna/domain/verification.py` (a bizonyossági szint, 20 teszt) + a `duna/ingest/decoder.py` (a 6 bites kódolás, 21 teszt) → **a `domain/` réteg 100%-os coverage** |
-| property | ~40 | **3** | a `hypothesis` a dev-függőségek között van → **a 6 bites round-trip teszt** (a standard armorra) |
+| **unit** | ~400 | **39** | a `duna/domain/verification.py` (a bizonyossági szint, 20 teszt) + a `duna/ingest/decoder.py` (a 6 bites kódolás, 19 teszt) → **a `domain/` réteg 100%-os coverage** |
+| property | ~40 | **5** | a `hypothesis` a dev-függőségek között van → **a 6 bites round-trip teszt** (a GPSD armorra) + **a `pyais` referencia-összevetés** (a `04` §11 Q6) |
 | komponens | ~80 | **0** | a service-ek még nincsenek |
 | integrációs | ~60 | **0** | az API még nincs |
 | e2e | ~25 | **0** | a frontend még nincs |
@@ -103,7 +103,7 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 | regresszió | 1 | **0** | a mérési adat megvan, a replay még nincs |
 
 **A mérhető rész működik:**
-- a `just test-unit` → **41 teszt, zöld**;
+- a `just test-unit` → **39 teszt, zöld**;
 - a `just test-domain` → **100% coverage** a `domain/`-en (a 90%-os
   küszöbön — a `08` §8.1);
 - a `just test` → **98%** (a 85%-os küszöbön);
@@ -207,22 +207,25 @@ import pytest
 from duna.ingest.decoder import decode_message
 
 
-@pytest.mark.parametrize("payload,expected_mmsi,expected_type", [
-    # a 2026-11-24-i javítás: a FIZIKAI (vevő-) dekódolás értékei
-    # (a vevő `mmsi` oszlopa a NORMALIZÁLT azonosító, a `04` §5)
-    ("13HOI:0P0000VOHLCnHQKwvL05Ip", 227006760, 1),
-    ("83Wj9l@j2dv=d<N=MhO@S@QU3L00", 243173873, 8),
-])
-def test_decode_known_messages(payload, expected_mmsi, expected_type):
-    msg = decode_message(payload, physical=True)
-    assert msg.mmsi == expected_mmsi
-    assert msg.message_type == expected_type
-
-
 def test_a_gpsd_referencia_pelda():
-    """A legismertebb AIS példa (a fizikai formátumban)."""
-    msg = decode_message("15M67FC000G?ufbE`FepT@3n00Sa", physical=True)
+    """**A GPSD/AIS referencia-példa** — a `pyais` referenciaértékei.
+
+    A `!AIVDM,1,1,,A,15M67FC000G?ufbE`FepT@3n00Sa,0*5C` → a `type=1`,
+    az **MMSI 366 053 209**.
+    """
+    msg = decode_message("15M67FC000G?ufbE`FepT@3n00Sa")
+    assert msg.message_type == 1
     assert msg.mmsi == 366053209
+
+
+def test_a_meresi_peldak():
+    """A `bud01` mérési payloadjai (a `08` §4.1).
+
+    **A `physical=True` a vevő oszlopát jelöli** → **a `type` a
+    mérési `type` oszloppal egyezik** (a mérés 8000/8000).
+    """
+    assert decode_message("13HOI:0P0000VOHLCnHQKwvL05Ip", physical=True).message_type == 1
+    assert decode_message("83Wj9l@j2dv=d<N=MhO@S@QU3L00", physical=True).message_type == 8
 
 
 def test_fill_bits_are_stripped():
@@ -231,11 +234,13 @@ def test_fill_bits_are_stripped():
 
 > **A `08` §4.1 eredeti példái (a 244 660 000 és a 243 042 769)
 > FALSIFIKÁLTAK** (a 2026-11-24-i mérés): **a vevő `mmsi` oszlopa a
-> NORMALIZÁLT azonosító, nem a payload-ból számítható** (a `04` §5)
-> → **a fizikai dekódolás értékei (a 227 006 760 és a 243 173 873)
-> a helyesek.** A `physical=True` a vevő formátumát jelöli (a
-> `bud01` mérési adata) → **a `duna` éles parseré a standard AIS-t
-> dekódolja** (`physical=False`).
+> NORMALIZÁLT azonosító, nem a payload-ból számítható** (a `04` §5) →
+> **a mérési payloadokból a `type` olvasható ki, az MMSI nem.**
+>
+> **A GPSD referencia-példa a `pyais`-szal (a hivatalos
+> referencia-dekoder, a `04` §11 Q6) ellenőrzött** → **a
+> `apps/api/tests/property/test_decoder_roundtrip.py` két tesztje a
+> `pyais` eredményével hasonlítja a `type`-ot és az MMSI-t.**
 
 ### 4.2 A property tesztek (a round-trip)
 
@@ -253,11 +258,14 @@ def test_a_standard_armor_roundtrip(payload: str):
     assert encode_standard_6bit(decode_standard_6bit(payload)) == payload
 ```
 
-> **A vevő fizikai formátuma NEM round-trip tesztelhető** (a
-> 2026-11-24-i felfedezés): **a visszafejtés nem egyértelmű** (a vevő
-> egy inverz táblázattal alakít karakterré) → **a fizikai forma
-> decode-only** → **a property teszt a standard armorra vonatkozik**,
-> a fizikai forma a mért értékekkel (a §4.1) ellenőrzött.
+> **A GPSD armor a round-trip tesztelhető** (a `pyais` szerint: a
+> 0–39 érték -> `chr(v+48)`, a 40–63 -> `chr(v+56)`) → **a property
+> teszt a standard armorra vonatkozik.**
+>
+> **A `pyais` a hivatalos referencia-dekoder** (a `04` §11 Q6) → **a
+> `test_decoder_roundtrip.py` két tesztje a `pyais` eredményével
+> hasonlítja a `type`-ot és az MMSI-t** → **ez a legbiztosabb
+> ellenőrzés, hogy a saját dekódolásunk helyes-e.**
 
 > **A `property` tesztek a CI-ban a `hypothesis` példákkal futnak** —
 > a `HYPOTHESIS_MAX_EXAMPLES` env-variabilissal korlátozva (a

@@ -241,48 +241,42 @@ bits = payload_bits[: len(payload_bits) - fill_bits]
 
 ### 4.1 A 6 bites karakterkódolás
 
-| Karakter | Bináris (MSB first) |
+**A karakter -> a 6 bites érték (a GPSD szerint, az ITU-R M.1371
+alapján):**
+
+| A tartomány | A 6 bites érték |
 |---|---|
-| `0`–`9` | `000000`–`001001` |
-| `A`–`Z` | `001010`–`011001` |
-| `a`–`z` | `011010`–`101001` |
-| `0`–`W` (számok) | `101010`–`111111` |
+| `0`–`W` (a 0x30–0x57) | **0–39** (az érték + 48) |
+| `` ` ``–`w` (a 0x60–0x77) | **40–63** (az érték + 56) |
 
-**A 6 bites érték → bit-sor:** a karakter indexe a fenti táblából,
-**6 bit, MSB first** (a legmagasabb bit a karakter 5. bitje).
+**A `0x58`–`0x5F` tartomány (a `X`–`_`) ÉRVÉNYETLEN.**
 
-**A megfordítás (a karakterek visszafelé):** a NMEA-ben a bitek
-**bajt-sorrendben, a karaktereken belül fordítottak** vannak — a
-dekódoláskor **a karakter 6 bitjét meg kell fordítani**.
+**A bitek a karaktereken belül NEM fordítottak** — a karakter 6 bitje
+**MSB-first** sorrendben van.
 
-> **⚠️ A 2026-11-24-i mérés CÁFOLJA a fenti állítást** — **a
-> `bud01` vevőn (AIS-catcher v0.71) a bitek a karaktereken belül
-> NEM fordítottak.**
+> **⚠️ A 2026-11-24-i mérés három megállapítása:**
 >
-> **A bizonyíték (a 40 órás mérés, 3000 üzenet):** a vevő `type`
-> oszlopa **3000/3000** egyezik, ha a biteket **MSB-first, a
-> karaktereken belül fordítás nélkül** olvassuk; a fordított
-> változattal **0/3000**.
+> **1. A `bud01` vevő (AIS-catcher v0.71) fizikai 6 bites értékeket
+> tárol** a `nmea` oszlopban → **a mérés igazolja: a vevő `type`
+> oszlopa 8000/8000 egyezik, ha a `payload[0]` karakter értékét a
+> fenti táblázat szerint olvassuk** (a `B`→18, az `E`→21, a `G`→23,
+> a `H`→24 → **mindegyik a 0–39 tartományban van**).
 >
-> **A vevő FIZIKAI 6 bites értékeket tárol** a `nmea` oszlopban, **nem
-> a standard AIS armor karaktereit.** A mérés igazolja: a vevő `type`
-> oszlopa megegyezik a `payload[0]` karakter `ord − 48` értékével
-> (a `B`→18, az `E`→21, a `G`→23, a `H`→24, a `?`→15) → **a
-> standard armor ezeket 11/14/16/17/15-nek adná.**
+> **2. A vevő `lat`/`lon`/`mmsi` mezői NORMALIZÁLTAK** → **a `nmea`
+> oszlopból csak a `type` olvasható ki megbízhatóan** (a `04` §5, a
+> `04` §11 Q8) → **a mérési adatot nem szabad nyers payloadként
+> kezelni.**
 >
-> **A GPSD/AIS referencia-példa** (`15M67FC000G?ufbE`FepT@3n00Sa`) →
-> **a fizikai dekódolás az MMSI-t hibátlanul adja: 366 053 209** (a
-> standard armor-értékekkel 358 713 148 jönne ki) → **a fizikai
-> dekódolás a helyes.**
->
-> **KÖVETKEZMÉNY A PARSERRE:** **két kódolás kell** →
-> - a `decode_standard_6bit` — az ITU-R M.1371 armorja (a szabvány,
->   **a `duna` rendszer ezt kezeli**);
-> - a `decode_physical_6bit` — a vevő formátuma (a `bud01` mérési
->   adatához, **decode-only**: a visszafejtés nem egyértelmű, a vevő
->   egy inverz táblázattal alakít karakterré).
->
-> **Az implementáció:** az `apps/api/src/duna/ingest/decoder.py`.
+> **3. A GPSD hivatalos referencia-példán a `pyais` (a hivatalos
+> referencia-dekoder, a `04` §11 Q6) és a mi dekódolásunk egyezik:**
+> a `!AIVDM,1,1,,A,15M67FC000G?ufbE`FepT@3n00Sa,0*5C` → a `type=1`,
+> az **MMSI 366 053 209**, a `lat=37.802118`, a `lon=-122.341618`.
+> → **a fenti táblázat a helyes** (a `pyais` `_six_bit_to_ascii`
+> implementációja).
+
+**Az implementáció:** az `apps/api/src/duna/ingest/decoder.py`
+(`decode_standard_6bit` + `decode_physical_6bit` — **a kettő ugyanaz
+a kódolás**, a fizikai csak a szándék kifejezésére).
 
 ### 4.2 Az üzenet fejléce
 
@@ -669,11 +663,9 @@ modellként rögzíti, a `02` ebből generálja az oszlopokat.
 > tárolt `mmsi`-t.**
 >
 > **A bizonyíték:**
-> - a `type` oszlop **3000/3000** egyezik → a payload sértetlen;
+> - a `type` oszlop **8000/8000** egyezik → a payload sértetlen és a
+>   kódolásunk helyes;
 > - a tárolt `mmsi` **egyetlen** variánsban sem egyezik;
-> - a **`type=8`** (SAI) üzeneteknél a **fizikai dekódolás pont a
->   tárolt `mmsi`-t adja** (a 226 001 160) → **a dekódolásunk helyes**,
->   a különbség a vevő **normalizálása**;
 > - a **MID egyezik** (a 243-as hajóknál a fizikai és a tárolt MMSI
 >   is 243-as), **csak a 6 számjegyű suffix tér el** → **a vevő a
 >   hajót azonosítja, nem a nyers MMSI-t adja tovább.**
@@ -685,16 +677,15 @@ modellként rögzíti, a `02` ebből generálja az oszlopokat.
 >
 > **KÖVETKEZMÉNYEK:**
 > 1. **a `duna` saját parserének a STANDARD AIS-t kell dekódolnia**
->    (a fizikai vevő-formátum csak a `bud01` mérési adatának
->    értelmezésére kell);
+>    (a `pyais` a hivatalos referencia — a `04` §11 Q6);
 > 2. **a mérési `mmsi` oszlop a NORMALIZÁLT azonosító** → **a
 >    mérési adatot nem szabad nyers payloadként kezelni**;
-> 3. **a normalizálás szabálya nyitott kérdés** (a `04` §11) → **a
+> 3. **a normalizálás szabálya nyitott kérdés** (a `04` §11 Q8) → **a
 >    hajót a MID + a fizikai MMSI suffix alapján kell azonosítani.**
 >
-> **Az implementáció:** a `decode_physical_6bit` (a vevő formátuma,
-> decode-only) és a `decode_standard_6bit` (a szabvány) az
-> `apps/api/src/duna/ingest/decoder.py`-ban.
+> **Az implementáció:** a `decode_standard_6bit` (a GPSD armor) és
+> a `decode_physical_6bit` (**ugyanaz a kódolás**, a mérési adat
+> kényelmes olvasására) az `apps/api/src/duna/ingest/decoder.py`-ban.
 
 ```python
 # apps/ingest/pydantic_models.py

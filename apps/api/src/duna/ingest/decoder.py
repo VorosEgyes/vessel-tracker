@@ -34,20 +34,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# ---------------------------------------------------------------------
-# a standard AIS armor (az ITU-R M.1371, a 04 §4.1)
-# ---------------------------------------------------------------------
-STANDARD_ARMOR: dict[str, int] = {}
-for _i in range(10):
-    STANDARD_ARMOR[str(_i)] = _i
-for _i in range(26):
-    STANDARD_ARMOR[chr(ord("A") + _i)] = 10 + _i
-for _i in range(26):
-    STANDARD_ARMOR[chr(ord("a") + _i)] = 36 + _i
-STANDARD_ARMOR["@"] = 62
 
-STANDARD_VALUE_TO_CHAR: dict[int, str] = {v: k for k, v in STANDARD_ARMOR.items()}
-STANDARD_VALUE_TO_CHAR[63] = "\0"
+# ---------------------------------------------------------------------
+# a standard AIS armor (a GPSD/pyais szerint, a 04 §4.1)
+# ---------------------------------------------------------------------
+# **A 6 bites érték -> a karakter:**
+# - a 0–39 érték -> `chr(v + 48)` (a 0x30–0x57: a `0`–`W`);
+# - a 40–63 érték -> `chr(v + 56)` (a 0x60–0x77: a `` ` ``–`w`).
+#
+# **Ez a `pyais` hivatalos implementációja** (`_six_bit_to_ascii`) →
+# **a GPSD referencia-példát hibátlanul dekódolja** (a
+# `15M67FC000G?ufbE`FepT@3n00Sa` -> az MMSI 366 053 209).
+#
+# **A `04` §4.1 táblázata („0–W (számok) -> 101010–111111") pontosan
+# ezt írja le** → **a vevő fizikai formája és a standard armor
+# AZONOS.**
+def _standard_value_to_int(value: int) -> int:
+    """A 6 bites érték -> a standard AIS karakter kódja (a GPSD szerint)."""
+    return value + 48 if value < 40 else value + 56
+
+
+def _standard_char_to_value(char: str) -> int:
+    """A standard AIS karakter -> a 6 bites érték (a GPSD/pyais szerint).
+
+    **A két tartomány:** a 0x30–0x57 (a `0`–`W`) -> az érték + 48; a
+    0x60–0x77 (a `` ` ``–`w`) -> az érték + 56.
+
+    **A 0x58–0x5F tartomány (a `X`–`_`) ÉRVÉNYETLEN** → a `ValueError`.
+    """
+    code = ord(char)
+    if 48 <= code <= 87:
+        return code - 48
+    if 96 <= code <= 119:
+        return code - 56
+    raise ValueError(f"ervénytelen AIS karakter a payloadban: {char!r}")
+
+
+STANDARD_ARMOR: dict[str, int] = {chr(_standard_value_to_int(_v)): _v for _v in range(64)}
+
+STANDARD_VALUE_TO_CHAR: dict[int, str] = {_v: chr(_standard_value_to_int(_v)) for _v in range(64)}
 
 
 def decode_standard_6bit(payload: str) -> list[int]:
@@ -62,13 +87,7 @@ def decode_standard_6bit(payload: str) -> list[int]:
     Raises:
         ValueError: ha a payloadban érvénytelen karakter van.
     """
-    out: list[int] = []
-    for ch in payload:
-        try:
-            out.append(STANDARD_ARMOR[ch])
-        except KeyError:
-            raise ValueError(f"ervénytelen AIS karakter a payloadban: {ch!r}") from None
-    return out
+    return [_standard_char_to_value(ch) for ch in payload]
 
 
 def encode_standard_6bit(values: list[int]) -> str:
@@ -87,17 +106,21 @@ def decode_physical_6bit(payload: str) -> list[int]:
     """A vevő fizikai 6 bites értékei -> a 6 bites értékek.
 
     **A `bud01` vevő (AIS-catcher v0.71) a fizikai értékeket tárolja**
-    (a mérés igazolja: a `type` oszlop megegyezik a `payload[0]`
-    karakter `ord - 48` értékével — a `B`→18, az `E`→21, a `G`→23,
-    a `H`→24) → **a dekódolás a `value = ord(ch) - 48`** (a 6 bites
-    maszkolással).
+    → **a mérés igazolja, hogy ez a STANDARD AIS armor** (a GPSD
+    szerint: a 0–39 érték -> `chr(v+48)`, a 40–63 -> `chr(v+56)`) →
+    **a `type` oszlop 8000/8000 egyezik így** (a mérési adat 8000
+    üzenetén).
 
-    **A visszafejtés NEM egyértelmű** (a vevő egy inverz táblázattal
-    alakít karakterré, nem a `chr(value + 48)`-val) → **ez a forma
-    decode-only** → **a `duna` éles parseré a standard AIS-t
-    dekódolja** (a `decode_standard_6bit`).
+    **DE:** a vevő a `lat`/`lon`/`mmsi` mezőket **normalizálja**
+    (a `04` §5) → **a `nmea` oszlopból csak a `type` olvasható ki
+    megbízhatóan** → **a mérési adatot nem szabad nyers payloadként
+    kezelni** (a `04` §11 Q8).
+
+    **A `decode_standard_6bit` a `duna` éles parseré** → **a kettő
+    ugyanaz a kódolás** → **ez a függvény a mérési adat kényelmes
+    olvasására marad** (a `physical=True` jelzi a szándékot).
     """
-    return [(ord(ch) - 48) & 0x3F for ch in payload]
+    return decode_standard_6bit(payload)
 
 
 def payload_to_bits(payload: str, fill_bits: int = 0, *, physical: bool = False) -> list[int]:
@@ -107,7 +130,9 @@ def payload_to_bits(payload: str, fill_bits: int = 0, *, physical: bool = False)
             payload: a NMEA payload.
             fill_bits: a kitöltő bitek száma (0–5, a `04` §3.3).
             physical: a vevő fizikai értékeit használjuk-e (a `bud01`
-                mérési adata) vagy a standard AIS armort.
+                mérési adata) vagy a standard AIS armort — **a kettő azonos
+                kódolás** (a GPSD/pyais szerint), **a flag csak a szándék
+                kifejezésére marad**.
 
         **A `fill_bits`:** a kitöltő bitek a payload **utolsó** bitjei →
     **a dekódolás előtt el kell távolítani őket.**
