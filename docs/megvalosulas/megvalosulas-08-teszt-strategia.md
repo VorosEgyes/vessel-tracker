@@ -421,6 +421,29 @@ terv 3.2 táblázatának forrása**, és **a regressziós tesztek alapja**.
 | **a `shiptype` → `vessel_type.code` lookup** | a 14 mért kód → **mind a 89 seedben van** |
 | **a `msg_hash` a valós `nmea` tömbökkel** | a `nmea` **tömb** (a v0.71) → a H-1 findingje |
 
+### 7.1a A minőségi metrikák (a MarineTraffic módszere)
+
+> **A MarineTraffic support-dokumentációja** (a „Data Quality" és az
+> „Understanding AIS & GNSS Spoofing" cikkek) **a pozíció-minőség
+> ellenőrzését** is dokumentálja → **a mérési protokollunk (a `04` §8)
+> ezt felveheti**:
+>
+> | A metrika | A módszer | A mi mérésünkben |
+> |---|---|---|
+> | **a pozícióugrás** | a két pozíció között a lehetségesnél nagyobb a távolság (a hajó nem ugorthat át) | **a `04` §8 szerinti mérésben** |
+> | **a természetellenes sebesség** | a pozíciók közti sebesség > a hajó maximális sebessége | **a `ais_position.sog_mps` ellenőrzése** |
+> | **a duplikált azonosító** | ugyanaz a MMSI/név több helyen | **a `vessel_identifier_active_uniq`** (a `02` §5.3) |
+> | **a hosszú kikötő nélküli állás** | a pozíció változatlan, a `status` mégis mozgást mutat | **a `vessel_last_position.age`** |
+
+> **A F-NF-17 (0 fantom hajó) a mérésben teljesül** (a 106 lámpa + a 3
+> bázisállomás kizárva) → **de ezek a metrikák a szándékos hamisítás
+> (a spoofing) és a mérési hibák (a több vevő) ellen is védik a
+> katalógust** → **a `08` §4.5 szerinti regressziós tesztekbe felvehetők.**
+>
+> **A fontos korlát:** a MarineTraffic szerint **a hamisított jeleket
+> a térképen MEGJELZIK, csak az analitikából zárják ki** → **a mi
+> katalógusunkban is: a hamis gyanús jelölést kapjon, ne tűnjön el.**
+
 ### 7.2 A mérési protokoll mint regressziós teszt
 
 **A 30 napos mérés végén** a teljes adathalmaz **replay**-elhető:

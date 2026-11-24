@@ -365,6 +365,60 @@ nevet**! A nevet az **Inland FI 10 (DAC 200, FID 10)** üzenet hordozza
 **A hívójel a Msg 5-ben van** — és az FI 10-ban is. **A `vessel_identifier`
 a kanonikus** (a 02-es terv §8.2a szinkron).
 
+### 4.4a A külső referencia: az AIS szabályok és a minőségi problémák
+
+> **A MarineTraffic support-dokumentációja** (a `support.marinetraffic.com`
+> „Data Quality & Methodology" és „Using MarineTraffic" gyűjteményei)
+> **a nemzetközi gyakorlatot mutatja** — **a saját protokoll-specifikációnk
+> (az IMO/UNECE/RI kódok) az irányadó**, ez a külső oldal a **gyakorlati
+> háttér**. **A három releváns pont:**
+>
+> **1. Az üzenetek ütemezése — a Class A és a Class B eltér.**
+>
+> | A transzponder | A dinamikus (pozíció) üzenet | A statikus üzenet |
+> |---|---|---|
+> | **Class A** | **2–10 mp** (a sebességtől és az iránytól függően) | **6 perc** (mozgás nélkül is) |
+> | **Class B** | **30 mp (minimum)** | a Class A-val azonos (6 perc) |
+>
+> **Ez a mérésben is látszik:** a statikus üzenetek közötti rés
+> **a medián 361 mp (6,0 perc)**, **a 75. percentilis 590 mp (10 perc)** —
+> **a 10 perces érték a Class B-k ritkább küldésével magyarázható**.
+>
+> **A Class B transzponder küldött adathalmaz is szűkebb:** **nincs
+> IMO-szám, nincs merülés, nincs célállomás, nincs ETA, nincs
+> kormányzási sebesség, nincs navigációs állapot.**
+>
+> **A tervezés következménye:** **a Class B hajóknál a `destination` és
+> az `eta` sosem jön** → **a `06` §4.2 szerkesztői mezője ezeknél
+> **üres** lesz, és **a kézi kitöltés a cél** → **a `05` §8.3 „Még nem
+> tudjuk" jelölése** (a F-DET-16) **pontos ezt jelenti.**
+>
+> **2. A navigációs állapot (`nav_status`) 16 értéke** (0–15) —
+> **a `02` DDL CHECK constraintje mind a 16-ot kezeli** (a szöveges
+> névekkel). **A mérésben előforduló értékek:** `0` (under way using
+> engine, 257 896 pozíció), `15` (undefined, 11 272), `8` (under way
+> sailing, 7 774), `5` (moored, 6 245), `1` (at anchor, 13), `4`
+> (constrained by draught, 3), `2` (not under command, 2), `10` (a
+> tartalék kód, 2), `9` (a tartalék kód, 1), `6` (aground, 1).
+>
+> **3. A hamis pozíciók (spoofing) — a F-NF-17 fantom-szűrőnk
+> kontextusa.** A MarineTraffic szerint:
+> - a **GNSS-hamisítás** (a külső, katonai/gépolitikai actoroktól) a
+>   hajó fedélzeti navigációját is megtéveszti;
+> - az **AIS-hamisítás** (a hajó saját maga) hamis koordinátákat,
+>   hamis azonosítókat és **duplikált üzeneteket** küld, hogy
+>   „szellemhajókat" (ghost ships) szimuláljon.
+> - **A felismerés:** a pozícióugrások, a természetellenes sebességek,
+>   a **duplikált MMSI-k/névvel**, a hosszú ideig kikötő nélkül álló
+>   hajók.
+>
+> **A mi fantom-szűrőnk (a `01` §5.5 és a `04` §4.7) a navigációs
+> infrastruktúrát zárja ki** (a 106 lámpa + a 3 bázisállomás) → **a
+> szándékos hamisítás ezen a Duna-szakaszon nem dokumentált** → **a
+> F-NF-17 (0 fantom hajó) a mérésben teljesül** → **de a mérési
+> protokoll (a `04` §8) rögzíthetné a pozícióugrás-ellenőrzést** mint
+> **minőségi metrikát** (a MarineTraffic módszere).
+
 ### 4.5 A belvízi statikus üzenet (Inland FI 10)
 
 **A formátum:** a 6 bites karakterkódolás **egy karakterrel eltér**:
@@ -379,7 +433,7 @@ kitöltő karakter).
 
 | Mező | Hossz | Jelentés |
 |---|---|---|
-| `vin` | 8×7 bit | **ENI** (a 2016/1629/EU szerinti európai hajóazonosító) |
+| `vin` | 8×7 bit | **ENI** (a 2016/1629/EU szerinti európai hajóazonosító) — **a kitöltő érték `00000000`** (a kényelmes hajóknak nincs ENI-jük; a CESNI Inland AIS irányelv) → **a kitöltő érték `NULL`-ra cserélendő**, nem tárolandó |
 | `length` | 13 bit | a hajó hossza (0,1 m) |
 | `beam` | 10 bit | a hajó szélessége (0,1 m) |
 | `shiptype` | 14 bit | a hajótípus kódja (UN/CEFACT ERI) |

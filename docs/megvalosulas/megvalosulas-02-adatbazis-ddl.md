@@ -784,6 +784,15 @@ CREATE TABLE vessel_identifier (
                  CHECK (identifier_type IN
                    ('eni','imo','mmsi','callsign','national_reg_no','internal_code')),
     value        text NOT NULL,
+    -- **A KITOLTO ERTEK TILOS** (a 04 §4.4a — a MarineTraffic
+    -- support-dokumentacioja a CESNI Inland AIS iranyelv alapjan):
+    -- a kényelmes hajoknál az ENI helyett `00000000` jon. Ha ez
+    -- bekerülne, (a) a keresö 8 nullas ENI-t talalna, (b) a
+    -- `vessel_identifier_active_uniq` unikus indexen minden ilyen
+    -- hajo ütközne -> **a minta import elbukna**.
+    -- A parser a kitolto erteket `NULL`-ra csereli (nem hajthatja be).
+    CONSTRAINT vessel_identifier_value_check
+        CHECK (value <> '00000000'),
     is_primary   boolean NOT NULL DEFAULT false,
     origin       text NOT NULL
                  CHECK (origin IN ('ais','official','operator_claimed')),
