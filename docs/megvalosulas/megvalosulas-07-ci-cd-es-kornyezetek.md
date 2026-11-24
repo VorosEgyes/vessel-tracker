@@ -426,6 +426,25 @@ volt, miközben a tesztek egyáltalán nem futottak.**
 a `cache: pnpm` kivétele megoldotta) → **a `lint` job a `ruff`
 telepítése után a lintig jutott.**
 
+#### A negyedik CI-futás (2026-11-24, a `06f1ce4cc0` commit után)
+
+**A postgres image BUILD MŰKÖDIK** (a base image + a csomagnév
+javítások) → **a push a registry-be bukott el**:
+
+| A hiba | A tünet | A javítás |
+|---|---|---|
+| **a registry push** | `failed to authorize: failed to fetch anonymous token ... 403 Forbidden` → **a `postgres` jobban NEM volt `docker/login-action`** (csak az `api`/`web` jobban) | a **`docker/login-action@v3`** a `postgres` jobba is |
+| **a `ruff` 6 hibája** | a `lint` job: a `report_range.py` 6 hibája (a `E401`, az `I001`, az `F401`, az `N806`, az `F541`, a `SIM108`) → **a helyi másolat 16 fájlban elmaradt a repótól** → a `ruff` a repóban lévő fájlokat nézi | a javítások a `report_range.py`-ben + **a tiszta klónból dolgozás** |
+
+> **A `ruff format` a MARKDOWN fájlok kódblokkjait is átírja** →
+> **a dokumentációk kódmintái nem változhatnak** → a
+> `pyproject.toml`-ban az **`extend-exclude = ["*.md", "docs/"]`**.
+
+> **A `build.yml` `api` és `web` jobja** a hiányzó
+> `apps/api/Dockerfile`-ra / `apps/web/Dockerfile`-ra hivatkozott →
+> **a build feltételes** (a `just build` szabálya szerint) → **a
+> Dockerfile-ok megjelenésekor a feltétel automatikusan megszűnik.**
+
 ### 4.2 A `ci.yml` — a minőségi kapu
 
 **A `01` – stack-terv §3.2 és a `02` – DDL-terv §12 alapján:**

@@ -38,9 +38,7 @@ def parse_seed(plan: pathlib.Path) -> dict[int, str]:
     if i == -1 or j == -1:
         raise SystemExit(f"HIBA: a vessel_type seed nem talalhato a {plan}-ben")
     codes: dict[str, int] = {}
-    for m in re.finditer(
-        r"\('((?:ERI|SOLAS)_\d+)',\s*(NULL|\d+),\s*(?:NULL|'[a-z]+')", text[i:j]
-    ):
+    for m in re.finditer(r"\('((?:ERI|SOLAS)_\d+)',\s*(NULL|\d+),\s*(?:NULL|'[a-z]+')", text[i:j]):
         if m.group(2) != "NULL":
             codes[m.group(1)] = int(m.group(2))
 
@@ -50,16 +48,12 @@ def parse_seed(plan: pathlib.Path) -> dict[int, str]:
     if i == -1 or j == -1:
         raise SystemExit(f"HIBA: a vessel_type_i18n seed nem talalhato a {plan}-ben")
     names: dict[str, str] = {}
-    for m in re.finditer(
-        r"\('((?:ERI|SOLAS)_\d+)',\s*'hu',\s*'([^']*)'", text[i:j]
-    ):
+    for m in re.finditer(r"\('((?:ERI|SOLAS)_\d+)',\s*'hu',\s*'([^']*)'", text[i:j]):
         names[m.group(1)] = m.group(2)
 
     missing = [c for c in codes if c not in names]
     if missing:
-        raise SystemExit(
-            f"HIBA: {len(missing)} tipusnak nincs magyar neve: {missing[:5]}"
-        )
+        raise SystemExit(f"HIBA: {len(missing)} tipusnak nincs magyar neve: {missing[:5]}")
     return {ais: names[code] for code, ais in codes.items()}
 
 
@@ -74,12 +68,15 @@ def build_case(types: dict[int, str]) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--plan", type=pathlib.Path, default=DEFAULT_PLAN,
-                    help="a 02-es DDL-terv (a seed forrasa)")
-    ap.add_argument("--report", type=pathlib.Path, default=DEFAULT_REPORT,
-                    help="a report_vessels.sh (a cel)")
-    ap.add_argument("--check", action="store_true",
-                    help="ellenorizd a riportot a generalt listaval")
+    ap.add_argument(
+        "--plan", type=pathlib.Path, default=DEFAULT_PLAN, help="a 02-es DDL-terv (a seed forrasa)"
+    )
+    ap.add_argument(
+        "--report", type=pathlib.Path, default=DEFAULT_REPORT, help="a report_vessels.sh (a cel)"
+    )
+    ap.add_argument(
+        "--check", action="store_true", help="ellenorizd a riportot a generalt listaval"
+    )
     args = ap.parse_args()
 
     if not args.plan.exists():

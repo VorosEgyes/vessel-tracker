@@ -9,6 +9,7 @@ be a kartyat:
 
 A fajlok a /tmp/cloudinit/ alatt keszulnek el a Macen.
 """
+
 import pathlib
 import sys
 

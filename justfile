@@ -92,6 +92,10 @@ ddl-generate:
 # a Python lint (a ruff)
 lint:
     {{UV}} ruff check .
+    # **A `ruff format` a MARKDOWN fajlok kodblokkjait is atirja** ->
+    # a dokumentaciok kodmintai nem valtozhatnak -> **csak a Python
+    # fajlokon** ellenorzzuk a formatot (a `apps/`, a `db/`, a
+    # `scripts/`).
     {{UV}} ruff format --check .
 
 # a frontend lint (az eslint + a prettier)
