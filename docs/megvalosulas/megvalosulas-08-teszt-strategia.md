@@ -317,6 +317,24 @@ típusból legalább egy**, és a gyakori típusokból több:
 > forrás-`mmsi`-t is tartalmazza → **a fixture-ök újrajátszhatók**
 > (a dedup idempotenciája is tesztelhető).
 
+### 5.2a A statikus adatok hiányának tesztje (a 2026-11-24-i mérési adat)
+
+**A statikus adatok 6 percenként jönnek** (a `04` §4.4 szerint, a
+mérés igazolva) → **a parsernek a „pozíció érkezett, statikus még nem"
+állapotot is kezelnie kell.**
+
+| A teszt | Mit vizsgál |
+|---|---|
+| **a pozíció statikus nélkül** | a `vessel` upsert **az `UNKNOWN` típussal** megy-e végig (a `02` §5.3 `NOT NULL`!) |
+| **a statikus megérkezése később** | a `vessel_type_code` **frissül-e** a `UNKNOWN`-ról a valósra |
+| **a név későbbi megjelenése** | a `vessel_i18n` upsert a `name_only` bizonyossági szintről valósra vált-e |
+| **a `verification_level`** | a `name_only` → `ais_identified` átmenet (a `02` §6.3 `vessel_verification` nézet) |
+| **az idempotencia** | a statikus adat **kétszer** érkezik → nincs duplikáció (a `msg_hash`) |
+
+**A fixture-ök ezt fedik:** a `manifest.json`-ben a `received_at` a
+fajlonkénti időpont → **a „statikus nélküli" állapot előállítható**
+(a pozíció fixture-ökkel, a statikus nélkül).
+
 ### 5.3 A mérési adat a repóban
 
 **A `docs/measurement_2026-11-22.md`** a mérés eredménye — **a

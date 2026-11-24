@@ -57,7 +57,15 @@
 |---|---|---|
 | F-NF-09 (≥ 95% azonosító) | **a név 82,6%, az ENI 0,4%** | ❌ **nem teljesíthető a városi helyen** |
 | F-NF-17 (0 fantom hajó) | **106 lámpa + 3 bázisállomás kizárva** | ✅ |
-| F-NF-18 (≥ 60% ENI) | **0,5%** | ❌ **nem mérhető itt** → a szűkvízi helyszín kell |
+| F-NF-18 (≥ 60% ENI) | **0,4%** | ❌ **nem mérhető itt** → a szűkvízi helyszín kell |
+
+> **Az ENI-arány miért nem javul a mérés ideje alatt?** (a 2026-11-24-i
+> mérés) — **a statikus adatok 6 percenként jönnek** (a `04` §4.4),
+> **de a hajók 76%-a küld FI 10-et (az ENI-t), a többi sosem fog
+> ENI-t küldeni ezen a vevőn** → **nem időzavar, hanem a hajók
+> felszerelése.** A mérés első órájában 0,5%, 37 óra alatt 0,4% volt.
+>
+> **A részletek a `docs/measurement_2026-11-22.md`-ben.**
 
 ---
 

@@ -303,6 +303,46 @@ tábla nem tartalmazza), de a `vessel_data_origin` **nem** kap ilyet
 
 ### 4.4 A statikus üzenetek (Msg 5)
 
+> #### 🆕 A STATIKUS ADATOK ÜTEMEZÉSE (a 2026-11-24-i mérési adat)
+>
+> **Az AIS nem egyetlen csomag:** a **pozícióadatok** (a sebesség, az
+> irány, a koordináták) **másodpercenként** sugároznak (a Msg 1/2/3),
+> **a statikus adatok** (a hajónév, a méretek, az ENI) **ritkábban,
+> általában 6 percenként** (a Msg 5, a belvízi FI 10).
+>
+> **A mérés igazolja (a `docs/measurement_2026-11-22.md`, a 37 órás adat):**
+>
+> | A mérőszám | Az érték |
+> |---|---|
+> | a statikus üzenetek közötti rés (a Msg 5/24) | **a medián 361 mp (6,0 perc)**, a 75% 590 mp (10 perc) |
+> | a FI 10 (a belvízi ENI) üzenetek közötti rés | **a medián 364 mp (6,1 perc)** |
+> | **a statikus adat elérése a pozíció után** | **a medián 8,8 perc**, a 75% 33,8 perc, **a maximum 795 perc (13 óra)** |
+> | 10 percen belül megvan | **51%** |
+> | 20 percen belül megvan | **63%** |
+>
+> **A tervezési következmény:**
+>
+> **1. Egy „éppen fogott pillanatnyi" AIS-üzenetben NEM feltétlenül van
+> az ENI (vagy a név, vagy a méret)** → **a parsernek a statikus
+> adatot külön kell kezelnie**, nem a pozícióból derivesztálnia.
+>
+> **2. A `vessel` rekord a statikus adat nélkül HIÁNYOS** → **a
+> `02` §5.3 szerint a `vessel_type_code` NOT NULL** → **a fallback az
+> `UNKNOWN` típus** (a `04` §4.5-ökkel) → **a hajó a `vessel`-ben
+> létezik, de `name_only`/`UNKNOWN` típussal.**
+>
+> **3. A katalógus teljessége a mérés időtartamától függ** → **a
+> mérési időszak elején (az első órában) az ENI-arány 0,5% volt, és
+> 37 óra alatt is csak 0,4%** → **nem az időzavar, hanem az, hogy a
+> hajók 76%-a küld FI 10-et, a többi sosem fog ENI-t küldeni ezen a
+> vevőn** (a mérés: a 34 pozíciót küldő hajóból **30 navigációs
+> lámpa**, és **a 4 valódi hajó NEM küld FI 10-et**).
+>
+> **4. A `03` – API-terv `meta.hint`-je és a `05` §8.3 „Nincs adat"
+> jelölése a helyes megoldás** → **a felhasználónak tudnia kell, hogy
+> egy hajó adatai még „érnek"** → **a `vessel_data_origin.observed_at`
+> (a statikus adat érkezési ideje) ezt megadja.**
+
 | Bit | Hossz | Mező |
 |---|---|---|
 | 40–69 | 30 | `imo` |

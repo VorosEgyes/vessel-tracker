@@ -100,6 +100,44 @@ lookup helyes, de a `02` seedből a SOLAS-osztályok hiányoznak**.
 
 ---
 
+### 🆕 A statikus adatok ütemezése (a 2026-11-24-i mérés)
+
+**Az AIS nem egyetlen csomag:** a **pozícióadatok** (a sebesség, az
+irány, a koordináták) **másodpercenként** sugároznak, **a statikus
+adatok** (a hajónév, a méretek, az ENI) **6 percenként**.
+
+**A mérés igazolja:**
+
+| A mérőszám | Az érték |
+|---|---|
+| a statikus (Msg 5/24) üzenetek közötti rés | **a medián 361 mp (6,0 perc)** · a 75% 590 mp |
+| a FI 10 (a belvízi ENI) üzenetek közötti rés | **a medián 364 mp (6,1 perc)** |
+| **a statikus adat elérése a pozíció után** | **a medián 8,8 perc** · a 75% 33,8 perc · **a maximum 795 perc (13 óra)** |
+| 10 percen belül megvan | **51%** |
+| 20 percen belül megvan | **63%** |
+
+**A nyers NMEA bizonyítja** (a `type 5` / `type 8` / `type 2`):
+
+| Az üzenet | A tartalom | Az ENI benne? |
+|---|---|---|
+| `type 2` → `23WkpQ0P00QGD\`RK=ckf4?wN20Sl` | a pozíció | **nem** |
+| `type 5` → `53Wktk400000PMH@001HU<DM84@000000000000t0hQ16vim02hUA0D1` | a nemzetközi hajószám, a méretek, a NAV-nevek | **nem** |
+| `type 8` → `83Wklbhj2P00000000gPS?\`53L00` | **a belvízi FI 10: az ENI (`2P000000`), a hossz, a szélesség, a `shiptype`, a merülés** | **igen** |
+
+**A két fontos következmény:**
+
+**1. Az ENI-arány nem az időzavartól függ.** A mérés első órájában
+**0,5%** volt, 37 óra alatt **0,4%** → **nem azért alacsony, mert
+„még nem jött be" a statikus adat** → **a hajók 76%-a küld FI 10-et,
+a többi sosem fog ENI-t küldeni ezen a vevőn.** A mérés: a 135
+pozíciót küldő hajóból **102 küld FI 10-et**, és a **34-ből 30
+navigációs lámpa**, a **4 valódi hajó pedig NEM küld FI 10-et**
+(a `LEGENDA`, a `KEPLER`, a `LAGUNA`, a `GONDOLA`).
+
+**2. A katalógus „érési" ideje 8,8 perc** (a medián) → **a mérés
+elején a katalógus hiányos** → **a felületnek jeleznie kell, hogy egy
+hajó adatai még frissülnek** (a `vessel_data_origin.observed_at`).
+
 ### A tipusok a 28 órában
 >
 > | `type` | Jelentés | Darab | Arány |
