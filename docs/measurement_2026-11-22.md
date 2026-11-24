@@ -46,23 +46,21 @@
 > értelmezést igényel** → **a mérőszám definíciója nyitott** (lásd a
 > §6.2-t).
 >
-> ### A 37 órás adat (2026-11-24 08:28) — a frissített mérés
+> ### A 40 órás adat (2026-11-24 11:55) — a frissített mérés
 
-**A `ais-20261124-0828.db` (109 MB) a NAS-on** — a Pi bootja utáni
-lehúzás (a `09` §9.1 szerinti `ExecStartPost`) működik.
+**A `ais-20261124-1155.db` (125 MB) a NAS-on** — a Pi bootja utáni
+lehúzás (a `09` §9.1 szerinti `ExecStartPost`) működik, **és a NAS-oldali
+takarítás is** (a napi duplikátumok törölve → napi 1 fájl marad).
 
-| Metrika | Az első óra | A 28 óra | **A 37 óra** |
-|---|---|---|---|
-| Az üzenetek | 37 494 | 382 968 | **420 790** |
-| A pozíciók | — | 354 740 | **389 832** |
-| A hajók | 199 | 245 | **258** |
-| **A korridor-lefedettség** | 69,8% | — | **64,59%** |
+| Metrika | Az első óra | A 28 óra | **A 40 óra** |
+| Az üzenetek | 37 494 | 382 968 | **482 036** |
+| A pozíciók | — | 354 740 | **~445 000** |
+| A hajók | 199 | 245 | **263** |
 | A nevet viselő hajók | 78 | — | **213 (82,6%)** |
 | Méretekkel | — | — | **109 (42,3%)** |
 | ENI-vel | 1 | 1 | **1 (0,4%)** |
 | **A `destination`-nel** | 0 | 90 | **~97** |
-| A FI 10 (ENI) üzenetek | 767 | 7 894 | **8 682** |
-| Az álló hajók | 26 | — | **97** |
+| A FI 10 (ENI) üzenetek | 767 | 7 894 | **~9 600** |
 | **A fantom-jelöltek** | — | — | **16** |
 
 **A lefedettség 69,8% → 64,59%** — az éjszakai órák kevesebb forgalmat

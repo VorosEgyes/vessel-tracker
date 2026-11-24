@@ -1,6 +1,6 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.7 (2026-11-24 — a 37 órás mérési adat alapján:
+**Verzió:** 1.8 (2026-11-24 — a 40 órás mérési adat alapján:
 **a SOLAS hajóosztályok (`SOLAS_30`…`SOLAS_90`) a saját
 `ais_type_code`-jukat kapták** → **a `shiptype` → `vessel_type`
 lookup megtalálja őket** — a mérésben 7 olyan `shiptype` jelentkezett
@@ -17,7 +17,7 @@ reviewer H-4/M-8/C-5 findingjei szerint; a DDL futtatva és tesztelve; **+ a `ho
 `home_basin_id` oszlopok** a `03` – API-terv `prof` reviewer C-1
 findingje szerint — a `?section=`/`?basin()` katalógus-szűrő adatforrása;
 **+ a teljes referenciaadat-seed** a `bud01` mérésből — a `vessel_type`
-a 89 hajótípussal és a magyar nevekkel, a `language`, a `data_source`,
+a 93 hajótípussal és a magyar nevekkel, a `language`, a `data_source`,
 a `country`, a `waterway`, a `river_section`, a `basin`, a `cargo_type`
 és az `operator` a referenciákkal; **+ a `position.msg_type` és
 `position.msg_subtype`**, a `position.nav_status` CHECK a szöveges
