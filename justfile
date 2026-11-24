@@ -110,19 +110,19 @@ typecheck:
 
 # a unit tesztek (a tiszta függvények)
 test-unit:
-    {{UV}} pytest {{TESTS}}/unit || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit
 
 # a property tesztek (a hypothesis round-trip)
 test-property:
-    {{UV}} pytest {{TESTS}}/property || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/property
 
 # a komponens tesztek (a service-ek a DB-vel)
 test-component:
-    {{UV}} pytest {{TESTS}}/component || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/component
 
 # az integrációs tesztek (a testcontainers + a PostGIS)
 test-integration:
-    {{UV}} pytest {{TESTS}}/integration || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/integration
 
 # az e2e tesztek (a playwright)
 test-e2e:
@@ -134,11 +134,11 @@ test-perf:
 
 # az adat-regresszió (a mérési adat a baseline, a 08 §7)
 test-regression:
-    {{UV}} pytest {{TESTS}}/regression || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/regression
 
 # az API-tesztek (a testcontainers DB-vel)
 test-api:
-    {{UV}} pytest {{TESTS}}/api || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/api
 
 # a frontend tesztek (a Vitest)
 test-frontend:
@@ -146,15 +146,13 @@ test-frontend:
 
 # a teljes tesztkészlet a coverage flaggel (a 08 §8.1 küszöb: 85%)
 test:
-    # A pytest exit 5-ot ad, ha nincs gyujtott teszt -> a CI ne bukjon
-    # el a meg nem lévő alkalmazaskodon (a 07 §3.1)
-    {{UV}} pytest {{TESTS}}/unit {{TESTS}}/property {{TESTS}}/component \
-      --cov=duna --cov-report=term-missing --cov-fail-under={{COVERAGE_MIN}} \
-      || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    # A pytest hibakodjai: a 5 (nem gyujtott teszt) a wrapperben
+    # elnyelodik -> a 3 (belső hiba) ES az 1 (teszthiba) atmegy
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit {{TESTS}}/property {{TESTS}}/component --cov=duna --cov-report=term-missing --cov-fail-under={{COVERAGE_MIN}}
 
 # a migráció-visszafordíthatóság (a 07 §8.1 8. lépése)
 test-reversible:
-    {{UV}} pytest -k reversible || echo "a tesztek meg nincsenek a repoban -> kihagyva"
+    {{UV}} python scripts/ci/pytest_or_skip.py -k reversible
 
 # A KAPUK
 

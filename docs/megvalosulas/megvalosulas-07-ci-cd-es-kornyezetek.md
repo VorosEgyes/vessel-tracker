@@ -231,13 +231,33 @@ FROM postgis/postgis:16-3.4
 # a pg_cron extension a stock PostGIS image-ben NINCS (a 01 H-11)
 # a postgresql-contrib a pg_stat_statements-hoz kell (a 09 §4.1
 # latencia-metrika) — a 02 §13.2 a custom image-ben kéri
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      postgresql-16-cron postgresql-contrib \
- && rm -rf /var/lib/apt/lists/*
+#
+# **A PGDG REPO KELL** (a 2026-11-24-i javítás): a `postgresql-16-cron`
+# **a Debian stable repójában NINCS benne** → az `apt-get update` a
+# postgis image-ben 404-et dobott → **a build elbukott**. A PGDG
+# repót (apt.postgresql.org) explicit módon hozzá kell adni:
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates gnupg; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      postgresql-16-cron postgresql-contrib; \
+    rm -rf /var/lib/apt/lists/*
 # a shared_preload_libraries a postgresql.conf-ban:
 #   shared_preload_libraries = 'pg_cron,pg_stat_statements'
 ```
+
+> **A `07` §3.2 eredeti, `apt-get install postgresql-16-cron` előírása
+> hibás volt** (a 2026-11-24-i CI-futas igazolta): a csomag a PGDG
+> repóban van, **nem** a Debian stable-ban. A javított Dockerfile a
+> repóban: `infra/docker/postgres/Dockerfile`.
 
 > **A `pg_cron` a custom imageben kell** — a stock PostGIS image-ben
 > **nincs** → a `cron.schedule(...)` hívások `schema "cron" does not
@@ -340,6 +360,38 @@ fájlok a `nginx`ben, **a szerveroldali szigetek** az
 >
 > **A `just ddl-generate` kötelező a terv módosításakor** — különben
 > a `git diff --exit-code` elbukik a CI-ban.
+
+#### A második CI-futás (2026-11-24, a `603c35e0f0` commit után)
+
+**A `test` job SIKERES** (a `pgserver` + a Python 3.12 javítás
+működik) → **két új hiba maradt:**
+
+| A hiba | A tünet | A javítás |
+|---|---|---|
+| **a `pnpm` továbbra is hiányzik** | `Unable to locate executable file: pnpm` — **a `actions/setup-node@v4` a `cache: pnpm` opcióval a pnpm-et KÉRDEZI** a cache beállításakor → a `pnpm/action-setup` **ELŐTT** bukik el | a **`cache: pnpm` kivéve** a `setup-node`-ből (a frontend még nincs a repóban → a cache felesleges) |
+| **a `pg_cron` csomag nem telepíthető** | az `apt-get update` → **404 Not Found** → a `postgresql-16-cron` **a PGDG repóban van**, nem a Debian stable-ban | a **PGDG repo** beállítása a Dockerfile-ban (a kulcs + a `apt.postgresql.org` forrás) |
+| **a `pytest` INTERNALERROR** | `pytest.PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset` → a `filterwarnings = ["error::DeprecationWarning"]` miatt **hibává** válik | az **`asyncio_default_fixture_loop_scope = "function"`** a `pyproject.toml`-ban |
+
+> **A `07` §3.2 terv hibás volt:** a `postgresql-16-cron` telepítéséhez
+> a **PGDG repo kell** → **a terv a Debian stable repóját feltételezte,
+> ahol a csomag nincs benne.**
+
+#### A maszkolás megszüntetése (a `pytest_or_skip.py`)
+
+**A korábbi `|| echo "..."` a `justfile`-ban MASZKOLTA a valódi
+hibákat:** a pytest exit 3 (belső hiba, a coverage config-hiba) és
+exit 4 (a nem létező útvonal) is „sikernek" számított → **a CI zöld
+volt, miközben a tesztek egyáltalán nem futottak.**
+
+**Az új `scripts/ci/pytest_or_skip.py`:**
+1. a nem létező útvonalakat kiszűri (→ a 4-es exit nem fordul elő);
+2. ha nem maradt útvonal → **a lépés kihagyva** (exit 0);
+3. a pytest futtatása → **csak az 5-öt (nem gyűjtött teszt) nyeli el**,
+   **a 1-est (teszthiba), a 3-asat (belső hiba) és a 4-est átengedi**.
+
+**Az igazolt viselkedés (a kesztyeben):** a valódi teszthiba →
+**exit 1** (a CI bukik); a sikeres teszt → exit 0; a nem létező
+útvonal → exit 0 (kihagyva).
 
 ### 4.2 A `ci.yml` — a minőségi kapu
 

@@ -58,6 +58,12 @@ packages = ["apps/api/src/duna"]
 [tool.pytest.ini_options]
 testpaths = ["apps/api/tests"]
 asyncio_mode = "auto"
+# **A `pytest-asyncio` figyelmeztetese `PytestDeprecationWarning`** ->
+# a `filterwarnings = ["error::DeprecationWarning"]` miatt ez
+# INTERNALERROR-ral elbuktatja a pytestet (a 2026-11-24-i CI-futas:
+# "pytest.PytestDeprecationWarning: The configuration option
+# asyncio_default_fixture_loop_scope is unset") -> a beallitas kell.
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: a lassu tesztek (a teljesitmény, az e2e)",
     "integration: az integracios tesztek (a testcontainers DB-vel)",
@@ -85,13 +91,22 @@ exclude_lines = [
     "raise NotImplementedError",
 ]
 
-[tool.coverage.report.exclude_also]
 # A 08 §8.1: a domain/ es az ingest/ 90%
 # (a `just test` a `--cov-fail-under` flaggel felulirhatja a teljes
 # 85%-ot; a ket kiemelt modulon a `pyproject.toml` a szigorubb hatart)
 # → a CI a ket kulcsmodulra kulon ellenorzi:
 #   pytest --cov=duna.domain --cov-fail-under=90
 #   pytest --cov=duna.ingest --cov-fail-under=90
+#
+# **A COVERAGE 7.x a `exclude_also`-t LISTAKENT olvassa** → az ures
+# TOMBOLY a coverage.exceptions.ConfigError-t dobta ("Option
+# [tool.coverage.report]exclude_also is not a list: {}") ->
+# **a lista nem lehet ures; a minimum egy elem kell** (a `pragma: no
+# cover` mar a `exclude_lines`-ban van, ezért a `def __init__` a
+# konstruktor).
+exclude_also = [
+    "def __init__",
+]
 
 # =====================================================================
 # A RUFF (a lint)
