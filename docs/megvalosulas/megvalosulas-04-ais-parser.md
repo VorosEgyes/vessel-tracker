@@ -255,6 +255,35 @@ bits = payload_bits[: len(payload_bits) - fill_bits]
 **bajt-sorrendben, a karaktereken belül fordítottak** vannak — a
 dekódoláskor **a karakter 6 bitjét meg kell fordítani**.
 
+> **⚠️ A 2026-11-24-i mérés CÁFOLJA a fenti állítást** — **a
+> `bud01` vevőn (AIS-catcher v0.71) a bitek a karaktereken belül
+> NEM fordítottak.**
+>
+> **A bizonyíték (a 40 órás mérés, 3000 üzenet):** a vevő `type`
+> oszlopa **3000/3000** egyezik, ha a biteket **MSB-first, a
+> karaktereken belül fordítás nélkül** olvassuk; a fordított
+> változattal **0/3000**.
+>
+> **A vevő FIZIKAI 6 bites értékeket tárol** a `nmea` oszlopban, **nem
+> a standard AIS armor karaktereit.** A mérés igazolja: a vevő `type`
+> oszlopa megegyezik a `payload[0]` karakter `ord − 48` értékével
+> (a `B`→18, az `E`→21, a `G`→23, a `H`→24, a `?`→15) → **a
+> standard armor ezeket 11/14/16/17/15-nek adná.**
+>
+> **A GPSD/AIS referencia-példa** (`15M67FC000G?ufbE`FepT@3n00Sa`) →
+> **a fizikai dekódolás az MMSI-t hibátlanul adja: 366 053 209** (a
+> standard armor-értékekkel 358 713 148 jönne ki) → **a fizikai
+> dekódolás a helyes.**
+>
+> **KÖVETKEZMÉNY A PARSERRE:** **két kódolás kell** →
+> - a `decode_standard_6bit` — az ITU-R M.1371 armorja (a szabvány,
+>   **a `duna` rendszer ezt kezeli**);
+> - a `decode_physical_6bit` — a vevő formátuma (a `bud01` mérési
+>   adatához, **decode-only**: a visszafejtés nem egyértelmű, a vevő
+>   egy inverz táblázattal alakít karakterré).
+>
+> **Az implementáció:** az `apps/api/src/duna/ingest/decoder.py`.
+
 ### 4.2 Az üzenet fejléce
 
 A dekódolt bitsor első **168 bitje** (22 karakter) az üzenet fejléce:
@@ -631,6 +660,41 @@ katalógusba kerülnek**, mint a Class A-k.
 
 A `02` és a `04` közötti **egyetlen definíció** — a `04` ezt Pydantic
 modellként rögzíti, a `02` ebből generálja az oszlopokat.
+
+> **⚠️ A 2026-11-24-i mérés TANULSÁGA (a `bud01` vevő normalizálása):**
+>
+> **A vevő `ais_message.mmsi` oszlopa NEM a `nmea` payloadból
+> számítható.** A mérés 300 pozíció- és 50 statikus üzeneten vizsgálta
+> → **egyetlen bit-pozíció és bit-orientáció sem adja vissza a
+> tárolt `mmsi`-t.**
+>
+> **A bizonyíték:**
+> - a `type` oszlop **3000/3000** egyezik → a payload sértetlen;
+> - a tárolt `mmsi` **egyetlen** variánsban sem egyezik;
+> - a **`type=8`** (SAI) üzeneteknél a **fizikai dekódolás pont a
+>   tárolt `mmsi`-t adja** (a 226 001 160) → **a dekódolásunk helyes**,
+>   a különbség a vevő **normalizálása**;
+> - a **MID egyezik** (a 243-as hajóknál a fizikai és a tárolt MMSI
+>   is 243-as), **csak a 6 számjegyű suffix tér el** → **a vevő a
+>   hajót azonosítja, nem a nyers MMSI-t adja tovább.**
+>
+> **A Class B (a `type=21`, FI 10) esetén** a mérésben **992-es
+> synthetic MMSI**-k vannak (a 992 436 091, a 992 438 237, …) →
+> **a Class B-nek nincs MMSI-je a payloadban** → **a vevő generál
+> egyet** → **ez a `04` §5 szerinti normalizálás egyik esete.**
+>
+> **KÖVETKEZMÉNYEK:**
+> 1. **a `duna` saját parserének a STANDARD AIS-t kell dekódolnia**
+>    (a fizikai vevő-formátum csak a `bud01` mérési adatának
+>    értelmezésére kell);
+> 2. **a mérési `mmsi` oszlop a NORMALIZÁLT azonosító** → **a
+>    mérési adatot nem szabad nyers payloadként kezelni**;
+> 3. **a normalizálás szabálya nyitott kérdés** (a `04` §11) → **a
+>    hajót a MID + a fizikai MMSI suffix alapján kell azonosítani.**
+>
+> **Az implementáció:** a `decode_physical_6bit` (a vevő formátuma,
+> decode-only) és a `decode_standard_6bit` (a szabvány) az
+> `apps/api/src/duna/ingest/decoder.py`-ban.
 
 ```python
 # apps/ingest/pydantic_models.py
@@ -1018,6 +1082,21 @@ vevőét.
 **A fixture-ök a mérés után jönnek** — a tesztek addig **szintetikus
 üzenetekkel** futnak (a nemzetközi specifikáció példái).
 
+> **A 2026-11-24-i mérés után a fixture-ök MEGVANNak** — **de a
+> `bud01` vevő FIZIKAI formátumban tárolja őket** (a §4.1) →
+> **a mérési fixture-ök a `decode_physical_6bit`-tel olvashatók**
+> (`physical=True`).
+>
+> **A GPSD/AIS referencia-példa** (`15M67FC000G?ufbE`FepT@3n00Sa`) a
+> **legismertebb szintetikus fixture** → **a fizikai dekódolás az
+> MMSI-jét hibátlanul adja: 366 053 209** → **a szintetikus
+> tesztek is a fizikai formát használják.**
+>
+> **A `duna` éles parserének viszont a STANDARD AIS-t kell
+> dekódolnia** (a `decode_standard_6bit`) → **a standard armor és a
+> fizikai forma közötti konverzió a `duna` feladata** (a `04` §5
+> szerinti normalizálás).
+
 ---
 
 ## 9. A teljesítmény
@@ -1107,6 +1186,7 @@ dekódolás → visszaalakítás az eredetit adja.
 | Q4 | A `draught_reference` a `vessel`-ben van (a statikus FI 10-ből) — a `position`-ben nincs | **így** — a `position` a pillanatnyi merülés, a hivatkozás a statikus adathoz tartozik | **lezárva** |
 | Q5 | A Msg 4 (bázisállomás) és a Msg 9/11 (SAR) kezelése | **a Msg 4/20/23 a NAVTEX/MSK-forrás** (a mérés) → a `data_quality_event`-be (`severity='info'`), **nem** a `position`-be; a Msg 9/11 (SAR) **eldobandó** | **lezárva** (§4.7.1) — **a korábbi „eldobandó" indoklás hamis volt** |
 | Q6 | A `pyais` használható-e **teszt-összehasonlításra** (a saját dekóder helyett)? | **igen** — a MIT licenc és a `pyais` a mezőneveket másképp adja, de a **számértékek** összehasonlíthatók → **a fixture-ök dekódolását a `pyais`-szal ellenőrizzük** | **lezárva** (a `preshaz` P-H-7 findingje) |
+| Q8 | **Mi a `bud01` vevő `mmsi` oszlopának a normalizálási szabálya?** (a 2026-11-24-i mérés: a tárolt `mmsi` **nem** a `nmea` payloadból számítható → a MID egyezik, a suffix nem; a Class B-nél synthetic 992-es) | **a hajót a MID + a fizikai MMSI suffix alapján azonosítjuk** — a pontos szabály a vevő forrásából kell → **a `duna` saját parserének NEM kell reprodukálnia** (a mi vevőnk a standard AIS-t adja) | **nyitva** (a `04` §5) |
 | Q7 | Melyik ** telephelyen** mérünk? | a bud01 a **városi** szakaszon (a Dunától 2,88 km) → a lefedettség itt mérhető, a **szűkvízi** forgalom nem → **a szűkvízi szakaszokon is kell mérni** (a F-CAT-08 szerinti 3 site) | **nyitva** (a `K-4` finding) — **Miklós döntése** |
 | Q8 | A `destination` (a célállomás) honnan jön? | **a szerkesztői felületről** (a `06` terv) — az AIS-ből nem (a mérés: 100%-ban üres) | **lezárva** (a `bori` B-C-2 findingje) |
 | Q9 | A `nav_status` a sémában `text` vagy `smallint`? | **`text`** (a 02-es sémában már az, és a UI-on olvashatóbb) | **lezárva** — **Miklós döntése** |

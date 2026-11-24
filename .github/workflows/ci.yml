@@ -110,6 +110,10 @@ jobs:
       # Az 5b. lepes: a domain 90%-os kuszobe (a 08 §8.1)
       - run: just test-domain
 
+      # Az 5c. lepes: az ingest 90%-os kuszobe (a 08 §8.1) — az AIS
+      # parser (a 04) a legbitebb kód
+      - run: just test-ingest
+
       # A 7. lepes: a DDL-validacio (a sajat PostgreSQL-en,
       # a funkcionalis fustteszttel)
       - run: just ddl-validate

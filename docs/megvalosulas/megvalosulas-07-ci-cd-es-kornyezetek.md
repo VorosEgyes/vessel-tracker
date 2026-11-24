@@ -167,6 +167,7 @@ szórva a workflow-ban).
 |---|---|---|
 | `just test-unit` | a unit (a `pytest tests/unit`) | ~30 s |
 | `just test-domain` | **a `domain/` 90%-os coverage-küszöbe** (a 08 §8.1: a kiemelt modulok szigorúbb határt kapnak, mint a teljes projekt 85%-a) — a `pytest --cov=duna.domain --cov-fail-under=90` | ~10 s |
+| `just test-ingest` | **az `ingest/` 90%-os coverage-küszöbe** (a 08 §8.1: az AIS parser, a 04) — a `pytest --cov=duna.ingest --cov-fail-under=90` | ~10 s |
 | `just test-property` | a property (a `hypothesis`) | ~20 s |
 | `just test-component` | a komponens (a `pytest tests/component`) | ~2 perc |
 | `just test-integration` | az integrációs (a `testcontainers` + a PostGIS) | ~3 perc |
@@ -182,7 +183,7 @@ stack-terv §11.3 és a `08` – teszt-stratégia-terv §6.1 szerint):
 ```make
 # a teljes minőségi kapu (a 01 §11.3 és a 08 §6.1 szerint)
 check: lint lint-frontend typecheck test-unit test-property test-component \
-       test-domain test-integration ddl-validate ddl-diff
+       test-domain test-ingest test-integration ddl-validate ddl-diff
 
 # a release teljes kapuja (a 08 §6.1 — hetente)
 check-release: check test-e2e test-perf test-regression
@@ -864,7 +865,8 @@ echo 'command="sudo -n /usr/local/bin/nas-receive-ais.sh",no-agent-forwarding,no
 | **3. az unit tesztek** | `just test-unit` | bármelyik bukás | **minden push** |
 | **4. a property tesztek** | `just test-property` | bármelyik bukás | **minden push** |
 | **5. a komponens tesztek** | `just test-component` | bármelyik bukás | **minden push** |
-| **5b. a domain 90%-os küszöbe** | `just test-domain` | **a coverage < 90%** (a 08 §8.1: a `domain/` és az `ingest/` szigorúbb határt kap, mint a teljes projekt 85%-a) | **minden push** |
+| **5b. a domain 90%-os küszöbe** | `just test-domain` | **a coverage < 90%** (a 08 §8.1: a `domain/` szigorúbb határt kap, mint a teljes projekt 85%-a) | **minden push** |
+| **5c. az ingest 90%-os küszöbe** | `just test-ingest` | **a coverage < 90%** (a 08 §8.1: az `ingest/` — az AIS parser, a 04 — a legbitebb kód) | **minden push** |
 | **6. az integrációs tesztek** | `just test-integration` | bármelyik bukás | **minden push** |
 | **7. a DDL-validáció** | `just ddl-validate` | bármelyik constraint-hiba | **minden push** |
 | **8. a migráció-visszafordíthatóság** | `pytest -k reversible` | bármelyik bukás | **minden push** |

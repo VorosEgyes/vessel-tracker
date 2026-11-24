@@ -164,6 +164,11 @@ test:
 test-domain:
     {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit --cov=duna.domain --cov-report=term-missing --cov-fail-under=90
 
+# az ingest réteg 90%-os küszöbe (a 08 §8.1) — az AIS parser
+# (a 04) a legbitebb kód -> a legmagasabb küszöb
+test-ingest:
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit {{TESTS}}/property --cov=duna.ingest --cov-report=term-missing --cov-fail-under=90
+
 # a migráció-visszafordíthatóság (a 07 §8.1 8. lépése)
 test-reversible:
     {{UV}} python scripts/ci/pytest_or_skip.py -k reversible
@@ -172,7 +177,7 @@ test-reversible:
 
 # a teljes minőségi kapu egy parancsban (a 01 §11.3 és a 08 §6.1)
 check: lint lint-frontend typecheck test-unit test-property test-component \
-       test-domain test-integration ddl-validate ddl-diff
+       test-domain test-ingest test-integration ddl-validate ddl-diff
 
 # a release teljes kapuja (a 08 §6.1 — hetente)
 check-release: check test-e2e test-perf test-regression
