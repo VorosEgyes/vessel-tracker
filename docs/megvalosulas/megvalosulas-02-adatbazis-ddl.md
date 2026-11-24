@@ -3071,6 +3071,7 @@ VALUES
     ('ERI_8500', 8500, 'liquid', false, 'duna'),
     ('ERI_8510', 8510, NULL, false, 'duna'),
     ('SOLAS_30', 30, 'fishing', true, 'duna'),
+    ('SOLAS_33', 33, 'service', true, 'duna'),
     ('SOLAS_31', 31, 'towing', true, 'duna'),
     ('SOLAS_35', 35, 'military', true, 'duna'),
     ('SOLAS_36', 36, 'passenger', true, 'duna'),
@@ -3089,8 +3090,11 @@ VALUES
     ('SOLAS_58', 58, 'passenger', true, 'duna'),
     ('SOLAS_60', 60, 'passenger', true, 'duna'),
     ('SOLAS_70', 70, 'general', true, 'duna'),
+    ('SOLAS_79', 79, 'general', true, 'duna'),
     ('SOLAS_80', 80, 'liquid', true, 'duna'),
-    ('SOLAS_90', 90, NULL, true, 'duna');
+    ('SOLAS_89', 89, 'liquid', true, 'duna'),
+    ('SOLAS_90', 90, NULL, true, 'duna'),
+    ('SOLAS_99', 99, NULL, true, 'duna');
 
 -- A magyar nevek (a `vessel_type_i18n`, a lang='hu')
 INSERT INTO vessel_type_i18n (vessel_type_code, lang, name, description)
@@ -3165,6 +3169,7 @@ VALUES
     ('ERI_8510', 'hu', 'tárgy, egyéb', NULL),
     ('SOLAS_30', 'hu', 'halászhajó', NULL),
     ('SOLAS_31', 'hu', 'halászhajó (túzhalog)', NULL),
+    ('SOLAS_33', 'hu', 'sócsaró', NULL),
     ('SOLAS_35', 'hu', 'katonai hajó', NULL),
     ('SOLAS_36', 'hu', 'sétáló', NULL),
     ('SOLAS_37', 'hu', 'kis vitorlázó', NULL),
@@ -3182,8 +3187,11 @@ VALUES
     ('SOLAS_58', 'hu', 'személyszállító hajó', NULL),
     ('SOLAS_60', 'hu', 'utasszállító hajó', NULL),
     ('SOLAS_70', 'hu', 'teherhajó', NULL),
+    ('SOLAS_79', 'hu', 'teherhajó (további információ nélkül)', NULL),
     ('SOLAS_80', 'hu', 'tankhajó', NULL),
-    ('SOLAS_90', 'hu', 'egyéb hajó', NULL);
+    ('SOLAS_89', 'hu', 'tanker (további információ nélkül)', NULL),
+    ('SOLAS_90', 'hu', 'egyéb hajó', NULL),
+    ('SOLAS_99', 'hu', 'egyéb hajó (további információ nélkül)', NULL);
 ```
 
 ```sql

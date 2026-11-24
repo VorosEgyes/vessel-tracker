@@ -218,16 +218,25 @@ if [ ! -f "$HOME/.ssh/ais_pull_key" ]; then
     warn "  command=\"sudo -n /usr/local/bin/nas-receive-ais.sh\" ... $(cat "$HOME/.ssh/ais_pull_key.pub" 2>/dev/null || echo '<a publikus kulcs>')"
 fi
 
-sudo tee /etc/cron.d/ais-fetch > /dev/null <<EOF
-# a nyers AIS-adat heti lehuzasa a meres idejere (Pi -> NAS direkt)
+# A HETI BIZTONSAGI LEHUZAS (a "miklos" CRONTABBA, NEM a /etc/cron.d-be!)
 #
-# A UTEM: **a boot UTAN** (nem egy fix oraban) — a Pi este kikapcsol
-# es reggel 8-kor indul -> a fix 04:17-es cron soha nem futna.
-# A cron a heti *biztonsagi* lehuzast adja (a service indulasa kozben
-# is mehet), a Fo lehuzas a systemd unit ExecStartPost-jaban van.
-17 4 * * 1 ${USER_NAME} DB_FILE=/var/lib/ais/ais.db /usr/local/bin/ais-fetch-weekly.sh
-EOF
-sudo chmod 644 /etc/cron.d/ais-fetch
+# A 2026-11-23-i teszt: a Debian cron a /etc/cron.d fajlokat a
+# "run-parts" szurovel olvassa -> a "miklos" userrel a /etc/cron.d-bol
+# NEM MUKODIK -> a heti lehuzas SOHA nem futott. A helyes hely a
+# felhasznalo sajat CRONTABJA (a crontab -l ezt mutatja).
+#
+# A cron csak BIZTONSAGI hatos: a Fo lehuzas a boot UTAN megy (a
+# systemd ExecStartPost) -> a Pi este ki, reggel 8-kor indul ->
+# a fix 04:17-es cron soha nem futna.
+( crontab -l 2>/dev/null | grep -v 'ais-fetch-weekly.sh' ; \
+  echo "17 4 * * 1 DB_FILE=/var/lib/ais/ais.db /usr/local/bin/ais-fetch-weekly.sh" \
+) | crontab -
+
+if crontab -l 2>/dev/null | grep -q 'ais-fetch-weekly.sh'; then
+    log "    a heti biztonsagi lehuzas a crontabba kerult"
+else
+    warn "    HIBA: a heti lehuzas nem kerult a crontabba!"
+fi
 
 # --- a boot UTANI lehuzas (a systemd ExecStartPost) ---
 # A Pi ejszaka ki van kapcsolva -> a fix oras cron nem mukodik.
@@ -237,16 +246,19 @@ sudo tee /usr/local/bin/ais-pull-after-boot.sh > /dev/null <<'BOOTEOF'
 #!/bin/bash
 # A heti lehuzas a service indulasa utan (a Pi ejszaka ki van kapcsolva).
 set -u
-# A log a sajat home-jaba megy — a "miklos" user nem tud irni a
-# /var/log-ba (a 2026-11-23-i teszt: a /var/log/ais-pull.log nem jott
-# letre, a sudo nelkul nem is irhato)
-LOG="${LOG:-$HOME/.ais-pull.log}"
+# A log a "miklos" SAJAT home-jaba megy — a "sudo -u miklos" NEM tartja
+# meg a HOME env-et (a /root-ra allitja) -> a "$HOME" itt a ROSSZ hely
+# lenne -> a log nem jott letre (a 2026-11-24-i teszt).
+MIKLOS_HOME="/home/miklos"
+LOG="${LOG:-$MIKLOS_HOME/.ais-pull.log}"
 DB_FILE="${DB_FILE:-/var/lib/ais/ais.db}"
 export DB_FILE
 
-# a service keszen all-e? (a vevonek mar be kell indulnia)
+# A DB fajl a /var/lib/ais alatt van (0750 ais:ais) -> a "miklos" user
+# NEM latja -> a "test -f" a sudo-val mukodik (a 2026-11-24-i teszt:
+# a sima "[ -f ]" mindig hamis volt -> a ciklus 12x10 masodpercet vart).
 for i in $(seq 1 12); do
-    if [ -f "$DB_FILE" ] && [ -s "$DB_FILE" ]; then break; fi
+    if sudo -n test -f "$DB_FILE" && sudo -n test -s "$DB_FILE"; then break; fi
     sleep 10
 done
 
@@ -257,6 +269,23 @@ done
 } >> "$LOG" 2>&1
 BOOTEOF
 sudo chmod 755 /usr/local/bin/ais-pull-after-boot.sh
+
+# --- a sudoers-szabaly (kell a boot utani lehuzashoz!) ---
+# A systemd unit "User=ais"-szal indul -> az ExecStartPost az "ais"
+# userrel fut -> a "sudo -n -u miklos" kell -> a sudoers szabaly
+# NELKUL a boot utani lehuzas csendben elbukik (a 2026-11-24-i teszt:
+# az ExecStartPost status=1/FAILURE lett).
+sudo tee /etc/sudoers.d/ais-pull > /dev/null <<'SUDOEOF'
+# A heti AIS-lehuzas a service indulasa utan (a 09 — uzemeteles terv).
+# A script a "miklos" kulcsaval megy a NAS-ra (a sajat home-jaban van).
+ais ALL=(miklos) NOPASSWD: /usr/local/bin/ais-pull-after-boot.sh
+SUDOEOF
+sudo chmod 440 /etc/sudoers.d/ais-pull
+if sudo -n visudo -c -f /etc/sudoers.d/ais-pull > /dev/null 2>&1; then
+    log "    a sudoers-szabaly telepitve (/etc/sudoers.d/ais-pull)"
+else
+    warn "    HIBA: a sudoers-szabaly telepitese nem sikerult!"
+fi
 
 # ---------------------------------------------------------------------
 sudo systemctl enable ais-receiver
@@ -281,4 +310,6 @@ echo "  sudo sqlite3 ${DB_FILE} 'SELECT count(*) FROM ais_message;'"
 echo "  sudo journalctl -u ais-receiver -f"
 echo
 echo "A 30 NAPOS MERES ELINDULT: $(date '+%Y-%m-%d %H:%M')"
-echo "A heti lemezhuzas: minden hetfon 04:17-kor -> ${NAS_TARGET}:${NAS_PATH}"
+echo "A lemezhuzas: a BOOT UTAN (a systemd ExecStartPost) -> ${NAS_TARGET}:${NAS_PATH}"
+echo "  a heti biztonsagi lehuzas: a crontabban, hetfon 04:17-kor"
+echo "  a log: /home/${USER_NAME}/.ais-pull.log"

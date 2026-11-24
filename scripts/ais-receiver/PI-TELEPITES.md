@@ -181,13 +181,15 @@ sudo bash ~/ais-scripts/start_measurement.sh
 | `install_ais_receiver.sh` | az `rtl-sdr` telepítése, a driver blacklista, az AIS-catcher build, a systemd unit |
 | `start_measurement.sh` | a mérési üzemmód (a helyi SQLite + a heti lehúzás) |
 | `ais-fetch-weekly.sh` | a heti lehúzás a NAS-ra (a Pi-ről, direkt SSH-vel) |
-| `ais-fetch.cron` | a cron-vonal (hétfő 04:17) |
-| `nas_receive_ais.sh` | **a NAS oldalon** — ez fogadja a lehúzást (`/usr/local/bin/nas-receive-ais.sh`) |
+| `ais-fetch.cron` | a cron-vonal (hétfő 04:17) — **a `miklos` crontabjába** kerül, **nem** a `/etc/cron.d`-be (az a Debian cron nem olvassa a userrel) |
+| `ais-pull-after-boot.sh` | a lehúzás a service indulása után (a systemd `ExecStartPost`) — **a fő útvonal**, mert a Pi éjszaka ki |
+| `nas_receive_ais.sh` | **a NAS oldalon** — ez fogadja a lehúzást (`/usr/local/bin/nas-receive-ais.sh`), törli a régebb fájlokat, elutasítja az üres adatot |
 | `report_range.py` | a vevő valódi helyzetéből számolt hatótávolság és hajólista |
 | `report_signals.sh` | a fogott jelek statisztikája (üzenettípus, csatorna, PPM) |
-| `report_vessels2.sh` | a látott hajók, a Duna kilométerjelölések és a FI 10 üzenetek |
+| `report_vessels.sh` | a látott hajók, a Duna kilométerjelölések és a FI 10 üzenetek (a `shiptype` CASE lista a `make_type_case.py`-tól jön) |
 | `analyze_measurement.py` | a go/no-go metrikák |
 | `inspect_schema.py` | a SQLite séma felismerése |
+| `make_type_case.py` | a `shiptype` CASE lista generálása a `02` – DDL-terv seedjéből (a `--check` a CI-ban) |
 
 ---
 

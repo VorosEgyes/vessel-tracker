@@ -9,12 +9,11 @@
 # A "/volume1/docker/hermes/data" a hermes kontener "/opt/data"
 # bind mountja — a fajl a martin mappajaban lesz elerheto.
 #
-# --- A 2026-11-23-i valtozas: a Pi NYILVANOS KULCSA is kiir ---
-# A cel: a NAS-on levo kulcs (hermes_nas_ed25519) a Pi-ra keruljon,
-# hogy a NAS-rol (a hermes userrel) be lehessen lepni a Pi-ra.
-# A Pi kulcsa mar a Pi-n van (a ~/.ssh/ais_pull_key) — a Pi a
-# standard inputon kuldi a DB-t, a stdout pedig a fogado uzenete.
-# A stdout-on a kulcs is mehet, a Pi cronja pedig feldolgozza.
+# ---
+# A 2026-11-24-i valtozasok:
+#   1. a 35 naposnal regebbi fajlok torlese + az azonos napon csak a
+#      legutolbi fajl marad (a boot utani napi lehuzas miatt)
+#   2. az ures stdin elutasitasa (a 0 bajtos fajl nem mentodik el)
 # =====================================================================
 set -u
 

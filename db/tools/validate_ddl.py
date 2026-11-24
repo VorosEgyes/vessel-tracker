@@ -8,9 +8,12 @@ a konténerben nem elérhető PostGIS/pg_trgm nélkül, ezért egy
 constraint-logika ettől még változatlanul fut.
 
 Használat:
-    .venv312/bin/python validate_ddl.py [--no-gis] [--keep]
+    uv run python db/tools/validate_ddl.py [--no-gis] [--keep]
 
-Kimenet: a létrejött táblák, indexek, constraint-ek száma + a hibák.
+Kimenet: a létrejött táblák, indexek, constraint-ek száma + a funkcionális
+füstteszt (a CHECK, a trigger, az upsert, a szerepkörök) + a hibák.
+
+A füstteszt MINDIG fut (a `--keep` csak a séma megtartása).
 """
 import argparse
 import os
@@ -31,8 +34,49 @@ HERE = pathlib.Path(__file__).parent
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_PLAN = _REPO_ROOT / "docs" / "megvalosulas" / "megvalosulas-02-adatbazis-ddl.md"
 PLAN = DEFAULT_PLAN
+
+# A PGDATA a script melle (a .gitignore kizárja) → a repo szennyezetlen marad
 PGDATA = HERE / "pgdata"
-PSQL = HERE / ".venv312/lib/python3.12/site-packages/pgserver/pginstall/bin/psql"
+
+
+# a psql binary — a main() allitja be (a find_psql() kereses)
+PSQL: pathlib.Path | None = None
+
+
+def find_psql() -> pathlib.Path | None:
+    """A psql binary megkeresese.
+
+    **A 2026-11-24-i javítás:** a hardcoded
+    `.venv312/lib/python3.12/site-packages/pgserver/...` utvonal **a
+    kesztyeben mukodott, de a CI-ban (a `07` §8.1: `just ddl-validate`)
+    NEM** → a pipeline elbukott volna. A kereses sorrendje:
+      1. a `PGPGBIN` env (a standard PostgreSQL elhelyezes)
+      2. a `PATH` on (a rendszer PostgreSQL)
+      3. a venv `pgserver` csomagja (a kesztyeben)
+      4. a repo alatti `db/tools/.venv*` (a kesztyeben)
+    """
+    candidates: list[pathlib.Path] = []
+
+    pgbin = os.environ.get("PGPGBIN")
+    if pgbin:
+        candidates.append(pathlib.Path(pgbin) / "psql")
+
+    which = shutil.which("psql")
+    if which:
+        candidates.append(pathlib.Path(which))
+
+    # a pgserver a venv-ben (a script kozvetlen kornyezete)
+    for site in HERE.parent.glob(".venv*/lib/python*/site-packages/pgserver/pginstall/bin/psql"):
+        candidates.append(site)
+
+    # a pgserver a rendszer-pythonban
+    for site in pathlib.Path(sys.prefix).glob("lib/python*/site-packages/pgserver/pginstall/bin/psql"):
+        candidates.append(site)
+
+    for c in candidates:
+        if c.exists() and os.access(c, os.X_OK):
+            return c
+    return None
 
 
 def extract_ddl(md_text: str) -> str:
@@ -147,7 +191,7 @@ def main() -> int:
     ap.add_argument("--no-gis", action="store_true",
                     help="a geometria/GiST/trgm reszeket text-re csereli")
     ap.add_argument("--keep", action="store_true",
-                    help="nem dobja el a schema utan")
+                    help="nem dobja el a schema utan (a debughoz)")
     ap.add_argument("--plan", type=pathlib.Path, default=None,
                     help="a validalt terv fajlja (a default a live)")
     args = ap.parse_args()
@@ -155,9 +199,16 @@ def main() -> int:
     if args.plan:
         PLAN = args.plan
 
-    if not PSQL.exists():
-        print(f"HIBA: a psql binary nem talalhato: {PSQL}")
+    global PSQL
+    psql_bin = find_psql()
+    if psql_bin is None:
+        print("HIBA: a psql binary nem talalhato.")
+        print("  A kereses sorrendje: a $PGPGBIN, a PATH, a pgserver a venv-ben.")
+        print("  A CI-ban (a 07 §8.1) a PostgreSQL image a postgres user")
+        print("  psql-jat adja -> a $PGPGBIN vagy a PATH megfelelő.")
         return 2
+    PSQL = psql_bin
+    print(f"--- a psql: {PSQL}")
     print(f"--- a validalt terv: {PLAN} ---")
     if not PLAN.exists():
         print(f"HIBA: a terv nem talalhato: {PLAN}")
@@ -190,6 +241,15 @@ def main() -> int:
         import pgserver
         srv = pgserver.get_server(str(PGDATA))
         print(f"--- a postgres elindult: {PGDATA} ---")
+    except ModuleNotFoundError as exc:
+        # **A 2026-11-24-i javítás:** a pgserver a venv-ben van
+        # (a `uv sync` utan) → a scriptet A SAJAT interpreterevel
+        # kell futtatni (a CI-ban: `uv run python db/tools/validate_ddl.py`).
+        print(f"HIBA: a '{exc.name}' modul nem talalhato.")
+        print(f"  a futtato python: {sys.executable}")
+        print("  A pgserver a virtualis kornyezetben van -> a scriptet")
+        print("  ugyond futtasd:  uv run python db/tools/validate_ddl.py")
+        return 1
     except Exception as exc:  # pragma: no cover
         print("HIBA: a postgres inditasa nem sikerult:", exc)
         return 1
@@ -223,9 +283,15 @@ def main() -> int:
         out = psql(sql=q)
         print(f"  {label}: {out.stdout.strip() or out.stderr.strip()[:100]}")
 
-    if args.keep:
-        smoke_test()
-    else:
+    # A funkcionalis fust MINDIG fut (a 2026-11-24-i javítás):
+    # korabban a "--keep" kapcsolotol fuggott, pedig a "--keep" csak
+    # a schema MEGTARTASA (a debughoz) -> a CI-ben (a 07 §8.1:
+    # "just ddl-validate") a fustteszt egyaltalan nem futott volna
+    # -> a constraint-logika (a CHECK, a trigger, az upsert) ellen
+    # szoritetlen maradt volna.
+    smoke_test()
+
+    if not args.keep:
         psql(sql=reset)
         print("  (a schema eldobva)")
     return 0
