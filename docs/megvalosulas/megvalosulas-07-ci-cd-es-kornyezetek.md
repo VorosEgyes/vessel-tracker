@@ -133,9 +133,20 @@ STALE_RECEIVER_INTERVAL=10 days
 pont** — **a CI is ezt használja** (nem a `docker compose` parancsokat
 szórva a workflow-ban).
 
+> **A `justfile` a repo gyökerében van** (a `01` §4.2) — **a `07` §4.2
+> CI-jében a `just` NINCS előre telepítve** a GitHub Actions-en →
+> **a `extractions/setup-just@v1` action kell** (a 2026-11-24-i
+> felfedezés).
+>
+> **A `pyproject.toml` a `01` §4.2 szerint a repo gyökerében van** →
+> **ebből megy a `uv sync`** → **a dev-függőségek (`--extra dev`)
+> tartalmazzák a `pgserver`-t** → **a `db/tools/validate_ddl.py` a
+> venv-ből indul** → **a `find_psql()` megtalálja a `psql`-t** →
+> **a `just ddl-validate` a CI-ban is működik**.
+
 | A parancs | Mit csinál |
 |---|---|
-| `just setup` | a `.venv` + a `node_modules` létrehozása (`uv sync` + `pnpm install`) |
+| `just setup` | a `.venv` + a `node_modules` létrehozása (`uv sync --extra dev` + `pnpm install`) — **a dev-eszközök is kellnek** (a pytest, a ruff, a mypy, **a `pgserver`** → a `just ddl-validate` a venv-ből indul) |
 | `just dev` | a compose `up` a build nélkül + a hot-reload |
 | `just up` | a teljes compose (a DB migrációval) |
 | `just down` | a compose leállítása (a volume-okkal) |
@@ -145,6 +156,9 @@ szórva a workflow-ban).
 | `just test` | a `pytest` (a unit + az integrációs) **a coverage flaggel** |
 | `just test-api` | az API-tesztek (a `testcontainers` DB-vel) |
 | `just test-frontend` | a `pnpm test` (a Vitest) |
+| `just lint-frontend` | a frontend lint (az eslint + a prettier) |
+| `just build-frontend` | a frontend statikus build (a `05` §1) |
+| `just check-type-case` | a hajótípus-név lista ellenőrzése: a `report_vessels.sh` CASE listája egyezik a `02` seedjével (a `make_type_case.py --check`) |
 
 **A szintenkénti teszt-célok (a `prof` reviewer H-9 findingje — a
 `08` – teszt-stratégia-terv §2.1 hét szintet különböztet meg):**
@@ -304,6 +318,11 @@ jobs:
         with: {version: "0.5"}
       - uses: actions/setup-node@v4
         with: {node-version: "22", cache: pnpm}
+      # **A `just` NINCS elore telepitve a GitHub Actions-en** (a 2026-11-24-i
+      # felfedezes) -> a kanonikus parancsokat nem lehet futtatni ->
+      # **a workflow-nak telepitenie kell** (a `extractions/setup-just` action
+      # vagy a `cargo install`).
+      - uses: extractions/setup-just@v1
       - run: pnpm install --frozen-lockfile
       - run: just lint
       - run: just typecheck
@@ -326,7 +345,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with: {version: "0.5"}
-      - run: uv sync --frozen
+      - uses: extractions/setup-just@v1
+      - run: uv sync --frozen --extra dev
+      # **A hajotipus-nev lista ellenorzese (a 2026-11-24):** a
+      # `report_vessels.sh` CASE listaja a 02-es DDL-terv seedjebol
+      # generalodik -> **a CI ellenorizze, hogy a riport es a DB
+      # egyezzen** (a `make_type_case.py --check`).
+      - run: just check-type-case
       - run: just db-migrate
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/duna_test
@@ -662,6 +687,7 @@ echo 'command="sudo -n /usr/local/bin/nas-receive-ais.sh",no-agent-forwarding,no
 | **9. az image build** | `docker build` | bármelyik hiba | **minden push** |
 | **10. a frontend build** | `pnpm build` | bármelyik hiba | **minden push** |
 | **10b. a séma-drift ellenőrzése** | `just ddl-diff` | **bármelyik eltérés** | **minden push** |
+| **10c. a hajótípus-lista ellenőrzése** | `just check-type-case` | **a riport és a seed eltérése** | **minden push** |
 | **11. az e2e tesztek** | `just test-e2e` | bármelyik bukás | **hetente** |
 | **12. a teljesítményteszt** | `just test-perf` | a p95 > 800 ms (a F-NF-01) | **hetente** |
 | **13. az adat-regresszió** | `just test-regression` | bármelyik eltérés | **hetente** |
