@@ -47,6 +47,11 @@ jobs:
       # A `just` NINCS elore telepitve a GitHub Actions-en -> a
       # kanonikus parancsokhoz telepiteni kell (a 07 §4.2)
       - uses: extractions/setup-just@v1
+      # **A venv ELKELL a lint jobnak is** -> a `just lint` a
+      # `uv run ruff`-et hívja -> a `ruff` a dev-fuggosegek kozott van
+      # -> **a `uv sync` KELL** (a 2026-11-24-i CI-futas hiba:
+      # "error: Failed to spawn: `ruff`")
+      - run: uv sync --frozen --extra dev
       # A pnpm-lock.yaml meg nincs a repoban (a frontend resze) ->
       # a `--frozen-lockfile` a CI-ban elbukna -> a `just` recept
       # maga ellenorzi (a 07 §3.1)

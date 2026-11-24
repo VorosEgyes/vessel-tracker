@@ -227,37 +227,50 @@ test:
 
 **A `postgres` custom image** (a `01` – stack-terv §3.2 szerint):
 ```dockerfile
-FROM postgis/postgis:16-3.4
-# a pg_cron extension a stock PostGIS image-ben NINCS (a 01 H-11)
-# a postgresql-contrib a pg_stat_statements-hoz kell (a 09 §4.1
-# latencia-metrika) — a 02 §13.2 a custom image-ben kéri
+# **A BASE IMAGE: `postgis/postgis:16-3.7`** (a 2026-11-24-i javítás)
 #
-# **A PGDG REPO KELL** (a 2026-11-24-i javítás): a `postgresql-16-cron`
-# **a Debian stable repójában NINCS benne** → az `apt-get update` a
-# postgis image-ben 404-et dobott → **a build elbukott**. A PGDG
-# repót (apt.postgresql.org) explicit módon hozzá kell adni:
+# **A korábbi `16-3.4` Debian `bullseye` (11) alapú volt** → a PGDG
+# repóban **NINCS `bullseye-pgdg`** (a PGDG megszüntette a Debian 11
+# támogatását) → az `apt-get update` **404 Not Found** hibával elbukott
+# ("E: The repository 'http://apt.postgresql.org/pub/repos/apt
+# bullseye-pgdg Release' does not have a Release file").
+#
+# **A `16-3.7` a `postgres:16-trixie` (Debian 13) alapú** → a PGDG
+# `trixie-pgdg` repója létezik, **ÉS a base image már beállítja**
+# (a `/usr/local/share/keyrings/postgres.gpg.asc` kulcs + a
+# `/etc/apt/sources.list.d/pgdg.list` forrás) → **a PGDG repo
+# beállítása NEM kell külön lépésként.**
+FROM postgis/postgis:16-3.7
+
+# A `postgresql-16-cron` (a 02 §12) — **a PGDG repoban van**
+# (a 1.6.8-1.pgdg13+3) -> a base image PGDG-forrasa miatt nincs
+# szukseg kulon repo-beallitasra.
+#
+# **A `postgresql-contrib` NEM KELL és NEM LÉTEZIK a PGDG-ben**:
+# a PostgreSQL 10+ ota a contrib modulok (a `pg_stat_statements`,
+# a 09 §4.1 latencia-metrikahoz) a **fő `postgresql-16` csomagban**
+# vannak -> a base image (a `postgres:16-trixie`) MAR tartalmazza oket.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends curl ca-certificates gnupg; \
-    install -d /usr/share/postgresql-common/pgdg; \
-    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-      https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
-    . /etc/os-release; \
-    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
-https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
-      > /etc/apt/sources.list.d/pgdg.list; \
-    apt-get update; \
     apt-get install -y --no-install-recommends \
-      postgresql-16-cron postgresql-contrib; \
+      postgresql-16-cron; \
     rm -rf /var/lib/apt/lists/*
 # a shared_preload_libraries a postgresql.conf-ban:
 #   shared_preload_libraries = 'pg_cron,pg_stat_statements'
 ```
 
-> **A `07` §3.2 eredeti, `apt-get install postgresql-16-cron` előírása
-> hibás volt** (a 2026-11-24-i CI-futas igazolta): a csomag a PGDG
-> repóban van, **nem** a Debian stable-ban. A javított Dockerfile a
-> repóban: `infra/docker/postgres/Dockerfile`.
+> **A `07` §3.2 eredeti előírása HIBÁS volt** (a 2026-11-24-i
+> CI-futas igazolta, három hibával):
+> 1. **a `postgis/postgis:16-3.4` Debian bullseye alapú** → a PGDG
+>    repóban nincs `bullseye-pgdg` → **a 404**;
+> 2. **a `postgresql-contrib` nem létező csomagnév a PGDG-ben** (a
+>    Debian bullseye meta-csomagja volt) → a contrib modulok a fő
+>    `postgresql-16` csomagban vannak → **a base image már tartalmazza
+>    őket**;
+> 3. **a PGDG repo beállítása nem kell külön lépésként**, ha a base
+>    image trixie (a `postgres:16-trixie` beállítja).
+>
+> A javított Dockerfile a repóban: `infra/docker/postgres/Dockerfile`.
 
 > **A `pg_cron` a custom imageben kell** — a stock PostGIS image-ben
 > **nincs** → a `cron.schedule(...)` hívások `schema "cron" does not
@@ -392,6 +405,26 @@ volt, miközben a tesztek egyáltalán nem futottak.**
 **Az igazolt viselkedés (a kesztyeben):** a valódi teszthiba →
 **exit 1** (a CI bukik); a sikeres teszt → exit 0; a nem létező
 útvonal → exit 0 (kihagyva).
+
+#### A harmadik CI-futás (2026-11-24, a `cce17c6811` commit után)
+
+**A `test` job ismét SIKERES** → **két új hiba maradt:**
+
+| A hiba | A tünet | A javítás |
+|---|---|---|
+| **a `ruff` nem telepítve** | a `lint` job: `error: Failed to spawn: 'ruff'` → **a `lint` jobban NEM volt `uv sync`** (csak a `setup-uv`) → a `ruff` a dev-függőségek között van → a venv kell | a **`uv sync --frozen --extra dev`** a `lint` jobba is |
+| **a postgres image build** | `E: The repository 'http://apt.postgresql.org/pub/repos/apt bullseye-pgdg Release' does not have a Release file` → **a `16-3.4` Debian bullseye alapú, és a PGDG-ben NINCS `bullseye-pgdg`** (a PGDG megszüntette a Debian 11 támogatását) | a **base image `postgis/postgis:16-3.7`** (a `postgres:16-trixie` alapú) → a PGDG `trixie-pgdg` repója létezik **ÉS a base image már beállítja** |
+
+> **A `postgresql-contrib` NEM LÉTEZIK a PGDG-ben** (a Debian
+> bullseye meta-csomagja volt) → a PostgreSQL 10+ óta a contrib
+> modulok (a `pg_stat_statements`) a **fő `postgresql-16` csomagban**
+> vannak → **a base image már tartalmazza őket** → **a
+> `postgresql-contrib` csomagnevet ki kell venni** (különben az
+> `apt-get install` elbukna).
+
+**A `pnpm`-hiba javítása működött** (a `pnpm/action-setup` lefutott,
+a `cache: pnpm` kivétele megoldotta) → **a `lint` job a `ruff`
+telepítése után a lintig jutott.**
 
 ### 4.2 A `ci.yml` — a minőségi kapu
 
