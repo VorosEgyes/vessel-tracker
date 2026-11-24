@@ -356,7 +356,7 @@ jön).
 | `operator` | integer (a `operator.id`) | F-CAT-08, F-CAT-11 | `7` |
 | `status` | `active` \| `excluded` \| `inactive` \| `scrapped` | F-CAT-08 | `active` |
 | `moving` | boolean — a **számított** mozgás (lásd a blokquote-ot) | F-CAT-04 | `true` |
-| `verification` | `ais_identified` \| `ais_partial` \| `operator_claimed` \| `name_only` — a **TÁROLT** érték (a `vessel.verification_level`) | F-CAT-14 | `ais_identified` |
+| `verification` | `ais_identified` \| `ais_partial` \| `operator_claimed` \| `name_only` \| `unverified` — a **TÁROLT** érték (a `vessel.verification_level`) | F-CAT-14 | `ais_identified` |
 | `section` | integer (a `river_section.id`) | F-CAT-08 | `3` |
 | `basin` | integer (a `basin.id`) | F-CAT-08 | `1` |
 | `home_section` | integer (a `river_section.id`) — a hajó **Hazai szakasz**-a | F-CAT-08 | `3` |
@@ -1095,7 +1095,11 @@ class VesselDetail(BaseModel):
     mmsi: int | None
     eni: str | None
     verification_level: str = Field(
-        description="a bizonyossagi badge — a SZAMITOTT ertek")
+        description=(
+            "a bizonyossagi badge — a SZAMITOTT ertek "
+            "(ais_identified|ais_partial|operator_claimed|name_only|unverified; "
+            "a 02 §6.2 vessel_verification nezet szamitja, a 05 §8.2 a badge)"
+        ))
     verification_source: Literal["computed", "stored_stale"] = Field(
         default="computed",
         description="a badge forrasa; a 'stored_stale' az elterest jelzi")

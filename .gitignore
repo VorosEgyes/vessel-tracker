@@ -28,3 +28,11 @@ pgdata/
 
 # Log
 *.log
+
+# A pytest es a coverage artefaktumai
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.hypothesis/

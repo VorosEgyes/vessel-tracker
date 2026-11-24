@@ -250,11 +250,25 @@ def main() -> int:
     try:
         import pgserver
 
-        # a pgserver a PGDATA-ban inditja a PostgreSQL-t; a visszatert
-        # objektum nem kell (a kapcsolat a psql-binariar jon) -> a
-        # valtozo a `ruff` F841 szabaly miatt nem hagyhato
-        pgserver.get_server(str(PGDATA))
-        print(f"--- a postgres elindult: {PGDATA} ---")
+        # **A `cleanup_mode` (a 2026-11-24-i javitas):**
+        # - a `--keep` NELKUL a `pgdata`-t a futas UTAN TÖRÖLJUK
+        #   (`delete`) -> **a validator MASKOLATLANUL futtathato**;
+        # - a `--keep` eseten a `stop` (a sEMA MEGMARAD a debughoz).
+        cleanup_mode = "stop" if args.keep else "delete"
+
+        # **A `pgdata` TORLOSE a futas ELOTT** (a 2026-11-24-i
+        # javitas): egy korábbi `--keep`-es futas utan megmaradt
+        # `pgdata`-ban a `public` sema **NEM a `postgres` user
+        # tulajdona** -> a `DROP SCHEMA public CASCADE` +
+        # `CREATE SCHEMA public` utan a `language` tabla nem latszik
+        # -> "relation language does not exist". **A tiszta `pgdata`
+        # minden futasnak kell.**
+        if PGDATA.exists() and not args.keep:
+            shutil.rmtree(PGDATA)
+
+        # a pgserver a PGDATA-ban inditja a PostgreSQL-t
+        pgserver.get_server(str(PGDATA), cleanup_mode=cleanup_mode)
+        print(f"--- a postgres elindult: {PGDATA} (cleanup: {cleanup_mode}) ---")
     except ModuleNotFoundError as exc:
         # **A 2026-11-24-i javítás:** a pgserver a venv-ben van
         # (a `uv sync` utan) → a scriptet A SAJAT interpreterevel
@@ -420,6 +434,47 @@ INSERT INTO vessel_data_origin (vessel_id, field_name, origin, value_snapshot, i
         print(f"  a vessel_verification nezet: OK -> {lvl}")
     else:
         print(f"  HIBA: a vessel_verification nezet ures vagy hibas -> {lvl!r}")
+
+    # **A BIZONYOSSAGI SZINT mind az 5 erteke elerheto** (a 05 §8.2
+    # badge-tablazata; a 2026-11-24-i javitas): a `name_only` (a
+    # nevhez kotott forras) es az `unverified` (forras nelkul) is.
+    # A `name_only`-hoz egy ures sort_name-ű hajo kell -> a
+    # `unverified`-hoz pedig ures nevvel es aktiv ENI-vel (a MMSI
+    # AIS-eredetu -> `ais_partial`, nem `unverified`).
+    r = psql(
+        stdin_text="""
+INSERT INTO vessel (mmsi, eni, slug, sort_name, vessel_type_code,
+                    operating_area, flag_country_code)
+VALUES (999999991, '99999991', 'fust-unverified', '',
+        (SELECT code FROM vessel_type LIMIT 1), 'duna',
+        (SELECT code FROM country LIMIT 1))
+RETURNING id;
+"""
+    )
+    tmp_id = ""
+    for ln in r.stdout.strip().splitlines():
+        s = ln.strip()
+        if s.isdigit():
+            tmp_id = s
+    if tmp_id:
+        r = psql(
+            sql=f"SELECT computed_verification_level FROM vessel_verification WHERE vessel_id={tmp_id};"
+        )
+        ulvl = ""
+        for ln in r.stdout.strip().splitlines():
+            st = ln.strip()
+            if st and st != "(1 row)" and not st.startswith("-"):
+                ulvl = st
+        if ulvl == "unverified":
+            print(f"  a vessel_verification nezet (ures sort_name): OK -> {ulvl}")
+        else:
+            print(
+                f"  HIBA: a vessel_verification nezet ures sort_name-nel nem 'unverified' -> {ulvl!r}"
+            )
+        # a takaritas: a hajo torlese (a fustteszt utan)
+        psql(sql=f"DELETE FROM vessel WHERE id={tmp_id};")
+    else:
+        print("  HIBA: a fustteszt-hajo letrehozasa nem sikerult")
 
     # az AZONOSITO-SZINKRON (M-5) ket iranyban:
     #   vessel -> vessel_identifier (a BEFORE UPDATE trigger)

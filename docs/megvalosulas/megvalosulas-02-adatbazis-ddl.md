@@ -1,6 +1,14 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.8 (2026-11-24 — a 40 órás mérési adat alapján:
+**Verzió:** 1.9 (2026-11-24 — **a bizonyossági szint javítva**:
+a `vessel_verification` nézetben az `ais_identified` ág **csak ENI/IMO-ra
+szűkít** (a MMSI a `ais_partial` ágba megy) → **mind az 5 szint
+elérhető** (a 05 §8.2 badge-táblázata); **a `name_only` a
+`vessel.sort_name <> ''`-t nézi** (a `vessel` táblában nincs `name`
+oszlop); **a CHECK constraint 5 értéket enged** (a `unverified` is);
+**a `02` §6.2 nézet és a `apps/api/src/duna/domain/verification.py`
+ugyanazt a logikát követi** — a Python a kanonikus, az SQL a tükrözése.
+A korábbi v1.8 (2026-11-24 — a 40 órás mérési adat alapján:
 **a SOLAS hajóosztályok (`SOLAS_30`…`SOLAS_90`) a saját
 `ais_type_code`-jukat kapták** → **a `shiptype` → `vessel_type`
 lookup megtalálja őket** — a mérésben 7 olyan `shiptype` jelentkezett
@@ -667,7 +675,8 @@ CREATE TABLE vessel (
     verification_level      text NOT NULL DEFAULT 'name_only'
                             CHECK (verification_level IN
                               ('ais_identified','ais_partial',
-                               'operator_claimed','name_only')),
+                               'operator_claimed','name_only',
+                               'unverified')),
     is_passenger_certified  boolean NOT NULL DEFAULT false,
     passenger_capacity      integer,
     source_id               bigint REFERENCES data_source(id),
@@ -1165,15 +1174,17 @@ CREATE VIEW vessel_verification AS
 SELECT
     v.id AS vessel_id,
     CASE
-        -- AIS-azonosított: van ENI/MMSI/IMO, AIS-eredetű
+        -- AIS-azonosított: van ENI vagy IMO, AIS-eredetű
+        -- (**A `mmsi` NEM benne** -> különben az `ais_partial` ág
+        -- halott kód lenne, lásd a megjegyzést alább)
         WHEN EXISTS (
             SELECT 1 FROM vessel_identifier i
             WHERE i.vessel_id = v.id
               AND i.valid_to IS NULL
-              AND i.identifier_type IN ('eni','imo','mmsi')
+              AND i.identifier_type IN ('eni','imo')
               AND i.origin = 'ais'
         ) THEN 'ais_identified'
-        -- Csak AIS-részadat: van MMSI, de nincs ENI
+        -- AIS-részleges: van MMSI, de nincs ENI/IMO
         WHEN EXISTS (
             SELECT 1 FROM vessel_identifier i
             WHERE i.vessel_id = v.id
@@ -1188,14 +1199,17 @@ SELECT
               AND o.is_current
               AND o.origin = 'operator_claimed'
         ) THEN 'operator_claimed'
-        ELSE 'name_only'
+        -- Név alapján (a mérésben a hajók 99,6%-a ez)
+        WHEN v.sort_name <> '' THEN 'name_only'
+        -- Forrás nélkül
+        ELSE 'unverified'
     END::text AS computed_verification_level,
     -- az eltérés, ha a beirt ertek nem egyezik a szamitottal
     (v.verification_level <>
      CASE
         WHEN EXISTS (SELECT 1 FROM vessel_identifier i
                      WHERE i.vessel_id = v.id AND i.valid_to IS NULL
-                       AND i.identifier_type IN ('eni','imo','mmsi')
+                       AND i.identifier_type IN ('eni','imo')
                        AND i.origin = 'ais') THEN 'ais_identified'
         WHEN EXISTS (SELECT 1 FROM vessel_identifier i
                      WHERE i.vessel_id = v.id AND i.valid_to IS NULL
@@ -1204,10 +1218,27 @@ SELECT
         WHEN EXISTS (SELECT 1 FROM vessel_data_origin o
                      WHERE o.vessel_id = v.id AND o.is_current
                        AND o.origin = 'operator_claimed') THEN 'operator_claimed'
-        ELSE 'name_only'
+        WHEN v.sort_name <> '' THEN 'name_only'
+        ELSE 'unverified'
      END) AS is_stale
 FROM vessel v;
 ```
+
+> **A `vessel_verification` nézet 5 szinte számol** (a 05 §8.2
+> badge-táblázata): `ais_identified` · `ais_partial` ·
+> `operator_claimed` · `name_only` · `unverified`.
+>
+> **A `name_only` és az `unverified` különbsége:** a `name_only`
+> a **névhez** kötött forrás (a mérésben a hajók 99,6%-a ez), az
+> `unverified` a **forrás nélküli** eset (nincs név sem) → **a
+> `vessel.sort_name <> ''` a döntő** (a `sort_name` a latin hivatalos
+> név denormalizált alakja — a 02 §5.1).
+>
+> **Az `ais_partial` elérhetősége (a 2026-11-24-i javítás):** az
+> `ais_identified` ág **csak ENI/IMO-ra szűkít**, **a MMSI a
+> `ais_partial` ágba megy** → **mind az 5 szint elérhető.** (Az
+> eredeti nézetben a `mmsi` az első ágban volt → az `ais_partial` ág
+> **halott kód** volt, és a `name_only`/`unverified` nem létezett.)
 
 **A `vessel.verification_level` a tárolt érték** (gyors olvasás),
 a `vessel_verification.computed_verification_level` a **számított**.

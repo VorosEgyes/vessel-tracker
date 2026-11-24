@@ -1,6 +1,13 @@
 # Implementációs terv – 08: teszt-stratégia
 
-**Verzió:** 0.1 (terv-draft, swarm review előtt)
+**Verzió:** 0.3 (2026-11-24 — **a mérhető rész élesedett**: az
+`apps/api/src/duna/domain/verification.py` + a 20 unit teszt → **a
+`just test-unit` zöld**, a `just test-domain` → **100% coverage** a
+`domain/`-en (a 90%-os küszöbön), a `just test` → 98% (a 85%-os
+küszöbön); **a `just ddl-validate` → a 22 füstteszt-pont zöld**; **a
+`just check` (a teljes minőségi kapu) → EXIT 0**. A §2.1a a jelenlegi
+állapotot mutatja. A korábbi v0.1 (terv-draft, swarm review előtt) a
+törzse.)
 **Dátum:** 2026-11-23
 **Kapcsolódó dokumentumok:**
 [`../README.md`](../README.md) (adatbázis-terv) ·
@@ -79,6 +86,35 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 > kilépési feltétel** (a §6.1).
 > **A `just check-release`** = a `check` + az e2e + a teljesítmény + a
 > regresszió.
+
+
+### 2.1a A jelenlegi állapot (2026-11-24) — a mérhető rész
+
+**A `~400` unit teszt egy TERVEZETI becslés — a valós állapot:**
+
+| A szint | A terv becslése | **A valós (2026-11-24)** | A megjegyzés |
+|---|---|---|---|
+| **unit** | ~400 | **20** | a `duna/domain/verification.py` (a bizonyossági szint) → **a `domain/` réteg 100%-os coverage** |
+| property | ~40 | **0** | a `hypothesis` a dev-függőségek között van, de **még nincs property teszt** |
+| komponens | ~80 | **0** | a service-ek még nincsenek |
+| integrációs | ~60 | **0** | az API még nincs |
+| e2e | ~25 | **0** | a frontend még nincs |
+| teljesítmény | ~6 | **0** | a `locust` a dev-függőségek között van |
+| regresszió | 1 | **0** | a mérési adat megvan, a replay még nincs |
+
+**A mérhető rész működik:**
+- a `just test-unit` → **20 teszt, zöld**;
+- a `just test-domain` → **100% coverage** a `domain/`-en (a 90%-os
+  küszöbön — a `08` §8.1);
+- a `just test` → **98%** (a 85%-os küszöbön);
+- a `just ddl-validate` → **a 22 füstteszt-pont zöld** (a `02` §12);
+- a **`just check` → EXIT 0** (a teljes minőségi kapu).
+
+> **A `~400` unit teszt a teljes R1-re vonatkozik** (a `domain/`,
+> az `ingest/`, az `api/`, a `repositories/`, a `services/` együtt) →
+> **a 20 a kezdet.** A sorrend: a `domain/` (a legtisztább, a
+> legjobban tesztelhető) → az `ingest/` (a mérési adattal) → az
+> `api/` (a `testcontainers`-szel).
 
 ### 2.2 A piramis aránya
 

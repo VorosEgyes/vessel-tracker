@@ -465,7 +465,8 @@ CREATE TABLE vessel (
     verification_level      text NOT NULL DEFAULT 'name_only'
                             CHECK (verification_level IN
                               ('ais_identified','ais_partial',
-                               'operator_claimed','name_only')),
+                               'operator_claimed','name_only',
+                               'unverified')),
     is_passenger_certified  boolean NOT NULL DEFAULT false,
     passenger_capacity      integer,
     source_id               bigint REFERENCES data_source(id),
@@ -870,15 +871,17 @@ CREATE VIEW vessel_verification AS
 SELECT
     v.id AS vessel_id,
     CASE
-        -- AIS-azonosított: van ENI/MMSI/IMO, AIS-eredetű
+        -- AIS-azonosított: van ENI vagy IMO, AIS-eredetű
+        -- (**A `mmsi` NEM benne** -> különben az `ais_partial` ág
+        -- halott kód lenne, lásd a megjegyzést alább)
         WHEN EXISTS (
             SELECT 1 FROM vessel_identifier i
             WHERE i.vessel_id = v.id
               AND i.valid_to IS NULL
-              AND i.identifier_type IN ('eni','imo','mmsi')
+              AND i.identifier_type IN ('eni','imo')
               AND i.origin = 'ais'
         ) THEN 'ais_identified'
-        -- Csak AIS-részadat: van MMSI, de nincs ENI
+        -- AIS-részleges: van MMSI, de nincs ENI/IMO
         WHEN EXISTS (
             SELECT 1 FROM vessel_identifier i
             WHERE i.vessel_id = v.id
@@ -893,14 +896,17 @@ SELECT
               AND o.is_current
               AND o.origin = 'operator_claimed'
         ) THEN 'operator_claimed'
-        ELSE 'name_only'
+        -- Név alapján (a mérésben a hajók 99,6%-a ez)
+        WHEN v.sort_name <> '' THEN 'name_only'
+        -- Forrás nélkül
+        ELSE 'unverified'
     END::text AS computed_verification_level,
     -- az eltérés, ha a beirt ertek nem egyezik a szamitottal
     (v.verification_level <>
      CASE
         WHEN EXISTS (SELECT 1 FROM vessel_identifier i
                      WHERE i.vessel_id = v.id AND i.valid_to IS NULL
-                       AND i.identifier_type IN ('eni','imo','mmsi')
+                       AND i.identifier_type IN ('eni','imo')
                        AND i.origin = 'ais') THEN 'ais_identified'
         WHEN EXISTS (SELECT 1 FROM vessel_identifier i
                      WHERE i.vessel_id = v.id AND i.valid_to IS NULL
@@ -909,7 +915,8 @@ SELECT
         WHEN EXISTS (SELECT 1 FROM vessel_data_origin o
                      WHERE o.vessel_id = v.id AND o.is_current
                        AND o.origin = 'operator_claimed') THEN 'operator_claimed'
-        ELSE 'name_only'
+        WHEN v.sort_name <> '' THEN 'name_only'
+        ELSE 'unverified'
      END) AS is_stale
 FROM vessel v;
 ;

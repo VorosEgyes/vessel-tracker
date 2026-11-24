@@ -77,11 +77,15 @@ ddl-diff:
     # a driftet ellenorzi, a `git diff --exit-code` a CI-ban a kapu.
     # A `pg_dump` a *rendeli* DB-vel mukodo masolat lenne (a CI-ban
     # nincs migrate-elt DB) -> a terv a kanonikus forras.
+    # **A `--check` a kapu**: a generalt fajl == a tervbol szarmazo DDL
+    # -> a drift (a terv valtozott, de a fajl nem) elbukik.
     {{UV}} python db/tools/gen_ddl.py --check
-    # a `git diff --exit-code` a CI-ban a kapu (a fajlnek a commitban
-    # kell lennie); a helyi, nem-git masolatban a `--check` marad a
-    # vizsgalat
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git diff --exit-code {{DDL_REF}}; else echo "nem git-repo -> a git diff kihagyva (a --check mar az ellenorzes)"; fi
+    # **A `git diff --exit-code` a CI-BAN, KULON LEPESKENT fut** (a
+    # `ci.yml`-ben) -> ott a munkafa == a commit -> a fajlnek a
+    # commitban kell lennie. **LOKALISAN nem futtatjuk**: a munkafaban
+    # a friss generalt fajl mindig elter a commitolt verziotol ->
+    # a `git diff` minden `just check`-et elbukna, pedig nincs drift.
+    @echo "a sema-drift ellenorzes kesz (a --check); a CI-ban a git diff --exit-code is fut"
 
 # a `db/ddl/` ujrageneralasa (a 02 §11) — **a terv modositasakor KOTELEZO**
 ddl-generate:
@@ -154,6 +158,12 @@ test:
     # elnyelodik -> a 3 (belső hiba) ES az 1 (teszthiba) atmegy
     {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit {{TESTS}}/property {{TESTS}}/component --cov=duna --cov-report=term-missing --cov-fail-under={{COVERAGE_MIN}}
 
+# a domain réteg 90%-os küszöbe (a 08 §8.1) — a kiemelt modulok
+# (a domain/ es az ingest/) szigorubb hatart kapnak, mint a teljes
+# projekt (85%)
+test-domain:
+    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit --cov=duna.domain --cov-report=term-missing --cov-fail-under=90
+
 # a migráció-visszafordíthatóság (a 07 §8.1 8. lépése)
 test-reversible:
     {{UV}} python scripts/ci/pytest_or_skip.py -k reversible
@@ -162,7 +172,7 @@ test-reversible:
 
 # a teljes minőségi kapu egy parancsban (a 01 §11.3 és a 08 §6.1)
 check: lint lint-frontend typecheck test-unit test-property test-component \
-       test-integration ddl-validate ddl-diff
+       test-domain test-integration ddl-validate ddl-diff
 
 # a release teljes kapuja (a 08 §6.1 — hetente)
 check-release: check test-e2e test-perf test-regression

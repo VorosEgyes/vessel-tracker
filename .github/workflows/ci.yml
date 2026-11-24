@@ -107,12 +107,21 @@ jobs:
       # A 3–6. lepes: a 4 gyors tesztszint (a coverage flaggel)
       - run: just test
 
+      # Az 5b. lepes: a domain 90%-os kuszobe (a 08 §8.1)
+      - run: just test-domain
+
       # A 7. lepes: a DDL-validacio (a sajat PostgreSQL-en,
       # a funkcionalis fustteszttel)
       - run: just ddl-validate
 
       # A 10b. lepes: a schema-drift ellenorzese (a 02 §11)
+      # **A `just ddl-diff` a `--check`-et futtatja** (a generalt fajl
+      # == a tervbol szarmazo DDL) -> **a `git diff --exit-code` itt,
+      # kulon lepesként**: a munkafa == a commit -> a fajlnek a
+      # commitban kell lennie, kulonben a CI elbukik.
       - run: just ddl-diff
+      - name: a generalt sema egyezik a commitottal
+        run: git diff --exit-code db/ddl/schema-v1.1.sql
 
   # ==================================================================
   # 9–10. az image build es a frontend build (a 07 §8.1)
