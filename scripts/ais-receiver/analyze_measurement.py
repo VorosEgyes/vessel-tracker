@@ -15,21 +15,22 @@ Használat:
     python3 analyze_measurement.py ais.db
     python3 analyze_measurement.py ais.db --json > measurement.json
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import math
+import re
 import sqlite3
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # --- a szűrőszabályok (a 01-es terv §5.5 és az ais-vevo-terv 4.2) ---
-MAX_SOG_KNOTS = 12.0          # a Duna legnagyobb hajói is lassabbak
-STATIC_DAYS = 5               # 5+ napig ugyanott álló hajó
-INLAND_MIN_KM = 1500.0        # a Duna folyó-km sávja (Sulina = 0)
+MAX_SOG_KNOTS = 12.0  # a Duna legnagyobb hajói is lassabbak
+STATIC_DAYS = 5  # 5+ napig ugyanott álló hajó
+INLAND_MIN_KM = 1500.0  # a Duna folyó-km sávja (Sulina = 0)
 INLAND_MAX_KM = 1900.0
 CORRIDOR_HALF_WIDTH_KM = 3.0  # a folyó-korridor félszélessége
 
@@ -42,9 +43,9 @@ def _rows(db: sqlite3.Connection, sql: str, args=()) -> list[tuple]:
 
 
 def _tables(db: sqlite3.Connection) -> set[str]:
-    return {r[0] for r in db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-
+    return {
+        r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
 
 
 # =====================================================================
@@ -84,12 +85,14 @@ CORRIDOR_HALF_WIDTH_KM = 1.5
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
-    R = 6371.0088
+    # a fold atmerete (km) — a `ruff` N806 szerint a fuggvenybeli
+    # valtozonak kisbetusnek kell lennie
+    r_fold = 6371.0088
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dp = math.radians(lat2 - lat1)
     dl = math.radians(lon2 - lon1)
     x = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(min(1.0, x)))
+    return 2 * r_fold * math.asin(math.sqrt(min(1.0, x)))
 
 
 def _in_duna_corridor(lat, lon):
@@ -118,7 +121,7 @@ def analyze(path: str) -> dict:
     result: dict = {
         "file": path,
         "tables": sorted(tables),
-        "analyzed_at": datetime.now(timezone.utc).isoformat(),
+        "analyzed_at": datetime.now(UTC).isoformat(),
     }
 
     if not tables:
@@ -136,8 +139,7 @@ def analyze(path: str) -> dict:
     # --- a period ---
     if "ais_message" in tables:
         cols = {r[1] for r in db.execute("PRAGMA table_info(ais_message)")}
-        ts_col = next((c for c in ("rxtime", "rx_time", "timestamp", "ts")
-                       if c in cols), None)
+        ts_col = next((c for c in ("rxtime", "rx_time", "timestamp", "ts") if c in cols), None)
         if ts_col:
             rng = _rows(db, f"SELECT min({ts_col}), max({ts_col}) FROM ais_message")
             if rng and rng[0][0]:
@@ -151,8 +153,10 @@ def analyze(path: str) -> dict:
         # A v0.71-es semaban az oszlop neve "type" (nem "msg_type").
         type_col = next((c for c in ("type", "msg_type") if c in cols), None)
         if type_col:
-            for t, n in _rows(db, f"SELECT {type_col}, count(*) FROM ais_message "
-                                  f"GROUP BY {type_col} ORDER BY 2 DESC"):
+            for t, n in _rows(
+                db,
+                f"SELECT {type_col}, count(*) FROM ais_message GROUP BY {type_col} ORDER BY 2 DESC",
+            ):
                 type_counts[str(t)] = n
     # a nyers NMEA-ből a tipus kinyerése (ha van ais_nmea tabla)
     if "ais_message" in tables:
@@ -177,18 +181,19 @@ def analyze(path: str) -> dict:
     if "ais_message" in tables:
         cols = {r[1] for r in db.execute("PRAGMA table_info(ais_message)")}
         if "status" in cols:
-            errors = _rows(db, "SELECT count(*) FROM ais_message "
-                               "WHERE status IS NOT NULL AND status != 0")[0][0]
+            errors = _rows(
+                db, "SELECT count(*) FROM ais_message WHERE status IS NOT NULL AND status != 0"
+            )[0][0]
         elif "error" in cols:
-            errors = _rows(db, "SELECT count(*) FROM ais_message "
-                               "WHERE error IS NOT NULL AND error != 0")[0][0]
+            errors = _rows(
+                db, "SELECT count(*) FROM ais_message WHERE error IS NOT NULL AND error != 0"
+            )[0][0]
     result["error_messages"] = errors
     # Ha a semaban nincs status/error oszlop, a hibaarany nem
     # merheto a DB-ből (a v0.71 csak a sikeres dekódolásokat tárolja)
     error_measurable = "status" in cols or "error" in cols if "ais_message" in tables else False
     result["error_measurable"] = error_measurable
-    result["error_ratio"] = (round(errors / total, 6)
-                              if total and error_measurable else None)
+    result["error_ratio"] = round(errors / total, 6) if total and error_measurable else None
 
     # --- 4. a statikus adatok ---
     vessels = 0
@@ -199,21 +204,23 @@ def analyze(path: str) -> dict:
         cols = {r[1] for r in db.execute("PRAGMA table_info(ais_state)")}
         vessels = _rows(db, "SELECT count(*) FROM ais_state")[0][0]
         if "imo" in cols:
-            with_eni = _rows(db, "SELECT count(*) FROM ais_state "
-                                 "WHERE imo IS NOT NULL AND imo != 0")[0][0]
+            with_eni = _rows(
+                db, "SELECT count(*) FROM ais_state WHERE imo IS NOT NULL AND imo != 0"
+            )[0][0]
         # A nev es a meretek oszlopnevai a v0.71-ben
         for name_col in ("name", "shipname", "vessel_name"):
             if name_col in cols:
-                with_name = _rows(db, f"SELECT count(*) FROM ais_state "
-                                     f"WHERE {name_col} IS NOT NULL "
-                                     f"AND {name_col} != ''")[0][0]
+                with_name = _rows(
+                    db,
+                    f"SELECT count(*) FROM ais_state "
+                    f"WHERE {name_col} IS NOT NULL "
+                    f"AND {name_col} != ''",
+                )[0][0]
                 break
-        dim_cols = [c for c in ("length", "beam", "draught", "shiptype")
-                    if c in cols]
+        dim_cols = [c for c in ("length", "beam", "draught", "shiptype") if c in cols]
         if dim_cols:
             cond = " OR ".join(f"{c} IS NOT NULL AND {c} != 0" for c in dim_cols)
-            with_dims = _rows(db, f"SELECT count(*) FROM ais_state "
-                                 f"WHERE {cond}")[0][0]
+            with_dims = _rows(db, f"SELECT count(*) FROM ais_state WHERE {cond}")[0][0]
 
     result["vessels"] = vessels
     result["vessels_with_imo"] = with_eni
@@ -237,22 +244,20 @@ def analyze(path: str) -> dict:
         # (a river_km) — azt a SAJAT parserunk (a 04-es terv)
         # ki a nyers NMEA-bol. A korridor-ellenorzes ezert a
         # 30 napos meres UTAN, a sajat parserrel tortenik.
-        km_col = next((c for c in ("river_km", "fairway_distance")
-                       if c in cols), None)
-        lat_col = next((c for c in ("lat", "latitude") if c in cols), None)
-        lon_col = next((c for c in ("lon", "longitude") if c in cols), None)
+        km_col = next((c for c in ("river_km", "fairway_distance") if c in cols), None)
         if km_col:
-            with_km = _rows(db, f"SELECT count(*) FROM ais_position "
-                                f"WHERE {km_col} IS NOT NULL")[0][0]
+            with_km = _rows(db, f"SELECT count(*) FROM ais_position WHERE {km_col} IS NOT NULL")[0][
+                0
+            ]
             in_corridor = _rows(
-                db, f"SELECT count(*) FROM ais_position "
-                   f"WHERE {km_col} BETWEEN ? AND ?",
-                (INLAND_MIN_KM, INLAND_MAX_KM))[0][0]
+                db,
+                f"SELECT count(*) FROM ais_position WHERE {km_col} BETWEEN ? AND ?",
+                (INLAND_MIN_KM, INLAND_MAX_KM),
+            )[0][0]
     result["positions"] = positions
     result["positions_with_river_km"] = with_km
     result["positions_in_corridor"] = in_corridor
-    result["corridor_ratio"] = (round(in_corridor / with_km, 4)
-                                if with_km else None)
+    result["corridor_ratio"] = round(in_corridor / with_km, 4) if with_km else None
 
     # --- 5b. a FOLDRAJZI lefedettség ---
     #
@@ -268,15 +273,16 @@ def analyze(path: str) -> dict:
         if plat and plon:
             geo_total = 0
             geo_in = 0
-            for lat, lon in _rows(db, f"SELECT {plat}, {plon} FROM ais_position "
-                                      f"WHERE {plat} IS NOT NULL AND {plat} != 0"):
+            for lat, lon in _rows(
+                db,
+                f"SELECT {plat}, {plon} FROM ais_position WHERE {plat} IS NOT NULL AND {plat} != 0",
+            ):
                 geo_total += 1
                 if _in_duna_corridor(lat, lon):
                     geo_in += 1
             result["positions_geo_total"] = geo_total
             result["positions_in_duna_corridor"] = geo_in
-            result["geo_corridor_ratio"] = (round(geo_in / geo_total, 4)
-                                            if geo_total else None)
+            result["geo_corridor_ratio"] = round(geo_in / geo_total, 4) if geo_total else None
 
     # --- 6. a ghost hajok ---
     # A v0.71-es semaban az `ais_position` a `msg_id`-vel hivatkozik
@@ -289,15 +295,16 @@ def analyze(path: str) -> dict:
         speed_col = next((c for c in ("speed", "sog") if c in pcols), None)
         if speed_col:
             r = _rows(
-                db, "SELECT count(DISTINCT m.mmsi) FROM ais_position p "
-                   "JOIN ais_message m ON m.id = p.msg_id "
-                   f"WHERE p.{speed_col} > ?", (MAX_SOG_KNOTS,))
+                db,
+                "SELECT count(DISTINCT m.mmsi) FROM ais_position p "
+                "JOIN ais_message m ON m.id = p.msg_id "
+                f"WHERE p.{speed_col} > ?",
+                (MAX_SOG_KNOTS,),
+            )
             ghost_candidates = r[0][0] if r else 0
             # az "allandoan allo" hajok: a legutolso poziciojuk
             # speedje 0 es a gyakorisaguk magas
-            r2 = _rows(
-                db, "SELECT count(*) FROM ais_state "
-                   "WHERE speed IS NOT NULL AND speed < 0.5")
+            r2 = _rows(db, "SELECT count(*) FROM ais_state WHERE speed IS NOT NULL AND speed < 0.5")
             still_count = r2[0][0] if r2 else 0
     result["ghost_candidates_over_speed"] = ghost_candidates
     result["vessels_standing_still"] = still_count
@@ -310,8 +317,7 @@ def analyze(path: str) -> dict:
         # A belvozi FI 10 a 6-os es a 8-as uzenettipus (200-as DAC).
         type_col = next((c for c in ("type", "msg_type") if c in cols), None)
         if type_col:
-            inland = _rows(db, f"SELECT count(*) FROM ais_message "
-                               f"WHERE {type_col} IN (6,8)")[0][0]
+            inland = _rows(db, f"SELECT count(*) FROM ais_message WHERE {type_col} IN (6,8)")[0][0]
     result["inland_fi10_messages"] = inland
 
     db.close()
@@ -326,8 +332,10 @@ def verdict(r: dict) -> list[str]:
 
     err_ratio = r.get("error_ratio")
     if err_ratio is None and not r.get("error_measurable", True):
-        out.append("a hibás üzenetek aránya: nem mérhető a DB-ből "
-                   "(a v0.71 csak a sikeresen dekódolt üzeneteket tárolja)")
+        out.append(
+            "a hibás üzenetek aránya: nem mérhető a DB-ből "
+            "(a v0.71 csak a sikeresen dekódolt üzeneteket tárolja)"
+        )
     elif err_ratio is not None:
         ok = err_ratio < 0.001
         # MEGJEGYZES: a v0.71-es AIS-catcher CSAK a sikeresen
@@ -336,8 +344,9 @@ def verdict(r: dict) -> list[str]:
         # meg — ha nincs status/error oszlop, a "mert" resz 0.0%,
         # ami hamis optimizmus lenne. Ilyenkor a resz helyett a
         # "nem merhető" a helyes.
-        out.append(f"a hibás üzenetek aránya: {err_ratio:.4%} "
-                   f"({'OK' if ok else 'NEM OK'} — a határ 0,1%)")
+        out.append(
+            f"a hibás üzenetek aránya: {err_ratio:.4%} ({'OK' if ok else 'NEM OK'} — a határ 0,1%)"
+        )
 
     cov = r.get("static_coverage") or {}
     ratio_imo = cov.get("ratio_imo")
@@ -356,8 +365,10 @@ def verdict(r: dict) -> list[str]:
         out.append(f"a Duna-korridorban lévő pozíciók (földrajzi): {geo:.1%}")
 
     inland = r.get("inland_fi10_messages") or 0
-    out.append(f"a belvízi FI 10 üzenetek: {inland:,} "
-               f"({'OK — az ENI-k elérhetők' if inland > 0 else 'HIBA — nincs ENI!'})")
+    out.append(
+        f"a belvízi FI 10 üzenetek: {inland:,} "
+        f"({'OK — az ENI-k elérhetők' if inland > 0 else 'HIBA — nincs ENI!'})"
+    )
 
     vessels = r.get("vessels") or 0
     out.append(f"a látott hajók: {vessels:,}")
@@ -367,8 +378,7 @@ def verdict(r: dict) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("db", help="a lehúzott SQLite fájl")
-    ap.add_argument("--json", action="store_true",
-                    help="a kimenet JSON (a gépi feldolgozáshoz)")
+    ap.add_argument("--json", action="store_true", help="a kimenet JSON (a gépi feldolgozáshoz)")
     args = ap.parse_args()
 
     r = analyze(args.db)
@@ -390,8 +400,7 @@ def main() -> int:
     print()
     if r.get("message_types"):
         print("  az üzenettípusok:")
-        for t, n in sorted(r["message_types"].items(),
-                           key=lambda kv: -kv[1])[:12]:
+        for t, n in sorted(r["message_types"].items(), key=lambda kv: -kv[1])[:12]:
             print(f"      {t:>4}: {n:>8,}")
     print()
     print("A részletes elemzés: a --json kapcsolóval")

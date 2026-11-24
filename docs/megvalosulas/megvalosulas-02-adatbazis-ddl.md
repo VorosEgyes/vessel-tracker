@@ -2519,15 +2519,37 @@ láncot **felfelé** futtatja, majd **lefelé** is, és a két séma
 ## 11. A generált `db/ddl/`
 
 ```bash
-# a séma kiírása az aktuális DB-ből
-alembic upgrade head
-pg_dump --schema-only --no-owner --no-privileges \
-    "$DATABASE_URL" > db/ddl/schema-v1.1.sql
+# **a séma kiírása a DDL-tervből** (a kanonikus forrás)
+just ddl-generate     # -> db/ddl/schema-v1.1.sql
+
+# a drift ellenőrzése (a CI-ban ez a kapu)
+just ddl-diff         # a --check + a git diff --exit-code
 ```
 
-**A CI diff-ellenőrzés** (a 01-es terv §4.3 szerint): a CI-ben a
-`db/ddl/schema-v1.1.sql`-t újragenerálja és `git diff --exit-code`-tel
-ellenőrzi — ha eltérés van, a build elbukik.
+**Miért a tervből, nem a `pg_dump`-ból:** a `pg_dump` a **rendelt
+DB-ből** írja ki a sémát → **a CI-ban nincs migrate-elt DB** (a
+pipeline a `strip_cron`/`strip_gis` preprocesszorokkal dolgozik, és a
+`pg_cron` a custom image-ben van) → a `pg_dump` a CI-ban nem
+futtatható, és a `strip_gis` miatt a geometriás oszlopok típusa is
+eltérne.
+
+**A kanonikus forrás a `02` – DDL-terv SQL-blokkjaival** →
+a `db/tools/gen_ddl.py` ugyanazt a blokk-kivonást használja, mint a
+`db/tools/validate_ddl.py` (`extract_ddl`) → **a validált sémia és a
+verziózott `db/ddl/` garantáltan ugyanaz** → **a `just ddl-diff` valódi
+séma-drift-ellenőrzés** (a terv változik → a generált fájl is
+változik → a `git diff --exit-code` elbukik).
+
+**A `just ddl-generate` kötelező a terv módosításakor** — különben
+a `git diff --exit-code` elbukik a CI-ban.
+
+> **A `02` §11 korábbi, `pg_dump`-os előírása (2026-11-24):**
+> a megvalósítás során kiderült, hogy a `pg_dump`-os forma a
+> CI-ban nem futtatható (nincs migrate-elt DB, a `pg_cron` a custom
+> image-ben van, a `strip_gis` megváltoztatná a geometriás
+> oszlopokat) → **a generátor a tervből** (a 2026-11-24-i javítás).
+> A `pg_dump` a **rendelt** környezetben használható a sémák
+> összevetésére (a `09` §4.1 monitoringhoz).
 
 ---
 

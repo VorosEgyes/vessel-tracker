@@ -438,7 +438,11 @@ teendő."
 ├── db/                          ← Alembic migrációk + seed
 │   ├── migrations/versions/
 │   ├── seeds/                   ← referenciaadat seed (kikötők, zsilip, típusok)
-│   └── ddl/                     ← a teljes DDL referencia (olvasható, nem a migráció forrása)
+│   ├── ddl/                     ← a teljes DDL referencia (olvasható, nem a migráció forrása)
+│   │   └── schema-v1.1.sql      ← GENERÁLT a 02-es tervből (a `just ddl-generate`)
+│   └── tools/                   ← a DDL-validátor és a generátor
+│       ├── validate_ddl.py      ← a 02-es terv futtatása egy élő PostgreSQL-en
+│       └── gen_ddl.py           ← a db/ddl/ generálása a tervből (a `just ddl-generate`)
 ├── apps/
 │   ├── api/                     ← FastAPI alkalmazás
 │   │   ├── Dockerfile

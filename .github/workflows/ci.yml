@@ -25,13 +25,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-        with: {version: "0.5"}
+        with:
+          version: "0.5"
+          # A Python 3.12 (a pyproject.toml: requires-python >=3.12;
+          # a pgserver is csak cp312 wheel)
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with: {node-version: "22", cache: pnpm}
+      # **A `pnpm`-t a `setup-node` NEM telepiti** -> kell a
+      # `pnpm/action-setup` (a 2026-11-24-i CI-futas hiba: "Unable to
+      # locate executable file: pnpm")
+      - uses: pnpm/action-setup@v4
+        with: {version: 10}
       # A `just` NINCS elore telepitve a GitHub Actions-en -> a
       # kanonikus parancsokhoz telepiteni kell (a 07 §4.2)
       - uses: extractions/setup-just@v1
-      - run: pnpm install --frozen-lockfile
+      # A pnpm-lock.yaml meg nincs a repoban (a frontend resze) ->
+      # a `--frozen-lockfile` a CI-ban elbukna -> a `just` recept
+      # maga ellenorzi (a 07 §3.1)
+      - run: if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else echo "a frontend meg nincs a repoban -> a pnpm install kihagyva"; fi
       - run: just lint
       - run: just lint-frontend
       - run: just typecheck
@@ -49,7 +61,7 @@ jobs:
           POSTGRES_DB: duna_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -58,9 +70,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-        with: {version: "0.5"}
+        with:
+          version: "0.5"
+          # **A Python 3.12 KELL**: a `pgserver` 0.1.4 csak `cp312`
+          # wheel-t ad (a GitHub runner default 3.14-es -> a
+          # `uv sync` elbukik: "can't be installed because it doesn't
+          # have a source distribution or wheel for the current
+          # platform")
+          python-version: "3.12"
       - uses: extractions/setup-just@v1
-      # A `--extra dev` kell: a pgserver (a DDL-validacio), a pytest,
+      # A `--extra dev` kell: a pgserver (a DDL-validacio), the pytest,
       # a ruff, a mypy -> a `just ddl-validate` a venv-bol indul
       - run: uv sync --frozen --extra dev
 
@@ -92,11 +111,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/api/Dockerfile
-          push: false
-          tags: duna-api:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # **A Dockerfile-ok meg nem lteznek a repoban** (az `apps/api/`,
+      # az `apps/web/`) -> a lepes a `just build` felteteles
+      # viselkedeset koveti (a 07 §3.1)
+      - name: a build (a Docker image-ek)
+        run: |
+          if [ -f apps/api/Dockerfile ]; then
+            docker build -f apps/api/Dockerfile -t duna-api:ci .
+          else
+            echo "az API Dockerfile meg nincs a repoban -> a build kihagyva"
+          fi
+      - name: a PostgreSQL custom image build
+        run: docker build -f infra/docker/postgres/Dockerfile -t duna-postgres:ci .

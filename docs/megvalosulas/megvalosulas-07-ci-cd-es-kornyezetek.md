@@ -311,6 +311,36 @@ fájlok a `nginx`ben, **a szerveroldali szigetek** az
 > release branch a `main`-ből indul, és **csak bugfix megy rá** → a
 > deploy **nem** minden pushra megy.
 
+### 4.1a A CI első futása (2026-11-24) — a feltárt hibák
+
+**A négy workflow a repóba került, és a GitHub Actions-en lefutott →
+3 valódi hiba → mind javítva (a `main` HEAD-en):**
+
+| A hiba | A tünet | A javítás |
+|---|---|---|
+| **a `pnpm` hiányzik** | a `lint` job: `Unable to locate executable file: pnpm` | a **`pnpm/action-setup@v4`** action (a `actions/setup-node@v4` **nem** telepíti a `pnpm`-t) |
+| **a `pgserver` nem telepíthető** | a `test` job: `Distribution pgserver==0.1.4 … doesn't have a source distribution or wheel for the current platform` → `You're using CPython 3.14 (cp314), but pgserver only has wheels with cp312` | a **`python-version: "3.12"`** a `setup-uv`-ban (a GitHub runner defaultja 3.14) |
+| **a GHCR tag nagybetűs** | a `Build`: `invalid tag "ghcr.io/VorosEgyes/…": repository name must be lowercase` | a **`IMAGE_PREFIX: vorosegyes`** (a GHCR a repó nevét kisbetűsíti; a `github.repository_owner` nagybetűs) |
+
+**Két további probléma (nem a workflowban, hanem a repóban):**
+
+| A probléma | A hatás | A javítás |
+|---|---|---|
+| **a repóban nincs alkalmazáskód** (`apps/api/`, `apps/web/`, `alembic.ini`, a Dockerfile-ok) | a `just db-migrate`, a `just test`, a `just build` mind elbukna → **a CI a 3. lépésen túl** | **a `justfile` receptjei feltételesek** (`if [ -f … ]`) → **a hiányzó rész kihagyódik, nem bukik el** (a 07 §3.1 elve) |
+| **a `db/ddl/schema-v1.1.sql` nem létezett** | a `just ddl-diff` (a 10b. lépés) nem tudta volna ellenőrizni a séma-driftet | **az új `db/tools/gen_ddl.py`** → a `db/ddl/` a **tervből** generálódik → a `--check` a driftet ellenőrzi |
+
+> **A `db/ddl/` generálása a tervből, nem a `pg_dump`-ból:**
+> a `02` §11 a `pg_dump`-ot írja elő, **de a CI-ban nincs
+> migrate-elt DB** → a `pg_dump` a CI-ban nem futtatható. **A
+> kanonikus forrás a `02` – DDL-terv SQL-blokkjaival** →
+> a `db/tools/gen_ddl.py` ugyanazt a blokk-kivonást használja, mint
+> a `db/tools/validate_ddl.py` → **a validált sémia és a verziózott
+> `db/ddl/` garantáltan ugyanaz** → **a `just ddl-diff` valódi
+> séma-drift-ellenőrzés.**
+>
+> **A `just ddl-generate` kötelező a terv módosításakor** — különben
+> a `git diff --exit-code` elbukik a CI-ban.
+
 ### 4.2 A `ci.yml` — a minőségi kapu
 
 **A `01` – stack-terv §3.2 és a `02` – DDL-terv §12 alapján:**

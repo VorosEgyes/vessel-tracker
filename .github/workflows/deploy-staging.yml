@@ -41,7 +41,7 @@ jobs:
         with: {version: "0.5"}
       - uses: extractions/setup-just@v1
 
-      - run: pnpm install --frozen-lockfile
+      - run: if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else echo "a frontend meg nincs a repoban -> a pnpm install kihagyva"; fi
       - run: uv sync --frozen --extra dev
 
       # A deploy a VPS-re SSH-vel (a 07 §7.1: a DEPLOY_SSH_KEY secret)

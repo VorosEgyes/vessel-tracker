@@ -17,7 +17,12 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}
+  # **A GHCR a repo nevet KISBETUSEN koveteli** -> a
+  # `github.repository_owner` ("VorosEgyes") ervénytelen ->
+  # "invalid tag: repository name must be lowercase".
+  # A GHCR a GitHub repó nevét automatikusan kisbetusitja -> ez a
+  # `vorosegyes` (a 07 §7.1: a registry a GitHub Container Registry).
+  IMAGE_PREFIX: vorosegyes
 
 jobs:
   # ==================================================================
@@ -37,13 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: a build context elokeszitese
-        run: |
-          mkdir -p infra/docker/postgres
-          cp -r infra/docker/postgres/. /tmp/ctx 2>/dev/null || true
       - uses: docker/build-push-action@v6
         with:
-          context: infra/docker/postgres
+          context: .
           file: infra/docker/postgres/Dockerfile
           push: true
           tags: |

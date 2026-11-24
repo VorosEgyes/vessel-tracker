@@ -10,6 +10,7 @@ pontosan lehessen igazítani.
 Használat:
     python3 inspect_schema.py ais.db
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -24,8 +25,9 @@ def main() -> int:
     path = sys.argv[1]
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
-    tables = [r[0] for r in db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+    tables = [
+        r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    ]
 
     print("=" * 70)
     print(f"{path} — {len(tables)} tábla")
@@ -61,7 +63,7 @@ def main() -> int:
         cols = [c[1] for c in db.execute(f"PRAGMA table_info({t})").fetchall()]
         print(f"\n--- {t} ---")
         for r in rows:
-            for name, val in zip(cols, r):
+            for name, val in zip(cols, r, strict=False):
                 if val is None:
                     continue
                 s = str(val)
