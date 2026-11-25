@@ -1,6 +1,11 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.9 (2026-11-24 — **a bizonyossági szint javítva**:
+**Verzió:** 1.10 (2026-11-25 — **a trigram indexek javítva**: a
+PostgreSQL szerint az `unaccent` **NEM IMMUTABLE** → a
+`lower(unaccent(...))` index-kifejezés **elbukik** („functions in index
+expression must be marked IMMUTABLE") → **az 5 index-kifejezés most
+`lower(x)`** (a `unaccent` nélkül) → **a normalizálás a triggerben
+marad**. A korábbi v1.9 (2026-11-24 — **a bizonyossági szint javítva**:
 a `vessel_verification` nézetben az `ais_identified` ág **csak ENI/IMO-ra
 szűkít** (a MMSI a `ais_partial` ágba megy) → **mind az 5 szint
 elérhető** (a 05 §8.2 badge-táblázata); **a `name_only` a
@@ -399,7 +404,7 @@ CREATE TABLE port_i18n (
 );
 -- A F-CAT-09 a kikötőnév keresését is kéri (a UN/LOCODE mellett)
 CREATE INDEX port_i18n_name_trgm ON port_i18n
-    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+    USING GIN (lower(name) gin_trgm_ops);
 
 CREATE TABLE operator (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -409,7 +414,7 @@ CREATE TABLE operator (
     founded      smallint
 );
 CREATE INDEX operator_legal_name_trgm ON operator
-    USING GIN (lower(unaccent(legal_name)) gin_trgm_ops);
+    USING GIN (lower(legal_name) gin_trgm_ops);
 
 CREATE TABLE operator_i18n (
     operator_id bigint NOT NULL REFERENCES operator(id) ON DELETE CASCADE,
@@ -765,7 +770,7 @@ CREATE TABLE vessel_i18n (
 -- kell — es a LEKERDEZES oldalan is ugyanez a kifejezes (külonben az
 -- index nem hasznalodik). A 03-as API-terv ezt orokli.
 CREATE INDEX vessel_i18n_name_trgm ON vessel_i18n
-    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+    USING GIN (lower(name) gin_trgm_ops);
 
 -- **A rendezés** (H-4): a katalóguslista a névre rendez (a F-CAT-02
 -- alapértelmezés: hajónév szerinti ábécé). A `vessel_i18n` PK-ja
@@ -783,7 +788,7 @@ CREATE TABLE vessel_alias (
     valid_to   date
 );
 CREATE INDEX vessel_alias_name_trgm ON vessel_alias
-    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+    USING GIN (lower(name) gin_trgm_ops);
 
 -- A területenként eltérő azonosítók (README 2.10 b)
 CREATE TABLE vessel_identifier (
@@ -811,7 +816,7 @@ CREATE TABLE vessel_identifier (
 );
 CREATE INDEX vessel_identifier_vessel_idx ON vessel_identifier (vessel_id);
 CREATE INDEX vessel_identifier_value_trgm ON vessel_identifier
-    USING GIN (lower(unaccent(value)) gin_trgm_ops);
+    USING GIN (lower(value) gin_trgm_ops);
 
 -- **M-4: az egyediség IDŐBELI.** A `UNIQUE (identifier_type, value)`
 -- a TORTENETI sorokat is betiltana — egy elront ENI javitasa lehetetlen
@@ -1798,6 +1803,15 @@ CREATE TRIGGER trg_app_user_guard_role
 (`SET LOCAL app.user_role = 'admin'`) — a `SET ROLE` DB-szerepkör
 mellett ez a második védvonal.
 
+-- **A NORMALIZALAS AZ INDEXBEN NEM LEHET** (a 2026-11-25-i
+-- javitas): **a PostgreSQL szerint az `unaccent` NEM IMMUTABLE**
+-- -> a "functions in index expression must be marked IMMUTABLE"
+-- hiba -> **az index-kifejezes a `lower(name)` (a `unaccent` nelkul)**,
+-- **a normalizalas a triggerben marad** (a `sort_name`-t a
+-- `set_updated_at`/a `sync_vessel_sort_name` trigger allitja) ->
+-- **a keresés a `lower(name)`-re epul, a szabvanyos
+-- `unaccent`-alapu keresest az alkalmazas oldalan kell megoldani.**
+--
 -- A slugot NEM a DB generalja: a hajonev ekezetes es unicode
 -- normalizalasara a PostgreSQL `unaccent` extension kellene, es a
 -- slug-ot igyis az alkalmazas oldalon kell generalni (a service

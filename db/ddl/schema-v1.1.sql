@@ -205,7 +205,7 @@ CREATE TABLE port_i18n (
 );
 -- A F-CAT-09 a kikötőnév keresését is kéri (a UN/LOCODE mellett)
 CREATE INDEX port_i18n_name_trgm ON port_i18n
-    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+    USING GIN (lower(name) gin_trgm_ops);
 
 CREATE TABLE operator (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -215,7 +215,7 @@ CREATE TABLE operator (
     founded      smallint
 );
 CREATE INDEX operator_legal_name_trgm ON operator
-    USING GIN (lower(unaccent(legal_name)) gin_trgm_ops);
+    USING GIN (lower(legal_name) gin_trgm_ops);
 
 CREATE TABLE operator_i18n (
     operator_id bigint NOT NULL REFERENCES operator(id) ON DELETE CASCADE,
@@ -527,7 +527,7 @@ CREATE TABLE vessel_i18n (
 -- kell — es a LEKERDEZES oldalan is ugyanez a kifejezes (külonben az
 -- index nem hasznalodik). A 03-as API-terv ezt orokli.
 CREATE INDEX vessel_i18n_name_trgm ON vessel_i18n
-    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+    USING GIN (lower(name) gin_trgm_ops);
 
 -- **A rendezés** (H-4): a katalóguslista a névre rendez (a F-CAT-02
 -- alapértelmezés: hajónév szerinti ábécé). A `vessel_i18n` PK-ja
@@ -545,7 +545,7 @@ CREATE TABLE vessel_alias (
     valid_to   date
 );
 CREATE INDEX vessel_alias_name_trgm ON vessel_alias
-    USING GIN (lower(unaccent(name)) gin_trgm_ops);
+    USING GIN (lower(name) gin_trgm_ops);
 
 -- A területenként eltérő azonosítók (README 2.10 b)
 CREATE TABLE vessel_identifier (
@@ -573,7 +573,7 @@ CREATE TABLE vessel_identifier (
 );
 CREATE INDEX vessel_identifier_vessel_idx ON vessel_identifier (vessel_id);
 CREATE INDEX vessel_identifier_value_trgm ON vessel_identifier
-    USING GIN (lower(unaccent(value)) gin_trgm_ops);
+    USING GIN (lower(value) gin_trgm_ops);
 
 -- **M-4: az egyediség IDŐBELI.** A `UNIQUE (identifier_type, value)`
 -- a TORTENETI sorokat is betiltana — egy elront ENI javitasa lehetetlen
