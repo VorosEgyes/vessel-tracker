@@ -65,13 +65,7 @@ def _run_sql(sql: str) -> None:
 
     # **A `psql` a `PGHOST`/`PGPORT` env-variánsokat használja** (nem a
     # `DATABASE_URL`-t) → **a DB URL-ből ki kell nyerni őket**
-    url = os.environ.get("DATABASE_URL", "")
-    if "host=" in url:
-        # a `postgresql+psycopg://user@/db?host=/socket/dir` forma
-        host = url.split("host=")[1].split("&")[0]
-        env["PGHOST"] = host
-    if "port=" in url:
-        env["PGPORT"] = url.split("port=")[1].split("&")[0]
+    _apply_db_url_to_env(env)
 
     result = subprocess.run(
         [psql, "-v", "ON_ERROR_STOP=1", "-f", "-"],
@@ -86,6 +80,52 @@ def _run_sql(sql: str) -> None:
             f"--- a stderr (a vege) ---\n{result.stderr[-2000:]}\n"
             f"--- a stdout (a vege) ---\n{result.stdout[-1000:]}"
         )
+
+
+def _apply_db_url_to_env(env: dict[str, str]) -> None:
+    """A `DATABASE_URL` -> a `PGHOST`/`PGPORT` env-variánsok.
+
+    **A `psql` nem a `DATABASE_URL`-t olvassa** → **a hosztot és a
+    portot ki kell nyerni.**
+
+    **Két forma:**
+    - a socketes: `postgresql+psycopg://user@/db?host=/socket/dir` →
+      a `PGHOST` a socket könyvtára;
+    - a TCP-s (a CI-ben): `postgresql+psycopg://user:pass@host:port/db`
+      → **a `PGHOST` a hoszt, a `PGPORT` a port.**
+
+    **A `psycopg` (az `env.py`) a URL-t használja** → **az SQLAlchemy
+    kapcsolat a TCP-n megy, de a `psql` a socketen keresne** → **ez
+    a kiegyeztetés kell.**
+    """
+    import os
+    from urllib.parse import unquote, urlparse
+
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        return
+
+    # a query-stringben a `host=` (a socketes forma)
+    if "host=" in url:
+        env["PGHOST"] = url.split("host=")[1].split("&")[0]
+        if "port=" in url:
+            env["PGPORT"] = url.split("port=")[1].split("&")[0]
+        return
+
+    # a netloc (a TCP-s forma): a hoszt:port
+    parsed = urlparse(url.replace("postgresql+psycopg://", "postgresql://"))
+    if parsed.hostname:
+        env["PGHOST"] = unquote(parsed.hostname)
+    if parsed.port:
+        env["PGPORT"] = str(parsed.port)
+    if parsed.username:
+        env["PGUSER"] = unquote(parsed.username)
+    if parsed.password:
+        # **a `psql` a TCP-n jelszot ker** (a CI-ben a PostgreSQL
+        # service: a postgres/postgres) -> **a `PGPASSWORD` kell**
+        env["PGPASSWORD"] = unquote(parsed.password)
+    if parsed.path and parsed.path != "/":
+        env["PGDATABASE"] = unquote(parsed.path.lstrip("/"))
 
 
 def _preprocessors():
@@ -130,11 +170,7 @@ def _has_postgis() -> bool:
     env = dict(os.environ)
     env.setdefault("PGUSER", "postgres")
     env.setdefault("PGDATABASE", "postgres")
-    url = os.environ.get("DATABASE_URL", "")
-    if "host=" in url:
-        env["PGHOST"] = url.split("host=")[1].split("&")[0]
-    if "port=" in url:
-        env["PGPORT"] = url.split("port=")[1].split("&")[0]
+    _apply_db_url_to_env(env)
     result = subprocess.run(
         [psql, "-t", "-A", "-c", "SELECT count(*) FROM pg_extension WHERE extname='postgis';"],
         capture_output=True,

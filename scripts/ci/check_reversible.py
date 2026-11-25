@@ -52,15 +52,38 @@ def find_psql() -> str | None:
 
 
 def psql_env() -> dict[str, str]:
-    """A `psql` környezete (a `PGHOST` a `DATABASE_URL`-ből)."""
+    """A `psql` környezete (a `PGHOST`/`PGPORT` a `DATABASE_URL`-ből).
+
+    **Két forma:**
+    - a socketes: `postgresql+psycopg://user@/db?host=/socket/dir`;
+    - a TCP-s (a CI-ben): `postgresql+psycopg://user:pass@host:port/db`.
+    """
     env = dict(os.environ)
     env.setdefault("PGUSER", "postgres")
     env.setdefault("PGDATABASE", "postgres")
+
     url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        return env
     if "host=" in url:
         env["PGHOST"] = url.split("host=")[1].split("&")[0]
-    if "port=" in url:
-        env["PGPORT"] = url.split("port=")[1].split("&")[0]
+        if "port=" in url:
+            env["PGPORT"] = url.split("port=")[1].split("&")[0]
+        return env
+
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(url.replace("postgresql+psycopg://", "postgresql://"))
+    if parsed.hostname:
+        env["PGHOST"] = unquote(parsed.hostname)
+    if parsed.port:
+        env["PGPORT"] = str(parsed.port)
+    if parsed.username:
+        env["PGUSER"] = unquote(parsed.username)
+    if parsed.password:
+        env["PGPASSWORD"] = unquote(parsed.password)
+    if parsed.path and parsed.path != "/":
+        env["PGDATABASE"] = unquote(parsed.path.lstrip("/"))
     return env
 
 
