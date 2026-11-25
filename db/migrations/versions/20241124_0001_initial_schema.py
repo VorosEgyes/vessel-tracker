@@ -149,22 +149,48 @@ def _preprocessors():
     return strip_gis, strip_unaccent, strip_crypto
 
 
-def _has_postgis() -> bool:
-    """Van-e `postgis` extension a DB-ben?
-
-    **A CI-ben és a productionben igen** (a `ghcr.io/baosystems/postgis`
-    image, a `07` §4.2) → **a teljes séma fut.**
-
-    **A fejlesztői `pgserver` DB-ben nincs** → **a GIS-t strippelni
-    kell** (a `db/tools/validate_ddl.py` `strip_gis` mintája) →
-    **a migráció ott is fut** (a `07` §8.1 8. lépése: a
-    visszafordíthatóság).
-    """
+def _psql() -> str | None:
+    """A `psql` bináris (a `PGPGBIN` env-variából, a PATH-ból vagy a
+    venv `pgserver`-éből — a `db/tools/validate_ddl.py` `find_psql()`
+    mintája)."""
     import os
     import shutil
+
+    pgbins = os.environ.get("PGPGBIN")
+    if pgbins:
+        candidate = pathlib.Path(pgbins) / "psql"
+        if candidate.exists():
+            return str(candidate)
+    found = shutil.which("psql")
+    if found:
+        return found
+    try:
+        import pgserver
+
+        candidate = pathlib.Path(pgserver.__file__).parent / "pginstall" / "bin" / "psql"
+        if candidate.exists():
+            return str(candidate)
+    except ModuleNotFoundError:
+        pass
+    return None
+
+
+def _has_extension(name: str) -> bool:
+    """Van-e a megadott extension a DB-ben?
+
+    **A CI-ben és a productionben a `postgis`, a `unaccent` és a
+    `pg_trgm` is megvan** (a `07` §4.2: a PostGIS image; a `unaccent`
+    és a `pg_trgm` a `postgresql-contrib` moduljai → **a migráció
+    telepíti őket**, ha a superuser megteheti).
+
+    **A fejlesztői `pgserver` DB-ben egyik sem van** → **a
+    preprocesszorok kimaradnak** (a `db/tools/validate_ddl.py`
+    mintája) → **a migráció ott is fut** (a `07` §8.1 8. lépése).
+    """
+    import os
     import subprocess
 
-    psql = os.environ.get("PGPGBIN") or shutil.which("psql")
+    psql = _psql()
     if not psql:
         return False
     env = dict(os.environ)
@@ -172,7 +198,7 @@ def _has_postgis() -> bool:
     env.setdefault("PGDATABASE", "postgres")
     _apply_db_url_to_env(env)
     result = subprocess.run(
-        [psql, "-t", "-A", "-c", "SELECT count(*) FROM pg_extension WHERE extname='postgis';"],
+        [psql, "-t", "-A", "-c", f"SELECT count(*) FROM pg_extension WHERE extname='{name}';"],
         capture_output=True,
         text=True,
         env=env,
@@ -246,13 +272,28 @@ def upgrade() -> None:
     # **a `psycopg` ezt a `simple query` protokollban nem engedi** →
     # **a `psql` subprocessként futtatjuk** (a `db/tools/validate_ddl.py`
     # mintájára) → **a `psql` kezeli a statement-eket és a hibákat.**
+    # **A szükséges extensionök telepítése** (a superuser megteheti):
+    # a `postgis` (a geometria), a `unaccent` (a normalizálás), a
+    # `pg_trgm` (a trigram indexek) → **a CI PostGIS image-ében az
+    # `postgis` megvan, a másik kettő a contrib modul → **a
+    # migráció telepíti őket.**
+    for extension in ("postgis", "unaccent", "pg_trgm"):
+        try:
+            _run_sql(f"CREATE EXTENSION IF NOT EXISTS {extension};")
+        except RuntimeError:
+            print(f"  a {extension} extension nem telepíthető -> a használata kimarad")
+
     # **A GIS csak akkor marad, ha van PostGIS** (a CI-ben és a
     # productionben van; a fejlesztői `pgserver`-ben nincs)
     strip_gis, strip_unaccent, strip_crypto = _preprocessors()
-    if not _has_postgis():
+    if not _has_extension("postgis"):
         print("  a postgis extension nem elérhető -> a GIS-részek text-re cserélve")
         sql = strip_gis(sql)
+    if not _has_extension("unaccent"):
+        print("  az unaccent extension nem elérhető -> a normalizálás kimarad")
         sql = strip_unaccent(sql)
+    if not _has_extension("pgcrypto"):
+        print("  a pgcrypto extension nem elérhető -> a hash kiszámítása kimarad")
         sql = strip_crypto(sql)
 
     _run_sql(_strip_cron(sql))
