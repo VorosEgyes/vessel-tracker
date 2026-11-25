@@ -51,9 +51,15 @@ down:
 
 # az Alembic migrációk futtatása
 db-migrate:
-    # **Az alkalmazaskod meg nincs a repoban** (az `apps/api/` + az
-    # `alembic.ini`) -> a lepes KIHAGYASA, nem hiba (a 07 §3.1)
-    if [ -f alembic.ini ]; then {{UV}} alembic upgrade head; else echo "az alkalmazaskod meg nincs a repoban -> a db-migrate kihagyva"; fi
+    # **A lepes KIHAGYASA, nem hiba** (a 07 §3.1) ha nincs
+    # `alembic.ini` (az alkalmazaskod meg nincs a repoban) vagy nincs
+    # `DATABASE_URL` (a CI-ben a PostgreSQL service adja, a 07 §4.2).
+    if [ ! -f alembic.ini ]; then echo "az alembic.ini nincs a repoban -> a db-migrate kihagyva"; elif [ -z "$${DATABASE_URL:-}" ]; then echo "a DATABASE_URL nincs beallitva -> a db-migrate kihagyva"; else {{UV}} alembic upgrade head; fi
+
+# a migracio VISSZAFORDITASA (a 07 §8.1 8. lepese: a
+# visszafordithatosag) -> a `just test-reversible` tesztje
+db-migrate-down:
+    if [ ! -f alembic.ini ]; then echo "az alembic.ini nincs a repoban -> a db-migrate-down kihagyva"; elif [ -z "$${DATABASE_URL:-}" ]; then echo "a DATABASE_URL nincs beallitva -> a db-migrate-down kihagyva"; else {{UV}} alembic downgrade base; fi
 
 # a referenciaadat-seed (a 02 §12)
 db-seed:
@@ -171,7 +177,10 @@ test-ingest:
 
 # a migráció-visszafordíthatóság (a 07 §8.1 8. lépése)
 test-reversible:
-    {{UV}} python scripts/ci/pytest_or_skip.py -k reversible
+    # **a migracio VISSZAFORDITATOSAGA** (a 07 §8.1 8. lepese) ->
+    # a `db-migrate` -> a `db-migrate-down` -> a `db-migrate` ciklus,
+    # **a tabla szamanak ellenorzesevel**
+    if [ ! -f alembic.ini ]; then echo "az alembic.ini nincs a repoban -> a test-reversible kihagyva"; elif [ -z "$${DATABASE_URL:-}" ]; then echo "a DATABASE_URL nincs beallitva -> a test-reversible kihagyva"; else {{UV}} python scripts/ci/check_reversible.py; fi
 
 # A KAPUK
 

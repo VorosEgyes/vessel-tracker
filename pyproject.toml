@@ -12,6 +12,10 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
+    # **A SZEKRON Alembic a `psycopg` drivert használja** (a
+    # `postgresql+asyncpg` -> `postgresql+psycopg`, a db/migrations/
+    # env.py)
+    "psycopg[binary]>=3.2",
     "alembic>=1.14",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

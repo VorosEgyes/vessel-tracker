@@ -150,7 +150,8 @@ szórva a workflow-ban).
 | `just dev` | a compose `up` a build nélkül + a hot-reload |
 | `just up` | a teljes compose (a DB migrációval) |
 | `just down` | a compose leállítása (a volume-okkal) |
-| `just db-migrate` | az Alembic `upgrade head` |
+| `just db-migrate` | az Alembic `upgrade head` (a `db/migrations/` a séma FORRÁSA — a 01 §4.3) |
+| `just db-migrate-down` | az Alembic `downgrade base` (a visszafordítás — a `07` §8.1 8. lépése) |
 | `just db-seed` | a referenciaadat-seed (`02` – DDL-terv §12) |
 | `just db-reset` | a DB újra (a `down -v` + `up` + migrate + seed) |
 | `just test` | a `pytest` (a unit + az integrációs) **a coverage flaggel** |
@@ -869,7 +870,16 @@ echo 'command="sudo -n /usr/local/bin/nas-receive-ais.sh",no-agent-forwarding,no
 | **5c. az ingest 90%-os küszöbe** | `just test-ingest` | **a coverage < 90%** (a 08 §8.1: az `ingest/` — az AIS parser, a 04 — a legbitebb kód) | **minden push** |
 | **6. az integrációs tesztek** | `just test-integration` | bármelyik bukás | **minden push** |
 | **7. a DDL-validáció** | `just ddl-validate` | bármelyik constraint-hiba | **minden push** |
-| **8. a migráció-visszafordíthatóság** | `pytest -k reversible` | bármelyik bukás | **minden push** |
+| **8. a migráció-visszafordíthatóság** | `just test-reversible` (a `db-migrate` → a `db-migrate-down` → a `db-migrate` ciklus, a táblák számának ellenőrzésével — a `scripts/ci/check_reversible.py`) | bármelyik bukás | **minden push** |
+
+> **A `pg_cron` a CI `test` jobban NINCS** (a stock
+> `ghcr.io/baosystems/postgis` image) → **a migráció a `pg_cron`
+> hívások nélkül fut** → **a séma a TTL-partíciók cron-jobjaival együtt
+> jön létre, de a `cron.schedule` hívások kimaradnak** → **a
+> `drop_expired_partitions` a CI-ben nem fut** (a productionben a
+> custom image-ben van → a `07` §3.2) → **a `test-reversible` a
+> `pg_cron` nélkül is működik** (a `scripts/ci/check_reversible.py` a
+> táblák számát ellenőrzi, nem a cron-jobokat).
 | **9. az image build** | `docker build` | bármelyik hiba | **minden push** |
 | **10. a frontend build** | `pnpm build` | bármelyik hiba | **minden push** |
 | **10b. a séma-drift ellenőrzése** | `just ddl-diff` | **bármelyik eltérés** | **minden push** |
