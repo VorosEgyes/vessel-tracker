@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from duna.api.v1.content import router as content_router
 from duna.api.v1.search import router as search_router
 from duna.api.v1.vessel import router as vessel_router
 from duna.config import get_settings
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     # **a `/api/v1/` routerek** (a 03 §3.1, §3.2)
     app.include_router(vessel_router, prefix="/api/v1")
     app.include_router(search_router, prefix="/api/v1")
+    app.include_router(content_router, prefix="/api/v1")
 
     return app
 

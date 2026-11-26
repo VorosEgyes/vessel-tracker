@@ -18,9 +18,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
-from duna.repositories.search_repo import SearchParams, search
 from duna.schemas.common import AreaHint, Page, PageMeta
 from duna.schemas.vessel import VesselListItem
+from duna.services import search_service
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -42,8 +42,9 @@ async def search_endpoint(
     **A `meta.total`** a trigram-alapú néven keresésnél `None` → **a
     pontos azonosító-egyezésnél a pontos darabszám.**
     """
-    params = SearchParams(area=area, q=q, lang=lang, limit=limit)
-    items, total, other_has_matches = await search(session, params)
+    items, total, other_has_matches = await search_service.search_vessels(
+        session, area=area, q=q, lang=lang, limit=limit
+    )
 
     return Page[VesselListItem](
         data=items,

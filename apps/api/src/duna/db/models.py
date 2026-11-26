@@ -349,3 +349,76 @@ class VesselCert(Base):
     issued_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     document_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class ContentKey(Base):
+    """A tartalmi kulcs (a `02` §5.1 — a F-NF-01…15).
+
+    **A `source_lang` a kulcs eredeti nyelve** → **a fallback-lánc
+    a `source_lang`-től indul** (a `03` §6.3: "a kód / az eredeti
+    érték").
+    """
+
+    __tablename__ = "content_key"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    domain: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_lang: Mapped[str] = mapped_column(CHAR(2))
+    is_placeholder: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ContentText(Base):
+    """A tartalom fordítása (a `02` §5.1 — a F-NF-01…15).
+
+    **A `status='published'` a KAPU** (a `03` §6.2a, a C-5 finding) →
+    **a nem publikált fordítás nem látható** a publikus API-n.
+    """
+
+    __tablename__ = "content_text"
+
+    content_key: Mapped[str] = mapped_column(
+        String, ForeignKey("content_key.key", ondelete="CASCADE"), primary_key=True
+    )
+    lang: Mapped[str] = mapped_column(CHAR(2), ForeignKey("language.code"), primary_key=True)
+    text: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="draft")
+    author_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app_user.id"), nullable=True
+    )
+    reviewed_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app_user.id"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AppUser(Base):
+    """A szerkesztő (a `02` §9 — a `app_user`).
+
+    **A `role` a szerkesztő NEM változtathatja** (a V-N-7 finding) →
+    **a DB-szintű védelem a trigger** (a `guard_role_change`).
+
+    **A `password_hash` a 'local' providerhez KÖTELEZŐ** (a P1-14
+    finding) → **a `CHECK` constraint a DB-ben.**
+    """
+
+    __tablename__ = "app_user"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    email: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    locale: Mapped[str] = mapped_column(CHAR(2), default="hu")
+    unit_system: Mapped[str] = mapped_column(String, default="metric")
+    auth_provider: Mapped[str] = mapped_column(String, default="local")
+    auth_subject: Mapped[str | None] = mapped_column(String, nullable=True)
+    role: Mapped[str] = mapped_column(String, default="editor")
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    session_token_hash: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    session_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

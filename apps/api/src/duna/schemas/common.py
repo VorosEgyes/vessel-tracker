@@ -51,12 +51,34 @@ class PageMeta(BaseModel):
     )
 
 
+class TranslationFallback(BaseModel):
+    """A fordítás-fallback jelölése (a 03 §6.3 — a F-INTL-05).
+
+    **A `meta`-ban van**, nem a `data`-ban → **a kliens nem keveri a
+    "nincs adat" és a "nincs fordítás" esetet.**
+
+    **A `missing: true` a F-DET-16 "adat nélkül" jelölése** → **a UI
+    üres helyett ezt mutatja.**
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    requested: str = Field(description="a kert nyelv")
+    used: str | None = Field(default=None, description="a hasznalt nyelv")
+    fallback: bool = Field(default=False, description="a szoveg a kert nyelven helyett jott")
+    missing: bool = Field(default=False, description="nincs forditas sem a lancban (a F-DET-16)")
+
+
 class ObjectMeta(BaseModel):
     """Az objektum-válasz metaadatai (a lapozás nélkül)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     total: int | None = Field(default=None)
+    translation_fallback: dict[str, TranslationFallback] | None = Field(
+        default=None,
+        description="a mezonkenti forditas-fallback jelolese (a 03 §6.3)",
+    )
 
 
 class Page[T](BaseModel):

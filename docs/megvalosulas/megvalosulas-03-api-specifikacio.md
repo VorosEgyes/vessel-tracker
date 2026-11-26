@@ -1,8 +1,11 @@
 # Implementációs terv – 03: API-specifikáció (OpenAPI v1)
 
-**Verzió:** 0.6 (a **katalóguslista + a hajóadatlap + az 5 al-végpont
-+ a globális kereső végrehajtva**: **8 R1-es végpont** a valós kód, a
-`just check` zöld, a 24 integrációs teszt valódi PostgreSQL-lel)
+**Verzió:** 0.7 (a **service réteg bevezetve**: a router → service →
+repository lánc a §5.1 szerint, a 4 `duna/services/` modul; **a
+`GET /api/v1/content/{key}` a fallback-lánccal** (§6.3); **a
+`duna/domain/slug.py`** a slug-generálással; **9 R1-es végpont** a
+valós kód, a `just check` zöld, a 32 integrációs teszt valódi
+PostgreSQL-lel)
 **Dátum:** 2026-11-22
 **A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.3** (71 tábla,
 150 index, 121 FK, 28 trigger — **a `home_river_section_id` +
@@ -348,6 +351,9 @@ jön).
 > | **a `duna/domain/text.py`** (a kereső normalizálás) | ✅ **a `lower(unaccent(name))` alakja** — **a `sort_name`-ével egyezik** |
 > | **a `meta.area_hint`** | ✅ **a `bori` H-2 findingje: a másik területen van-e találat, a darabszám nélkül** |
 > | a `GET /api/v1/search/suggest` (a F-SRCH-08) | ⏳ **NEM KÉSZ** (R3) |
+> | a `GET /api/v1/content/{key}` | ✅ **VALÓS KÓD** (a fallback-lánc, a §6.3) |
+> | **a `duna/services/` réteg** | ✅ **4 modul** (a `vessel_service`, a `search_service`, a `content_service`, az `origin_service`) — **a router → service → repository lánc** (a §5.1) |
+> | **a `duna/domain/slug.py`** | ✅ **a slug-generálás** (a `02` §8.1a: az alkalmazás generálja) |
 >
 > **A `verification_level` a SZÁMÍTOTT érték** (a `vessel_verification`
 > nézetből) → **a `verification_source` jelzi, ha a tárolt érték
