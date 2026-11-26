@@ -22,18 +22,16 @@ from sqlalchemy.sql import Select
 
 from duna.db.models import (
     Country,
-    DataSource,
     OperatorI18n,
     Port,
     PortI18n,
     Vessel,
-    VesselDataOrigin,
     VesselI18n,
-    VesselOwnership,
     VesselTypeI18n,
 )
 from duna.db.views import VESSEL_LAST_POSITION, VESSEL_VERIFICATION
-from duna.schemas.vessel import FieldOrigin, OwnershipPeriod, VesselDetail
+from duna.repositories.vessel_sub_repo import list_data_origins, list_ownership
+from duna.schemas.vessel import VesselDetail
 
 
 def _decimal_to_str(value: Decimal | None) -> str | None:
@@ -105,64 +103,6 @@ def build_detail_query(vessel_id: int, lang: str) -> Select[Any]:
     return stmt
 
 
-async def list_origins(session: AsyncSession, vessel_id: int) -> list[FieldOrigin]:
-    """A mezőnkénti eredet (a F-DET-15) → **a `vessel_data_origin` +
-    a `data_source`** → **csak az aktuális források** (a `is_current`).
-    """
-    stmt = (
-        select(
-            VesselDataOrigin.field_name,
-            VesselDataOrigin.origin,
-            VesselDataOrigin.value_snapshot,
-            VesselDataOrigin.observed_at,
-            VesselDataOrigin.confidence,
-            VesselDataOrigin.is_current,
-            DataSource.name.label("source_name"),
-        )
-        .outerjoin(DataSource, DataSource.id == VesselDataOrigin.source_id)
-        .where((VesselDataOrigin.vessel_id == vessel_id) & (VesselDataOrigin.is_current.is_(True)))
-        .order_by(VesselDataOrigin.field_name, VesselDataOrigin.observed_at.desc())
-    )
-    rows = (await session.execute(stmt)).all()
-    return [
-        FieldOrigin(
-            field_name=row.field_name,
-            origin=row.origin,
-            value_snapshot=row.value_snapshot,
-            observed_at=row.observed_at,
-            confidence=float(row.confidence) if row.confidence is not None else None,
-            source_name=row.source_name,
-            is_current=row.is_current,
-        )
-        for row in rows
-    ]
-
-
-async def list_ownership(session: AsyncSession, vessel_id: int, lang: str) -> list[OwnershipPeriod]:
-    """A tulajdonosváltások (a F-DET-05) → **a `vessel_ownership` +
-    az `operator_i18n`** → **a legújabb elöl.**
-    """
-    stmt = (
-        select(
-            OperatorI18n.display_name.label("operator_name"),
-            VesselOwnership.valid_from,
-            VesselOwnership.valid_to,
-        )
-        .join(OperatorI18n, OperatorI18n.operator_id == VesselOwnership.operator_id)
-        .where((VesselOwnership.vessel_id == vessel_id) & (OperatorI18n.lang == lang))
-        .order_by(VesselOwnership.valid_from.desc())
-    )
-    rows = (await session.execute(stmt)).all()
-    return [
-        OwnershipPeriod(
-            operator_name=row.operator_name,
-            valid_from=row.valid_from,
-            valid_to=row.valid_to,
-        )
-        for row in rows
-    ]
-
-
 async def get_vessel_detail(
     session: AsyncSession, vessel_id: int, lang: str = "hu"
 ) -> VesselDetail | None:
@@ -175,7 +115,7 @@ async def get_vessel_detail(
     if row is None:
         return None
 
-    origins = await list_origins(session, vessel_id)
+    origins = await list_data_origins(session, vessel_id)
     ownership = await list_ownership(session, vessel_id, lang)
 
     return VesselDetail(

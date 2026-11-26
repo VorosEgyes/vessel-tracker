@@ -165,3 +165,55 @@ class VesselDetail(BaseModel):
         default_factory=list,
         description="a tulajdonosváltások (a dátumtartománnyal)",
     )
+
+
+class VesselAlias(BaseModel):
+    """A történeti név (a F-DET-05).
+
+    **A `/aliases` a LEZÁRT neveket adja** (a `03` §3.1: a
+    `valid_to IS NOT NULL` = a történet) → **a jelenlegi név a
+    `vessel_i18n`-ből jön, nem duplikálódik itt.**
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    name_type: str = Field(description="'former' | 'official' | 'shipyard'")
+    valid_from: date | None = None
+    valid_to: date | None = None
+
+
+class VesselIdentifierDetail(BaseModel):
+    """A hajó azonosítója (a F-DET-02, a F-DET-15).
+
+    **Az `/identifiers` szűrés nélkül mindent ad** (az aktív + a
+    lezárt azonosítók egyaránt) → **a `valid_to` megmutatja, hogy
+    aktív-e.**
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    identifier_type: str = Field(
+        description="'eni' | 'imo' | 'mmsi' | 'callsign' | 'national_reg_no' | 'internal_code'"
+    )
+    value: str
+    is_primary: bool = False
+    origin: str = Field(description="'ais' | 'official' | 'operator_claimed'")
+    valid_from: date | None = None
+    valid_to: date | None = None
+    source_name: str | None = Field(default=None, description="a forras neve (a `data_source`-bol)")
+
+
+class VesselCertDetail(BaseModel):
+    """A hajó engedélye (a F-DET-02)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cert_type: str
+    authority: str | None = None
+    issued_at: date | None = None
+    expires_at: date | None = None
+    document_ref: str | None = None

@@ -166,6 +166,9 @@ class VesselIdentifier(Base):
     origin: Mapped[str] = mapped_column(String)
     valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    source_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("data_source.id"), nullable=True
+    )
 
 
 class Vessel(Base):
@@ -327,3 +330,22 @@ class Waterway(Base):
     waterway_type: Mapped[str] = mapped_column(String)
     length_km: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class VesselCert(Base):
+    """A hajó engedélye (a `02` §4.9 — a F-DET-02).
+
+    **A `/certificates` szűrés nélkül mindent ad** (a `03` §3.1:
+    az aktív + a lezárt engedélyek egyaránt) → **nincs
+    `valid_to IS NULL` szűrő.**
+    """
+
+    __tablename__ = "vessel_cert"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    vessel_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("vessel.id", ondelete="CASCADE"))
+    cert_type: Mapped[str] = mapped_column(String)
+    authority: Mapped[str | None] = mapped_column(String, nullable=True)
+    issued_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    document_ref: Mapped[str | None] = mapped_column(String, nullable=True)

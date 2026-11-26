@@ -178,6 +178,46 @@ def seeded_vessel() -> int:
             await conn.execute(
                 text("UPDATE vessel SET sort_name = 'kikoto hajo' WHERE slug = 'kikoto-hajo'")
             )
+            # **A `vessel_alias`** (a F-DET-05) -> **a LEZART nevek**
+            # (a `valid_to IS NOT NULL`) -> **a `test-hajo` aktualis neve
+            # a `vessel_i18n`-ben van, nem itt**
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_alias (vessel_id, name, name_type, valid_from,"
+                    " valid_to) SELECT id, 'REGI HAJO', 'former', '2010-01-01',"
+                    " '2014-12-31' FROM vessel WHERE slug = 'test-hajo'"
+                )
+            )
+            # **A `vessel_cert`** (a F-DET-02) -> **az aktív + a lezárt
+            # engedelyek egyarant** (szures nelkul)
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_cert (vessel_id, cert_type, authority,"
+                    " issued_at, expires_at, document_ref) SELECT id,"
+                    " 'passenger_certificate', 'Hajozasi Hatosag',"
+                    " '2020-01-01', '2030-01-01', 'DOC-1' FROM vessel"
+                    " WHERE slug = 'test-hajo'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_cert (vessel_id, cert_type, authority,"
+                    " issued_at, expires_at, document_ref) SELECT id,"
+                    " 'old_certificate', 'Hajozasi Hatosag',"
+                    " '2010-01-01', '2015-01-01', 'DOC-0' FROM vessel"
+                    " WHERE slug = 'test-hajo'"
+                )
+            )
+            # **A lezart azonosito** (a F-DET-02) -> **az `/identifiers`
+            # szures nelkul mindent ad** (az aktív + a lezárt egyarant)
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_identifier (vessel_id, identifier_type, value,"
+                    " is_primary, origin, valid_from, valid_to) SELECT id, 'callsign',"
+                    " 'OLDABC', false, 'official', '2010-01-01', '2014-12-31'"
+                    " FROM vessel WHERE slug = 'test-hajo'"
+                )
+            )
             result = await conn.execute(text("SELECT id FROM vessel WHERE slug = 'test-hajo'"))
             vessel_id = result.scalar_one()
         await engine.dispose()
@@ -464,3 +504,88 @@ def test_a_kereso_ekezet_fuggetlen_ekeazetes_nevre(
 
     slugs = [item["slug"] for item in body["data"]]
     assert "kikoto-hajo" in slugs
+
+
+def test_az_aliasok_a_torteneti_nevek(client: TestClient, seeded_vessel: int):
+    """**A `/aliases` a LEZÁRT neveket adja** (a F-DET-05, a 03 §3.1)
+    -> **a `valid_to IS NOT NULL`** -> **a jelenlegi név a
+    `vessel_i18n`-ből jön, nem duplikálódik itt.**
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}/aliases")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["meta"]["total"] == 1
+    alias = body["data"][0]
+    assert alias["name"] == "REGI HAJO"
+    assert alias["name_type"] == "former"
+    assert alias["valid_to"] == "2014-12-31"
+
+
+def test_a_tulajdonosvaltasok_al_vegpont(client: TestClient, seeded_vessel: int):
+    """**A `/ownership` a tulajdonosváltásokat adja** (a F-DET-05) ->
+    **a dátumtartománnyal** -> **a legújabb elöl.**
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}/ownership")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["meta"]["total"] == 2
+    assert body["data"][0]["valid_from"] == "2021-01-01"
+    assert body["data"][0]["valid_to"] is None
+    assert body["data"][1]["valid_to"] == "2020-12-31"
+
+
+def test_az_engelyek_szures_nelkul(client: TestClient, seeded_vessel: int):
+    """**A `/certificates` szűrés NÉLKÜL mindent ad** (a 03 §3.1) ->
+    **az aktív + a lezárt engedély egyaránt** -> **a lejárton
+    legrégebbi elöl.**
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}/certificates")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["meta"]["total"] == 2
+    types = [c["cert_type"] for c in body["data"]]
+    assert "passenger_certificate" in types
+    assert "old_certificate" in types
+
+    # **a lejaraton legregebbi elol**
+    assert body["data"][0]["expires_at"] == "2015-01-01"
+
+
+def test_az_azonositok_szures_nelkul(client: TestClient, seeded_vessel: int):
+    """**Az `/identifiers` szűrés NÉLKÜL mindent ad** (a 03 §3.1) ->
+    **az aktív + a lezárt azonosító egyaránt** -> **a `valid_to`
+    megmutatja, melyik aktív.**
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}/identifiers")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["meta"]["total"] >= 2
+    values = {i["value"]: i for i in body["data"]}
+
+    # **a lezart azonosito is itt van**
+    assert "OLDABC" in values
+    assert values["OLDABC"]["valid_to"] == "2014-12-31"
+    assert values["OLDABC"]["origin"] == "official"
+
+    # **az aktiv azonosito**
+    assert "87654321" in values
+    assert values["87654321"]["valid_to"] is None
+
+
+def test_a_mezonekenti_eredet_al_vegpont(client: TestClient, seeded_vessel: int):
+    """**A `/data-origin` a mezőnkénti eredetet adja** (a F-DET-15) ->
+    **csak az AKTUÁLIS források** (`is_current`) -> **a konfliktus
+    látható.**
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}/data-origin")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["meta"]["total"] == 2
+    by_origin = {o["origin"]: o for o in body["data"]}
+    assert by_origin["ais"]["value_snapshot"] == "85.50"
+    assert by_origin["operator_claimed"]["value_snapshot"] == "87.00"

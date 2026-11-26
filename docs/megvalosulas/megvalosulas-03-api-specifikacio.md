@@ -1,9 +1,8 @@
 # Implementációs terv – 03: API-specifikáció (OpenAPI v1)
 
-**Verzió:** 0.5 (a **katalóguslista + a hajóadatlap + a globális
-kereső végrehajtva**: a `GET /api/v1/vessels`, a
-`GET /api/v1/vessels/{id}` és a `GET /api/v1/search` a valós kód, a
-`just check` zöld, a 19 integrációs teszt valódi PostgreSQL-lel)
+**Verzió:** 0.6 (a **katalóguslista + a hajóadatlap + az 5 al-végpont
++ a globális kereső végrehajtva**: **8 R1-es végpont** a valós kód, a
+`just check` zöld, a 24 integrációs teszt valódi PostgreSQL-lel)
 **Dátum:** 2026-11-22
 **A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.3** (71 tábla,
 150 index, 121 FK, 28 trigger — **a `home_river_section_id` +
@@ -339,7 +338,11 @@ jön).
 > | az alkalmazásréteg-coverage | ✅ **91%** (a CI-ben, a `DATABASE_URL`-lel) |
 > | **a `models-check`** (a `just models-check`) | ✅ **a modell–séma drift-ellenőrzés** (a §5.1a) — **a kézzel írt modellek elcsúszását a CI kapja el** |
 > | a `GET /api/v1/vessels/{id}` (a hajóadatlap) | ✅ **VALÓS KÓD** (`duna/repositories/vessel_detail_repo.py`) |
-> | a `GET /api/v1/vessels/{id}/aliases` és a többi 6 végpont | ⏳ **NEM KÉSZ** (a következő kör) |
+> | a `GET /api/v1/vessels/{id}/aliases` | ✅ **VALÓS KÓD** (a `vessel_alias` — **a LEZÁRTak**, a 03 §3.1) |
+> | a `GET /api/v1/vessels/{id}/ownership` | ✅ **VALÓS KÓD** (a `vessel_ownership` + a dátumtartomány) |
+> | a `GET /api/v1/vessels/{id}/certificates` | ✅ **VALÓS KÓD** (a `vessel_cert` — **szűrés nélkül**) |
+> | a `GET /api/v1/vessels/{id}/identifiers` | ✅ **VALÓS KÓD** (a `vessel_identifier` + a `data_source` — **szűrés nélkül**) |
+> | a `GET /api/v1/vessels/{id}/data-origin` | ✅ **VALÓS KÓD** (a `vessel_data_origin` — **csak az aktuális források**) |
 > | **a `scripts/ci/check_models.py`** (a `just models-check`) | ✅ **a modellek és a séma driftjét elkapja** (a §5.1a) — **kétirányú**: a modell oszlopa a DB-ben, a DB NOT NULL oszlopa a modellben |
 > | a `GET /api/v1/search` | ✅ **VALÓS KÓD** (`duna/repositories/search_repo.py`) |
 > | **a `duna/domain/text.py`** (a kereső normalizálás) | ✅ **a `lower(unaccent(name))` alakja** — **a `sort_name`-ével egyezik** |

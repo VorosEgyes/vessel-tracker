@@ -17,8 +17,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from duna.db.session import get_session
 from duna.repositories.vessel_detail_repo import get_vessel_detail
 from duna.repositories.vessel_repo import VesselFilters, list_vessels
+from duna.repositories.vessel_sub_repo import (
+    list_aliases,
+    list_certificates,
+    list_data_origins,
+    list_identifiers,
+    list_ownership,
+)
 from duna.schemas.common import Data, ObjectMeta, Page, PageMeta
-from duna.schemas.vessel import VesselDetail, VesselListItem
+from duna.schemas.vessel import (
+    FieldOrigin,
+    OwnershipPeriod,
+    VesselAlias,
+    VesselCertDetail,
+    VesselDetail,
+    VesselIdentifierDetail,
+    VesselListItem,
+)
 
 router = APIRouter(prefix="/vessels", tags=["vessels"])
 
@@ -87,3 +102,87 @@ async def get_vessel_endpoint(
     if detail is None:
         raise HTTPException(status_code=404, detail="a hajo nem talalhato")
     return Data[VesselDetail](data=detail, meta=ObjectMeta(total=1))
+
+
+@router.get("/{vessel_id}/aliases", response_model=Page[VesselAlias])
+async def get_vessel_aliases(
+    vessel_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Page[VesselAlias]:
+    """A hajó **történeti** nevei (a F-DET-05).
+
+    **A LEZÁRTak** (`valid_to IS NOT NULL`) → **a jelenlegi név a
+    `vessel_i18n`-ből jön** (a `03` §3.1) → **nem duplikálódik.**
+    """
+    items = await list_aliases(session, vessel_id)
+    return Page[VesselAlias](
+        data=items,
+        meta=PageMeta(total=len(items), page=1, per_page=len(items), has_more=False),
+    )
+
+
+@router.get("/{vessel_id}/ownership", response_model=Page[OwnershipPeriod])
+async def get_vessel_ownership(
+    vessel_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
+) -> Page[OwnershipPeriod]:
+    """A **tulajdonosváltások** (a F-DET-05) → **a dátumtartománnyal**
+    → **a legújabb elöl.**
+    """
+    items = await list_ownership(session, vessel_id, lang)
+    return Page[OwnershipPeriod](
+        data=items,
+        meta=PageMeta(total=len(items), page=1, per_page=len(items), has_more=False),
+    )
+
+
+@router.get("/{vessel_id}/certificates", response_model=Page[VesselCertDetail])
+async def get_vessel_certificates(
+    vessel_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Page[VesselCertDetail]:
+    """A hajó engedélyei (a F-DET-02).
+
+    **Szűrés NÉLKÜL** (a `03` §3.1) → **az aktív + a lezárt
+    engedélyek egyaránt.**
+    """
+    items = await list_certificates(session, vessel_id)
+    return Page[VesselCertDetail](
+        data=items,
+        meta=PageMeta(total=len(items), page=1, per_page=len(items), has_more=False),
+    )
+
+
+@router.get("/{vessel_id}/identifiers", response_model=Page[VesselIdentifierDetail])
+async def get_vessel_identifiers(
+    vessel_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Page[VesselIdentifierDetail]:
+    """Az összes azonosító + eredet (a F-DET-02, a F-DET-15).
+
+    **Szűrés NÉLKÜL** (a `03` §3.1) → **az aktív + a lezárt
+    azonosítók egyaránt** → **a `valid_to` megmutatja, melyik aktív.**
+    """
+    items = await list_identifiers(session, vessel_id)
+    return Page[VesselIdentifierDetail](
+        data=items,
+        meta=PageMeta(total=len(items), page=1, per_page=len(items), has_more=False),
+    )
+
+
+@router.get("/{vessel_id}/data-origin", response_model=Page[FieldOrigin])
+async def get_vessel_data_origin(
+    vessel_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Page[FieldOrigin]:
+    """A mezőnkénti eredet (a F-DET-15).
+
+    **Csak az aktuális források** (`is_current`) → **a történeti
+    források a `vessel_data_origin`-ban maradnak, de nem jelennek meg.**
+    """
+    items = await list_data_origins(session, vessel_id)
+    return Page[FieldOrigin](
+        data=items,
+        meta=PageMeta(total=len(items), page=1, per_page=len(items), has_more=False),
+    )
