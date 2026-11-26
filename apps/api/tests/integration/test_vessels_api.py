@@ -14,7 +14,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from duna.main import app
 
@@ -391,10 +391,65 @@ def test_a_mezonekenti_eredet_a_konfliktust_lattatja(client: TestClient, seeded_
     assert "operator_claimed" in by_origin
     assert by_origin["ais"]["value_snapshot"] == "85.50"
     assert by_origin["operator_claimed"]["value_snapshot"] == "87.00"
-
-    # **a megfigyeles idopontja** (a `observed_at`) -> **a datetime**
     assert by_origin["ais"]["observed_at"]
     assert by_origin["ais"]["confidence"] == 0.9
+
+
+@pytest.mark.asyncio
+async def test_catalog_search_and_detail_regressions_postgresql(seeded_vessel: int):
+    """Multiple identifiers, fallback and position work against the real schema."""
+    from duna.repositories.search_repo import SearchParams, search
+    from duna.repositories.vessel_detail_repo import get_vessel_detail
+    from duna.repositories.vessel_repo import VesselFilters, list_vessels
+
+    engine = create_async_engine(os.environ["DATABASE_URL"])
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                async with AsyncSession(bind=connection) as session:
+                    before, total_before, _ = await list_vessels(
+                        session, VesselFilters(area="duna", q="teszthajo")
+                    )
+                    identifier = f"regression-{seeded_vessel}"
+                    await session.execute(
+                        text(
+                            "INSERT INTO vessel_identifier"
+                            " (vessel_id, identifier_type, value, is_primary, origin)"
+                            " VALUES (:id, 'internal_code', :value, false, 'official')"
+                        ),
+                        {"id": seeded_vessel, "value": identifier},
+                    )
+                    after, total_after, _ = await list_vessels(
+                        session, VesselFilters(area="duna", q="teszthajo")
+                    )
+                    assert [item.id for item in before] == [item.id for item in after]
+                    assert total_before == total_after
+                    found, total, _, _ = await search(
+                        session, SearchParams(area="duna", q=identifier, lang="en")
+                    )
+                    assert [item.id for item in found] == [seeded_vessel]
+                    assert total == 1
+                    found, _, hint, _ = await search(
+                        session, SearchParams(area="balaton", q=identifier)
+                    )
+                    assert not found
+                    assert hint
+                    await session.execute(
+                        text(
+                            "INSERT INTO position (vessel_id, ts, river_km)"
+                            " VALUES (:id, now(), 1642)"
+                        ),
+                        {"id": seeded_vessel},
+                    )
+                    detail = await get_vessel_detail(session, seeded_vessel, "en")
+                    assert detail is not None
+                    assert detail.name == "TESZTHAJO"
+                    assert detail.location_text == "1642 km"
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
 
 
 def test_a_tulajdonosvaltasok_a_legutolso_elol(client: TestClient, seeded_vessel: int):

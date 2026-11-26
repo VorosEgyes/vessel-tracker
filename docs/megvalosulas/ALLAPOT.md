@@ -2,7 +2,8 @@
 
 **Frissítve:** 2026-11-26
 **Repo:** https://github.com/VorosEgyes/vessel-tracker
-**A `main` HEAD:** `0062220fcd` (a CI/Build zöld)
+**A fejlesztések alapcommitja:** `7fb5c26`; az alább jelzett fejlesztéseket
+a dokumentum frissítésekor a GitHub CI még nem ellenőrizte.
 **Aktuális munkaterület:** **az alkalmazás rétegeinek megépítése**
 (a `03` – API-specifikáció alapján) — **a Pi + rádió mérésével
 párhuzamosan**
@@ -18,10 +19,11 @@ párhuzamosan**
 **Hajókövető a Dunán és a Balatonon** — az R1 release egy **statikus
 hajókatalógus** (térkép és élő adat nélkül), három nyelven (hu/de/en).
 
-**A mérési fázis fut** (a `bud01` AIS-vevő, 2026-11-22 óta) —
+**A mérési fázis korábban elindult** (a `bud01` AIS-vevő, 2026-11-22) —
 **és párhuzamosan az alkalmazás rétegei készülnek** (a `03`
-alapján): **a séma, a migráció, a CI, és az első 9 API-végpont
-valós kód.**
+alapján): a séma, a migráció, a hajós és referenciakatalógus-API,
+a generált TypeScript-kliens és a statikus katalógus első változata
+valós kód. A mérés jelenlegi üzemállapotát ebben a körben nem ellenőriztük.
 
 **A két munkaág összefüggése:** a mérés **a fixture-öket adja**
 (a `04` – parser-terv) → **a mérésből jönnek az AIS-tesztadatok**,
@@ -50,18 +52,18 @@ vár** → **ezért lehetett párhuzamosan dolgozni.**
 
 | # | Terv | Státusz |
 |---|---|---|
-| 01 | technológiai stack és projektstruktúra | **v1.3** — 2 körű swarm review, a 2. kör 17 findingje javítva |
-| 02 | adatbázis-séma (DDL v1.1) | **v1.5** — 113 finding, a 10 blokkoló javítva, **futtatva és tesztelve** (17/17 zöld) |
-| 03 | API-specifikáció | **v0.3** — 96 finding (3 reviewer + verifier), **mind javítva** |
+| 01 | technológiai stack és projektstruktúra | **v1.4** — 2 körű swarm review |
+| 02 | adatbázis-séma (DDL v1.1) | **v1.12** — korábbi PostgreSQL-validáció és review |
+| 03 | API-specifikáció | **v0.7** — review és implementációs pontosítások |
 | 04 | AIS-parser specifikáció | **v1.0** — 64 finding, **mind javítva** (a mérés alapján) |
-| 05 | frontend-arkitektúra | v0.1 — draft |
-| 06 | szerkesztői felület | v0.1 — draft |
-| 07 | CI/CD és környezetek | **v0.1** — draft (új) |
-| 08 | teszt-stratégia | **v0.1** — draft (új, a mérési adatból) |
-| 09 | üzemeltetés és observability | **v0.1** — draft (új, a watchdog) |
+| 05 | frontend-arkitektúra | **v0.3** — review után, részleges megvalósítással |
+| 06 | szerkesztői felület | **v0.2** — review után, megvalósítás előtt |
+| 07 | CI/CD és környezetek | **v0.4** — review után |
+| 08 | teszt-stratégia | **v0.3** — review után |
+| 09 | üzemeltetés és observability | **v0.3** — review után |
 
-**A sorozat teljes (01–09).** A 02–04 terv swarm review-zott; az 05–09
-draft, a review-juk a következő kör.
+**A tervsorozat teljes (01–09)**, de a tervek megléte és review-ja nem
+jelenti az összes funkció megvalósítását.
 
 ### 2.3 A 02-es DDL — a legjobban validált rész
 
@@ -107,17 +109,24 @@ apps/api/src/duna/
 │   ├── vessel.py          ← GET /vessels, /vessels/{id} + 5 al-végpont
 │   ├── search.py          ← GET /search
 │   ├── content.py         ← GET /content/{key}
-│   └── export_openapi.py  ← az OpenAPI export (a just openapi)
+│   └── reference.py       ← referencialisták + kikötő/zsilip adatlap
+├── api/export_openapi.py  ← OpenAPI export
 ├── schemas/               ← a Page[T]/Data[T], a VesselListItem, a VesselDetail
-├── repositories/          ← a SQLAlchemy query-k (4 modul)
-├── services/              ← a service réteg (a 03 §5.1) — 4 modul
+├── repositories/          ← a lekérdezések, köztük a referenciák
+├── services/              ← a service réteg
 ├── domain/                ← a tiszta üzleti logika (verification, text, slug)
 └── ingest/                ← az AIS parser (a 04)
 ```
 
 **A rétegsorrend (a `03` §5.1):** `router → service → repository → DB`.
+Az Astro alkalmazás az `apps/web/`, a generált kliens a
+`packages/api-client/`, a generált séma a `docs/api/v1/openapi.json` alatt van.
 
-### 2b.2 A kész API-végpontok (9)
+### 2b.2 A megvalósított API-végpontok
+
+Összesen **21 végpont**: az alábbi 10 (a `/health`-szel együtt), 9
+referencialista és 2 referencia-adatlap; a FastAPI dokumentációs útvonalai
+nem számítanak bele.
 
 | A végpont | A funkció | A státusz |
 |---|---|---|
@@ -132,7 +141,20 @@ apps/api/src/duna/
 | `GET /api/v1/search` | a globális kereső (a F-SRCH-01…07) | ✅ |
 | `GET /api/v1/content/{key}` | a fordítás-fallback-lánc (a F-NF-01…15) | ✅ |
 
+**Korlátok:** a katalógus egyes tervezett szűrői (`moving`, `section`,
+`basin`, `home_section`, `home_basin`, `season`) még nem készültek el;
+ezekre az API 422-es választ ad. A hajóadatlap és a listák a hiányzó
+nyelv esetén visszaeső nevet használnak, de a mezőnkénti
+`translation_fallback` metaadat ezeknél a végpontoknál még nem kész.
+
 **A `GET /api/v1/search/suggest`** (a F-SRCH-08) ⏳ **R3** — nem R1.
+
+**Referenciakatalógus:** elkészült a `ports`, `locks`, `waterways`,
+`river-sections`, `basins`, `vessel-types`, `operators`, `routes` és
+`cargo-types` lista, továbbá a kikötő- és zsilipadatlap. A listák
+lapozhatók; a kikötőlista vízút-, típus-, ország- és szövegszűrést is
+támogat. A fordított nevekhez `name_language` és `name_fallback` jelzés
+tartozik; a kért nyelv után angol, majd magyar szöveg következik.
 
 ### 2b.3 A kész infrastruktúra
 
@@ -141,32 +163,48 @@ apps/api/src/duna/
 | **a `justfile`** (a kanonikus belépési pont) | ✅ **~36 recept** |
 | **az Alembic-migráció** (a `db/migrations/`) | ✅ **a `0001` a teljes sémát hozza létre** — a `just db-migrate` fut, a `just test-reversible` igazolja a visszafordíthatóságot |
 | **a `db/ddl/schema-v1.1.sql`** | ✅ **GENERÁLT** a `02` tervből (a `just ddl-generate`) — **a `just ddl-diff` ellenőrzi a driftet** |
-| **a CI** (a `.github/workflows/ci.yml`) | ✅ **a lint + a typecheck + a test + a build jobok** — **a PostgreSQL service-en fut a migráció + az integrációs teszt + a `models-check`** |
-| **a Build** (a `build.yml`) | ✅ **a PostgreSQL custom image (a PostGIS + a `pg_cron`) + az API image** |
-| **a deploy workflow-k** | ✅ **a staging (a környezet-ellenőrzéssel kihagyja a hiányzó VPS-t) + a production (manuális)** |
+| **a CI** (a `.github/workflows/ci.yml`) | létezik; a helyi változat kliens- és frontendellenőrzésekkel bővült, GitHubon még nem futott |
+| **a Build** (a `build.yml`) | a PostgreSQL image épül; az API és a web Dockerfile hiányzik, image-buildjük kimarad |
+| **a deploy workflow-k** | léteznek, de a környezetek és a telepítés működését most nem ellenőriztük |
 | **a `scripts/ci/pytest_or_skip.py`** | ✅ **nem maszkolja a hibákat** (csak a „nincs gyűjtött teszt" esetet nyeli el) |
 | **a `scripts/ci/check_models.py`** (a `just models-check`) | ✅ **kétirányú modell–séma drift-ellenőrzés** |
 | **a `scripts/ci/check_reversible.py`** | ✅ **a valódi migráció-visszafordítás teszt** |
 
 ### 2b.4 A tesztek és a minőségi kapuk
 
-| A szint | A tesztek | A státusz |
-|---|---|---|
-| **unit** | **64** (a `verification`, a `decoder`, a `text`, a `slug`) | ✅ |
-| **property** | **5** (a 6 bites round-trip, a `hypothesis`) | ✅ |
-| **integrációs** | **32** (valódi PostgreSQL-lel) | ✅ |
-| **összesen** | **101** | ✅ |
+| Ellenőrzés | Legutóbbi helyi eredmény a jelenlegi fejlesztés során |
+|---|---|
+| Python `pytest` | **88 sikeres, 43 kihagyott**; a kihagyottak PostgreSQL-t igényelnek |
+| API-kliens | 2 Vitest-teszt sikeres; TypeScript típusellenőrzés és generált séma driftellenőrzés sikeres |
+| Frontend | 4 Vitest-teszt sikeres; ebből egy ellenőrzi a hat statikus oldal buildjét és az elérhetetlen API miatti buildhibát |
+| Böngésző | a keresés, az üres eredmény és az API-hiba helyi teszt-API-val ellenőrizve |
+| Statikus ellenőrzés | Python Ruff és mypy, Astro/TypeScript típusellenőrzés és Prettier sikeres |
 
-| A kapu | A küszöb | A mért |
-|---|---|---|
-| a `duna.domain` coverage | 90% | **100%** |
-| a `duna.ingest` coverage | 90% | **99,03%** |
-| az alkalmazásréteg coverage | 70% | **89,89%** (DB-vel) |
-| a teljes `duna` coverage | 85% | **a release-kapu** (a `just test-app`) |
-| a `mypy` | hibátlan | ✅ **32 forrásfájl** |
-| a `ruff` | hibátlan | ✅ |
+A PostgreSQL-es integrációs tesztek és a teljes `just check` **nem
+futottak le ebben a munkamenetben**; a korábbi commitra vonatkozó CI- és
+coverage-eredmények nem igazolják a jelenlegi munkafát. Az új integrációs
+tesztek CI-ben is futtatandók.
 
-**A `just check` EXIT 0** — **ez a teljes minőségi kapu egy parancsban.**
+### 2b.4a Az új frontend és kliens
+
+- **API-kliens:** `packages/api-client/`; az OpenAPI-export és a generált
+  típusok együtt frissülnek (`pnpm api:generate`), eltérésük ellenőrizhető
+  (`pnpm api:check`).
+- **Katalógus:** `apps/web/`; hat statikus oldal (`hu`/`en`/`de` ×
+  Duna/Balaton), buildkori API-adatokkal és élő API-s kereséssel,
+  rendezéssel, lapozással. A build hibával leáll, ha az API nem érhető el.
+- **Korlátok:** JavaScript nélkül csak a buildkori lista látható; nincs még
+  hajóadatlap, automatikus rebuild-hook vagy webes/API Dockerfile.
+  A build- és böngészős API-cím beállítását az
+  [apps/web/README.md](../../apps/web/README.md) írja le.
+
+### 2b.4b Ebben a munkamenetben javított hibák
+
+Az AIS sebesség- és iránymértékegységei; az ismétlődő hajósorok;
+a hiányzó és téves nyelvű fordítások; a keresési lapozás és a másik
+terület azonosítós jelzése; a nem támogatott szűrők csendes figyelmen
+kívül hagyása; valamint az adatlap szöveges pozíciója. A hibákhoz
+regressziós tesztek kerültek; a PostgreSQL-specifikus igazolás még nyitott.
 
 ### 2b.5 A mérési oldal (a 2026-11-24-i állapot)
 
@@ -180,12 +218,13 @@ apps/api/src/duna/
 | **a névlefedettség** | **82,6%** |
 | **az ENI-arány** | **0,4%** (a városi helyen — a szűvízben mérni kell) |
 
-> **A 30 napos mérés fut** (2026-12-22-ig) — **a heti lehúzás működik**
-> (a Pi → NAS, a `command=` korlátozással).
+> A korabeli feljegyzés szerint a 30 napos mérés 2026-12-22-ig tartott
+> volna, heti Pi → NAS lehúzással; aktuális állapota nem ellenőrzött.
 
-### 2b.6 A ma délelőtti munka eredménye (a 9 végpont)
+### 2b.6 Korábbi, commitolt munka
 
-**A `main` HEAD:** `0062220fcd` — **a CI és a Build zöld.**
+Az alábbiak korábbi commitok; a dokumentált új fejlesztések alapja
+`7fb5c26`.
 
 | A lépés | A commit |
 |---|---|
@@ -214,7 +253,9 @@ apps/api/src/duna/
 | 10 | az `UPDATE` `rowcount`-ja nem megbízható | a `RETURNING`-es upsert |
 | 11 | a `vessel_identifier.source_id` hiányzott a `models.py`-ből | javítva (a `mypy` kapta el) |
 
-## 3. Mi fut
+## 3. Korábban jelentett üzemállapot
+
+Az alábbi Pi/NAS-állapot történeti feljegyzés; most nem történt élő ellenőrzés.
 
 | Mi | Hol | Állapot |
 |---|---|---|
@@ -235,12 +276,11 @@ navigációs lámpa, 767 FI 10 (ENI) üzenet, **69,8% földrajzi lefedettség**
 
 | Mi | Hol | Állapot |
 |---|---|---|
-| **a FastAPI app** | `apps/api/src/duna/` | ✅ **9 R1-es végpont**, valódi PostgreSQL-en igazolva |
-| **a séma + a migráció** | `db/migrations/` + `db/ddl/` | ✅ **a `just db-migrate` fut, a visszafordítás igazolt** |
-| **a CI** | `.github/workflows/ci.yml` | ✅ **zöld** (a lint + a typecheck + a test + a build) |
-| **a Build** | `.github/workflows/build.yml` | ✅ **zöld** (a PostGIS + `pg_cron` image) |
-| **a minőségi kapu** | `just check` | ✅ **EXIT 0** (101 teszt, 3 coverage-kapu) |
-| **a `main` HEAD** | a GitHubon | `0062220fcd` |
+| **a FastAPI app** | `apps/api/src/duna/` | hajós és referencia-végpontok; az új PostgreSQL-tesztek még nem futottak helyben |
+| **a séma + a migráció** | `db/migrations/` + `db/ddl/` | korábban ellenőrzött; a jelenlegi munkafával nem futott újra |
+| **a CI és Build** | `.github/workflows/` | a helyi módosítások GitHubon még nem futottak; API/web image nincs |
+| **a minőségi kapu** | `just check` | a jelenlegi munkafán nem futott teljes egészében |
+| **a fejlesztések alapcommitja** | Git | `7fb5c26` |
 
 **A részletek:** a [2b. fejezet](#2b-a-kódoldali-állapot-2026-11-26).
 
@@ -482,7 +522,11 @@ terv §8.3).
 | **A DDL-validáló** | a `pgserver` (a `pgdata` mappában) — az élő PostgreSQL | a `just ddl-validate` |
 | **A swarm board** | `/opt/data/kanban/boards/review-swarm/` — a review-k | a `hermes kanban` parancs |
 
-### 5.1 A kód → GitHub kapcsolat (2026-11-26)
+### 5.1 Korábbi NAS-os kód → GitHub munkafolyamat
+
+Ez a rész a korábbi NAS-os munkakörnyezetet írja le, nem a jelenlegi
+Mac-munkafát. A jelenlegi checkout a `/Users/modmj/dev/vessel-tracker`;
+a helyi változtatások a szokásos `git status` paranccsal láthatók.
 
 **A Mac offline** (a `192.168.0.135` és a `192.168.1.172` nem
 elérhető a NAS-ról) → **a teljes fejlesztés a NAS konténerben
@@ -545,15 +589,14 @@ NEM megy** → **azokat Alfred pusholja** (a klasszikus workflow PAT-tal).
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─ ALKALMAZÁS ───────────────────────────────────────────────┐
-│ ✅ séma + migráció   ✅ CI/CD   ✅ service réteg            │
-│ ✅ 9 API-végpont     ✅ 101 teszt   ✅ a just check zöld    │
-│                     ↓                                       │
-│ ⬜ referenciavégpontok → ⬜ frontend → ⬜ szerkesztő          │
+│ séma + migráció; CI-konfiguráció; service réteg             │
+│ hajós és referencia API; generált TypeScript-kliens          │
+│ részleges frontend; szerkesztő és deploy hátravan           │
+│ PostgreSQL-tesztek és teljes kapu: újra futtatandó          │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─ A MÉRÉS (a másik munkaág, párhuzamosan) ──────────────────┐
-│ hardver ✅ → Pi előállítás ✅ → 30 NAPOS MÉRÉS ⏳ FUT        │
-│ (2026-11-22 óta, a go/no-go 69,8%-on)                       │
+│ korábbi mérés: 2026-11-22-től; jelenleg nem ellenőrzött     │
 │                              ↓                               │
 │              a saját parser → az ingest → a statikus adat    │
 └─────────────────────────────────────────────────────────────┘
@@ -566,9 +609,8 @@ vagy az API-tól; **az alkalmazás rétegei nem várnak** a mérésre
 **A mérésből jövő fixture-ök** (az AIS-tesztadatok) **az `ingest`
 réteghez kell** → **a mérés lezárása után** (2026-12-22).
 
-**A tervezés gyakorlatilag kész** — **a 03–09 tervek a kódhoz
-igazítva vannak** (a `03` v0.7, a `02` v1.12, a `07` v0.2, a `08`
-v0.2).
+**A tervek rendelkezésre állnak**, de nem minden tervezett funkció
+készült el; az aktuális implementációt a 2b. fejezet írja le.
 
 ### 7.1 A következő lépések (2026-11-26)
 
@@ -579,22 +621,22 @@ v0.2).
 
 | # | A lépés | A méret | A függőség |
 |---|---|---|---|
-| A1 | **a referenciatáblák végpontjai** (a `03` §3.3): `/api/v1/ports`, `/locks`, `/waterways`, `/river-sections`, `/basins`, `/vessel-types`, `/operators`, `/routes`, `/cargo-types` | 9 végpont | **nincs** (a séma kész) — **a `reference.py` router** |
+| A1 | **a referenciatáblák végpontjai** (a `03` §3.3): `/api/v1/ports`, `/locks`, `/waterways`, `/river-sections`, `/basins`, `/vessel-types`, `/operators`, `/routes`, `/cargo-types` | 9 lista + 2 adatlap | **elkészült** — a `reference.py` router |
 | A2 | **a `vessel_service` write-oldalának használatba vétele** (a `sort_name` + a `slug` betöltése) | kicsi | az A1 után (a szerkesztői felülethez kell) |
 | A3 | **az `ingest` réteg** (a `04`): a parser → a `position`/`vessel_static` írása | nagy | **a mérésből jövő fixture-ök** |
-| A4 | **a `apps/web`** (a `05`): az Astro frontend, a katalógusoldal | nagy | **az A1 után** (a `packages/api-client` az OpenAPI-ból) |
+| A4 | **a `apps/web`** (a `05`): az Astro frontend, a katalógusoldal | nagy | **első változat:** statikus katalógus, élő API-s keresés, rendezés és lapozás; az adatlap és a rebuild-hook még hátravan |
 | A5 | **a szerkesztői felület** (a `06`): az `/api/admin/v1/` | nagy | az A2 + az A4 után |
-| A6 | **a `packages/api-client`** (a generált TS kliens az OpenAPI-ból) | kicsi | **a `just openapi` már fut** → **bárhogyan megírható** |
+| A6 | **a `packages/api-client`** (a generált TS kliens az OpenAPI-ból) | kicsi | **elkészült** — generálás, típusellenőrzés és CI driftkapu |
 
-**A sorrend javasoltan:** **A6 → A1 → A4 → A2 → A5** → **a frontend
-tudja használni a kész API-t** → **az A3 (a parser) párhuzamosan,
-a mérés végén.**
+**Következő javasolt sorrend:** a PostgreSQL-es integrációs tesztek és
+teljes minőségi kapu futtatása → a frontend hajóadatlapja és a build-hook →
+A2 és A5. Az A3 a mérési fixture-ökkel párhuzamosan folytatható.
 
 #### B) A mérés és a hardver
 
 | # | A lépés | A mikor |
 |---|---|---|
-| B1 | **a mérés fut** — a heti lehúzás ellenőrzése hétfőnként | **2026-12-22-ig** |
+| B1 | a mérés és a heti lehúzás aktuális állapotának ellenőrzése | nyitott |
 | B2 | **a TCXO-s dongle** (a PPM ≤ 2) — a mérés lezárása után | a mérés után |
 | B3 | **a 162 MHz SAW szűrő** — a döntés a mérés végén | a mérés után |
 | B4 | **a 2. site a szűvízen** (az ENI-arány 0,4% → kell) | a mérés után |
@@ -603,7 +645,7 @@ a mérés végén.**
 
 | # | A lépés | A mikor |
 |---|---|---|
-| C1 | **a 05–09 terv swarm review-ja** (a draftok) | a mérés alatt, párhuzamosan |
+| C1 | a tervek további összehangolása az implementációval | folyamatos |
 | C2 | **a `release-terv` frissítése** (a kész R1-es végpontok listájával) | az A1 után |
 
 #### D) A nyitott kérdések (Miklós döntése)

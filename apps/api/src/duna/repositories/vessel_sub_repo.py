@@ -18,7 +18,7 @@ adja → **a szűrő `valid_to IS NOT NULL`** → **a `name_type='official'`
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.models import (
@@ -75,14 +75,32 @@ async def list_ownership(session: AsyncSession, vessel_id: int, lang: str) -> li
     """A tulajdonosváltások (a F-DET-05) → **a `vessel_ownership` +
     az `operator_i18n`** → **a legújabb elöl.**
     """
+    operator_name = (
+        select(OperatorI18n.display_name)
+        .where(
+            OperatorI18n.operator_id == VesselOwnership.operator_id,
+            OperatorI18n.display_name.is_not(None),
+        )
+        .order_by(
+            case(
+                (OperatorI18n.lang == lang, 0),
+                (OperatorI18n.lang == "en", 1),
+                (OperatorI18n.lang == "hu", 2),
+                else_=3,
+            ),
+            OperatorI18n.lang,
+        )
+        .limit(1)
+        .correlate(VesselOwnership)
+        .scalar_subquery()
+    )
     stmt = (
         select(
-            OperatorI18n.display_name.label("operator_name"),
+            operator_name.label("operator_name"),
             VesselOwnership.valid_from,
             VesselOwnership.valid_to,
         )
-        .join(OperatorI18n, OperatorI18n.operator_id == VesselOwnership.operator_id)
-        .where((VesselOwnership.vessel_id == vessel_id) & (OperatorI18n.lang == lang))
+        .where(VesselOwnership.vessel_id == vessel_id)
         .order_by(VesselOwnership.valid_from.desc())
     )
     rows = (await session.execute(stmt)).all()

@@ -18,7 +18,7 @@ async def search_vessels(
     q: str,
     lang: str = "hu",
     limit: int = 20,
-) -> tuple[list[VesselListItem], int | None, bool]:
+) -> tuple[list[VesselListItem], int | None, bool, bool]:
     """A globális kereső.
 
     **A visszatérés:** `(a találatok, a teljes darabszám vagy None,

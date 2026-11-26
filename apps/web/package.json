@@ -1,0 +1,27 @@
+{
+  "name": "@vessel-tracker/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev --host 127.0.0.1",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview --host 127.0.0.1",
+    "lint": "ASTRO_TELEMETRY_DISABLED=1 astro check",
+    "typecheck": "ASTRO_TELEMETRY_DISABLED=1 astro check",
+    "format:check": "prettier --plugin prettier-plugin-astro --check 'src/**/*.{ts,astro,css}' 'tests/**/*.ts' '*.json' '*.mjs'",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vessel-tracker/api-client": "workspace:*",
+    "astro": "5.18.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "@types/node": "22.19.15",
+    "prettier": "3.8.1",
+    "prettier-plugin-astro": "0.14.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

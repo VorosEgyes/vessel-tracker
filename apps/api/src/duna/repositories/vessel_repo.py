@@ -24,16 +24,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from duna.db.models import (
-    Operator,
-    OperatorI18n,
     Vessel,
-    VesselI18n,
     VesselIdentifier,
-    VesselType,
-    VesselTypeI18n,
 )
 from duna.db.views import VESSEL_VERIFICATION
 from duna.domain.text import normalize_search_text
+from duna.repositories.expressions import (
+    display_identifier_id,
+    operator_name,
+    vessel_name,
+    vessel_type_name,
+)
 from duna.schemas.vessel import VesselListItem
 
 
@@ -70,15 +71,18 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
     `vessel_i18n.name`-re** → **a `meta.total` ilyenkor `None`**
     (a 03 §5.5: "nem indexelhető").
     """
+    name = vessel_name(filters.lang)
+    type_name = func.coalesce(vessel_type_name(filters.lang), Vessel.vessel_type_code)
+    operator = operator_name(filters.lang)
     stmt = (
         select(
             Vessel.id,
             Vessel.slug,
-            VesselI18n.name.label("name"),
-            VesselTypeI18n.name.label("vessel_type_name"),
+            func.coalesce(name, Vessel.sort_name).label("name"),
+            type_name.label("vessel_type_name"),
             VesselIdentifier.value.label("identifier"),
             VesselIdentifier.identifier_type.label("identifier_type"),
-            OperatorI18n.display_name.label("operator_name"),
+            operator.label("operator_name"),
             Vessel.operating_area,
             Vessel.status,
             # **AZ EGYEDI LABEL LÉNYEGES:** a `Vessel.verification_level`
@@ -89,24 +93,9 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
             VESSEL_VERIFICATION.c.computed_verification_level.label("computed_verification_level"),
             VESSEL_VERIFICATION.c.is_stale.label("is_stale"),
         )
-        .join(
-            VesselI18n,
-            (VesselI18n.vessel_id == Vessel.id) & (VesselI18n.lang == filters.lang),
-        )
-        .join(VesselType, VesselType.code == Vessel.vessel_type_code)
-        .outerjoin(
-            VesselTypeI18n,
-            (VesselTypeI18n.vessel_type_code == VesselType.code)
-            & (VesselTypeI18n.lang == filters.lang),
-        )
-        .outerjoin(Operator, Operator.id == Vessel.operator_id)
-        .outerjoin(
-            OperatorI18n,
-            (OperatorI18n.operator_id == Vessel.operator_id) & (OperatorI18n.lang == filters.lang),
-        )
         .outerjoin(
             VesselIdentifier,
-            (VesselIdentifier.vessel_id == Vessel.id) & (VesselIdentifier.valid_to.is_(None)),
+            VesselIdentifier.id == display_identifier_id(),
         )
         .outerjoin(
             VESSEL_VERIFICATION,
@@ -140,19 +129,19 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
         stmt = stmt.where(
             or_(
                 Vessel.sort_name.contains(normalized_q),
-                VesselI18n.name.ilike(f"%{filters.q.strip()}%"),
-                VesselI18n.name.ilike(f"%{normalized_q}%"),
+                name.ilike(f"%{filters.q.strip()}%"),
+                name.ilike(f"%{normalized_q}%"),
             )
         )
 
     # **a rendezés** (a F-CAT-02: a hajónév az alapértelmezett)
     order_col = {
-        "name": VesselI18n.name,
-        "type": VesselTypeI18n.name,
-        "operator": OperatorI18n.display_name,
+        "name": func.coalesce(name, Vessel.sort_name),
+        "type": type_name,
+        "operator": operator,
         "length": Vessel.length_m,
         "updated_at": Vessel.updated_at,
-    }.get(filters.sort, VesselI18n.name)
+    }.get(filters.sort, Vessel.sort_name)
     stmt = stmt.order_by(
         order_col.desc() if filters.order == "desc" else order_col.asc(),
         Vessel.id.asc(),
@@ -163,7 +152,7 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
 
 async def list_vessels(
     session: AsyncSession, filters: VesselFilters
-) -> tuple[list[VesselListItem], int | None]:
+) -> tuple[list[VesselListItem], int | None, bool]:
     """A katalóguslista (a lapozott elemek + a teljes darabszám).
 
     **A `meta.total` a szűrés utáni teljes darabszám** (a 03 §5.5) →
@@ -177,8 +166,10 @@ async def list_vessels(
         count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
         total = (await session.execute(count_stmt)).scalar_one()
 
-    paged = stmt.limit(filters.per_page).offset(filters.offset)
+    paged = stmt.limit(filters.per_page + 1).offset(filters.offset)
     rows = (await session.execute(paged)).all()
+    has_more = len(rows) > filters.per_page
+    rows = rows[: filters.per_page]
 
     items = [
         VesselListItem(
@@ -196,4 +187,4 @@ async def list_vessels(
         )
         for row in rows
     ]
-    return items, total
+    return items, total, has_more

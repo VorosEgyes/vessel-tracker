@@ -9,9 +9,9 @@ lapozással (a F-CAT-02, a F-CAT-08, a F-CAT-10, a F-CAT-14).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
@@ -34,15 +34,16 @@ router = APIRouter(prefix="/vessels", tags=["vessels"])
 @router.get("", response_model=Page[VesselListItem])
 async def list_vessels_endpoint(
     session: Annotated[AsyncSession, Depends(get_session)],
-    area: Annotated[str, Query(description="a terulet: 'duna' | 'balaton'")],
+    request: Request,
+    area: Annotated[Literal["duna", "balaton"], Query(description="a terulet")],
     lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
     q: Annotated[str | None, Query(description="a kereso")] = None,
     type_code: Annotated[str | None, Query(alias="type")] = None,
     operator_id: Annotated[int | None, Query(alias="operator")] = None,
     status: Annotated[str | None, Query()] = None,
     verification: Annotated[str | None, Query()] = None,
-    sort: Annotated[str, Query()] = "name",
-    order: Annotated[str, Query()] = "asc",
+    sort: Annotated[Literal["name", "type", "operator", "length", "updated_at"], Query()] = "name",
+    order: Annotated[Literal["asc", "desc"], Query()] = "asc",
     page: Annotated[int, Query(ge=1)] = 1,
     per_page: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> Page[VesselListItem]:
@@ -52,6 +53,24 @@ async def list_vessels_endpoint(
     **a `q` keresésnél `None`** (a trigram-alapú keresés nem
     indexelhető).
     """
+    supported = {
+        "area",
+        "lang",
+        "q",
+        "type",
+        "operator",
+        "status",
+        "verification",
+        "sort",
+        "order",
+        "page",
+        "per_page",
+    }
+    unsupported = set(request.query_params) - supported
+    if unsupported:
+        raise HTTPException(
+            status_code=422, detail=f"nem tamogatott szurok: {', '.join(sorted(unsupported))}"
+        )
     filters = VesselFilters(
         area=area,
         lang=lang,
@@ -65,14 +84,14 @@ async def list_vessels_endpoint(
         page=page,
         per_page=per_page,
     )
-    items, total = await vessel_service.list_catalog(session, filters)
+    items, total, has_more = await vessel_service.list_catalog(session, filters)
     return Page[VesselListItem](
         data=items,
         meta=PageMeta(
             total=total,
             page=page,
             per_page=per_page,
-            has_more=total is not None and page * per_page < total,
+            has_more=has_more,
         ),
     )
 

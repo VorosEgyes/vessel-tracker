@@ -77,7 +77,7 @@ class OwnershipPeriod(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    operator_name: str = Field(description="az üzemeltető neve (fordul)")
+    operator_name: str | None = Field(description="az üzemeltető neve (fordul)")
     valid_from: date
     valid_to: date | None = Field(default=None, description="None = jelenleg is aktuális")
 

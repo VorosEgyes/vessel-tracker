@@ -168,7 +168,7 @@ def test_a_pozicio_a_gpsd_peldan():
     assert p.lon == -122.341618
     assert p.sog_mps == 0.0
     assert p.cog_deg == 219.3
-    assert p.heading_deg == 0.1  # a nyers 9 bites érték (1) / 10
+    assert p.heading_deg == 1.0
     assert p.nav_status == 3
     assert p.timestamp == 59
     assert p.maneuver == 0
@@ -191,14 +191,30 @@ def test_a_pozicio_egyezik_a_pyais_szal():
     assert p.mmsi == reference.mmsi
     assert p.lat == reference.lat
     assert p.lon == reference.lon
-    assert p.sog_mps == reference.speed
+    assert p.sog_mps == pytest.approx(reference.speed * 1852 / 3600)
     assert p.cog_deg == reference.course
-    assert p.heading_deg == reference.heading / 10
+    assert p.heading_deg == reference.heading
     assert p.nav_status == reference.status
     assert p.timestamp == reference.second
     assert p.maneuver == reference.maneuver
     assert p.raim == reference.raim
     assert p.radio == reference.radio
+
+
+def test_a_sebesseg_es_irany_mertekegysege():
+    bits = payload_to_bits("15M67FC000G?ufbE`FepT@3n00Sa")
+    bits[50:60] = [int(bit) for bit in f"{100:010b}"]
+    bits[128:137] = [int(bit) for bit in f"{90:09b}"]
+    values = [int("".join(str(bit) for bit in bits[i : i + 6]), 2) for i in range(0, len(bits), 6)]
+    report = decode_position(encode_standard_6bit(values))
+    assert report.sog_mps == pytest.approx(10 * 1852 / 3600)
+    assert report.heading_deg == 90
+
+
+@pytest.mark.parametrize("fill_bits", [-1, 6, 100])
+def test_a_hibas_fill_bits_hibat_dob(fill_bits):
+    with pytest.raises(ValueError, match="fill_bits"):
+        payload_to_bits("1234567", fill_bits)
 
 
 def test_a_pozicio_a_meresi_peldan():

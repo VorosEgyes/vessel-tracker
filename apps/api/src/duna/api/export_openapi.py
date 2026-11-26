@@ -6,10 +6,7 @@ automatikusan generálja** → **ez a modul kiírja a
 `docs/api/v1/openapi.json`-ba** (a `packages/api-client` innen
 generálódik).
 
-**A `DATABASE_URL` kell** (a `just openapi` e nélkül kihagyja a
-lépést) → **az app indulásakor a DB nem kell** (a `/health` csak
-kérésre pingel) → **az OpenAPI export DB nélkül is működik**, ha a
-`DATABASE_URL` megvan.
+Az OpenAPI export adatbázis-kapcsolat nélkül működik.
 """
 
 from __future__ import annotations

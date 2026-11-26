@@ -149,7 +149,7 @@ test-integration:
 
 # az e2e tesztek (a playwright)
 test-e2e:
-    if [ -f pnpm-workspace.yaml ]; then pnpm test:e2e; else echo "a frontend meg nincs a repoban -> a test-e2e kihagyva"; fi
+    if [ -d apps/web/tests/e2e ]; then pnpm --filter ./apps/web test:e2e; else echo "a bongeszos e2e tesztek meg nincsenek a repoban -> a test-e2e kihagyva"; fi
 
 # a teljesítményteszt (a locust; a F-NF-01: a p95 < 800 ms)
 test-perf:
@@ -165,7 +165,10 @@ test-api:
 
 # a frontend tesztek (a Vitest)
 test-frontend:
-    if [ -f pnpm-workspace.yaml ]; then pnpm test; else echo "a frontend meg nincs a repoban -> a test-frontend kihagyva"; fi
+    if [ -f apps/web/package.json ]; then pnpm --filter ./apps/web test; else echo "a frontend meg nincs a repoban -> a test-frontend kihagyva"; fi
+
+test-api-client:
+    pnpm --filter @vessel-tracker/api-client test
 
 # a teljes tesztkészlet a coverage flaggel (a 08 §8.1 küszöb: 85%)
 test:
@@ -219,7 +222,7 @@ test-reversible:
 # a teljes minőségi kapu egy parancsban (a 01 §11.3 és a 08 §6.1)
 check: lint lint-frontend typecheck test-unit test-property test-component \
        test-domain test-ingest test-integration ddl-validate ddl-diff \
-       models-check
+       models-check openapi-check test-api-client
 
 # a release teljes kapuja (a 08 §6.1 — hetente)
 check-release: check test-app test-e2e test-perf test-regression
@@ -233,14 +236,14 @@ build:
 
 # a frontend statikus build (a 05 §1)
 build-frontend:
-    if [ -f pnpm-workspace.yaml ]; then pnpm build; else echo "a frontend meg nincs a repoban -> a build-frontend kihagyva"; fi
+    if [ -f apps/web/package.json ]; then pnpm --filter ./apps/web build; else echo "a frontend meg nincs a repoban -> a build-frontend kihagyva"; fi
 
 # az OpenAPI export (a 03 §5.1a)
 openapi:
-    # **Az OpenAPI export** (a 03 §5.1a: a specifikacio a kodbol jon)
-    # -> **a `docs/api/v1/openapi.json`** (a `packages/api-client` innen
-    # generálódik)
-    if [ ! -d apps/api/src/duna/api ]; then echo "az alkalmazaskod meg nincs a repoban -> az openapi kihagyva"; elif [ -z "$${DATABASE_URL:-}" ]; then echo "a DATABASE_URL nincs beallitva -> az openapi kihagyva"; else mkdir -p docs/api/v1 && {{UV}} python -m duna.api.export_openapi > docs/api/v1/openapi.json && echo "az OpenAPI exportalva: docs/api/v1/openapi.json"; fi
+    pnpm api:generate
+
+openapi-check:
+    pnpm api:check
 
 # A SZINTENKÉNTI MINŐSÉGI KAPUK (a 08 §8.1)
 

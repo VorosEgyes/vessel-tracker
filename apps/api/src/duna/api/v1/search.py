@@ -12,9 +12,9 @@ darabszám nélkül** (a terület-szivárgás tiltása, a `release-terv` 3.5).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 async def search_endpoint(
     session: Annotated[AsyncSession, Depends(get_session)],
     q: Annotated[str, Query(min_length=2, description="a keresoszove")],
-    area: Annotated[str, Query(description="a terulet: 'duna' | 'balaton'")],
+    area: Annotated[Literal["duna", "balaton"], Query(description="a terulet")],
     lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> Page[VesselListItem]:
@@ -42,7 +42,9 @@ async def search_endpoint(
     **A `meta.total`** a trigram-alapú néven keresésnél `None` → **a
     pontos azonosító-egyezésnél a pontos darabszám.**
     """
-    items, total, other_has_matches = await search_service.search_vessels(
+    if len(q.strip()) < 2:
+        raise HTTPException(status_code=422, detail="a keresoszoveg legalabb 2 karakter legyen")
+    items, total, other_has_matches, has_more = await search_service.search_vessels(
         session, area=area, q=q, lang=lang, limit=limit
     )
 
@@ -52,7 +54,7 @@ async def search_endpoint(
             total=total,
             page=1,
             per_page=limit,
-            has_more=False,
+            has_more=has_more,
             area_hint=(
                 AreaHint(
                     other_area="balaton" if area == "duna" else "duna",

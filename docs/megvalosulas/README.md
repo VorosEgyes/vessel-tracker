@@ -20,39 +20,27 @@ Ez a mappa a **megvalósítási tervek** sorozata: a [`../README.md`](../README.
 | 05 | [frontend-arkitektúra](megvalosulas-05-frontend-arkitektura.md) | Az Astro SSR, az i18n routing (a F-INTL-01…08), a SEO (a `hreflang`, a JSON-LD, a sitemap), a komponensmodell, a hajóadatlap blokkjai | **v0.3** — a 05–09-es swarm review javításai (a nyelvválasztó süti/prefix, a rendezés, a bizonyossági badge, a `river_km` 3 forrás, a súgó) **+ a 2. kör: a `output: 'static'` + a rebuild-mechanizmus** (a C-9 blokkoló) |
 | 06 | [szerkesztői felület](megvalosulas-06-szerkesztoi-felulet.md) | A session-alapú hitelesítés, a `/api/admin/v1/` végpontok, a mezőnkénti eredet szerkesztése, a konfliktuskezelés (a F-ADM-09), az üzemeltetői önbevallás (a F-ADM-08), a tömeges import (a F-ADM-07), a fordítási hiánylista | **v0.2** — a 05–09-es swarm review javításai (a `admin_api` DB-szerepkör, az egy-session korlát, az AIS-import, a célállomás mező, az import limit) |
 | 07 | [CI/CD és környezetek](megvalosulas-07-ci-cd-es-kornyezetek.md) | A pipeline (a `ci.yml`/`build.yml`/a deploy-workflow-ok), a build (a `justfile`, a Docker image-ek), a környezet-változók, a migrációk, a deploy és a rollback, a titkok, a smoke teszt | **v0.4** — a 05–09-es swarm review javításai (a `justfile` a szintenkénti célokkal és a `check`/`check-release` kapukkal, a coverage-küszöb a `just test`-ben, a `pg_stat_statements` a Dockerfile-ban, a host cron telepítése a deployban) **+ a 2. kör: a `ddl-diff` séma-drift lépés, a heti cron-ütem, a Telegram-titok, a branch protection javítása** ; **a rétegenkénti coverage-kapuk** (a `just test` a mérhető részre mer, az alkalmazásréteg gate 70%, a teljes `duna` 85% a `just test-app` release-kapu); **a `just models-check`** (a modellek–séma drift-ellenőrzés); **a `just test-integration` a CI-ben** (a valódi PostgreSQL service-en) |
-| 08 | [teszt-stratégia](megvalosulas-08-teszt-strategia.md) | A teszt-piramis (7 szint), a 20 NFR → a mérőszám, a szintenkénti tesztek, a mérésből jövő fixture-ök, a kilépési feltételek | **v0.3** — a 05–09-es swarm review javításai (a fixture-méretkorlát, a replay a NAS-ról, a szintenkénti `just` célok, a flake-gate) ; **a valós állapot** (a 101 teszt: 64 unit + 5 property + 32 integrációs valódi PostgreSQL-lel); **a rétegenkénti coverage-kapuk** (a domain 100%, az ingest 99,03%, az alkalmazásréteg 89,89%) |
+| 08 | [teszt-stratégia](megvalosulas-08-teszt-strategia.md) | A teszt-piramis (7 szint), a 20 NFR → a mérőszám, a szintenkénti tesztek, a mérésből jövő fixture-ök, a kilépési feltételek | **v0.3** — review és rétegenkénti coverage-kapuk; a korábbi 101 tesztes és coverage-mérés történeti eredmény, a jelenlegi munkafa ellenőrzését lásd az [állapotban](ALLAPOT.md) |
 | 09 | [üzemeltetés és observability](megvalosulas-09-uzemeltetés-es-observability.md) | A mentés és a visszaállítás (a PITR, a heti restore-drill), a monitorozás, a **watchdog** (a riasztás), a naplózás, a vevőhálózat üzemeltetése, az incidenskezelés | **v0.3** — a 05–09-es swarm review javításai (a lehúzás-határ 8 → **4 nap**, a környezetfüggő heartbeat-határ, a restore-drill a **stagingben**, a 3 site kapacitás, a havi partícióméret, a `COPY` batchelés) **+ a 2. kör: a PPM 7, a watchdog mind a 10 riasztása, a `job_run`-ba író drill, a katalógusméret-metrika** |
 
 ---
 
 ## Az implementáció állapota (2026-11-26)
 
-**A `main` HEAD:** `0062220fcd` — **a CI és a Build zöld.**
+**A fejlesztések alapcommitja:** `7fb5c26`. A legutóbbi fejlesztéseket a
+dokumentum frissítésekor távoli CI még nem ellenőrizte.
 
-**A kész R1-es API-végpontok (9):**
-
-| A végpont | A terv | A státusz |
-|---|---|---|
-| `GET /health` | a `09` §4.1 | ✅ |
-| `GET /api/v1/vessels` | a `03` §3.1 | ✅ |
-| `GET /api/v1/vessels/{id}` | a `03` §3.1 | ✅ |
-| `GET /api/v1/vessels/{id}/aliases` | a `03` §3.1 | ✅ |
-| `GET /api/v1/vessels/{id}/ownership` | a `03` §3.1 | ✅ |
-| `GET /api/v1/vessels/{id}/certificates` | a `03` §3.1 | ✅ |
-| `GET /api/v1/vessels/{id}/identifiers` | a `03` §3.1 | ✅ |
-| `GET /api/v1/vessels/{id}/data-origin` | a `03` §3.1 | ✅ |
-| `GET /api/v1/search` | a `03` §3.2 | ✅ |
-| `GET /api/v1/content/{key}` | a `03` §3.4 | ✅ |
-
-**A kész infrastruktúra:** a `justfile` · az Alembic-migráció · a
-generált `db/ddl/schema-v1.1.sql` · a CI (a lint + a typecheck + a
-test + a build) · a Build (a PostGIS + `pg_cron` image) · a deploy
-workflow-k.
-
-**A minőségi kapuk:** a `just check` **EXIT 0** · **101 teszt**
-(64 unit + 5 property + 32 integrációs, valódi PostgreSQL-lel) ·
-a domain coverage **100%** · az ingest **99,03%** · az
-alkalmazásréteg **89,89%** · a `mypy` és a `ruff` hibátlan.
+- Az API-ban 10 korábbi végpont (a health endpointtal), 9 referencialista
+  és 2 referencia-adatlap van; egyes katalógusszűrők még hiányoznak.
+- Elkészült a generált TypeScript API-kliens és a háromnyelvű,
+  két területet kezelő statikus katalógus első változata, élő API-s
+  kereséssel, rendezéssel és lapozással.
+- A helyi Python-teszteken 88 sikeres, 43 PostgreSQL-függő teszt
+  kihagyott; a 6 kliens- és frontendteszt sikeres. A teljes
+  PostgreSQL-es ellenőrzés még hátravan.
+- Az API/web Dockerfile, a frontend hajóadatlapja és az automatikus
+  újraépítés még nincs kész. A tesztadatokkal végzett böngészős
+  ellenőrzés nem éles telepítési igazolás.
 
 **A részletes állapot:** az [`ALLAPOT.md`](ALLAPOT.md) — **a „hol
 tartunk és mi a következő lépés" hivatkozási pont.**
@@ -81,9 +69,8 @@ teljes R1-et fedik le (a 3.7 sprintjei + az R1-0 előkészítés). Az
 **GitHub:** https://github.com/VorosEgyes/vessel-tracker
 (publikus, `main` branch védett — force push tilos).
 
-**A jelenlegi állapot:** [`ALLAPOT.md`](ALLAPOT.md) — mi kész, mi fut,
-mi a következő lépés (a mostani munkaterület: a Pi + rádió
-megépítése).
+**A jelenlegi állapot:** [`ALLAPOT.md`](ALLAPOT.md) — mi készült el,
+mi ellenőrzött, és mi a következő lépés.
 
 ## A 02-es terv validációja
 

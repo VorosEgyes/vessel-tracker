@@ -204,12 +204,12 @@ class PositionReport:
     - 8–37: az MMSI;
     - 38–41: a navigációs állapot (4 bit);
     - 42–49: a manöverjelzés (8 bit, a ROT);
-    - 50–59: a SOG (10 bit, 1/10 m/s);
+    - 50–59: a SOG (10 bit, 1/10 csomó, m/s-ra átalakítva);
     - 60: a pozíció pontossága (1 bit);
     - 61–88: a LON (28 bit, 1/10000 perc);
     - 89–115: a LAT (27 bit, 1/10000 perc);
     - 116–127: a COG (12 bit, 1/10 fok);
-    - 128–136: a heading (9 bit, 1/10 fok);
+    - 128–136: a heading (9 bit, egész fok);
     - 137–142: az időbélyeg (6 bit);
     - 143–144: a manöver (2 bit);
     - 145–147: a tartalék (3 bit);
@@ -229,10 +229,7 @@ class PositionReport:
     lon: float | None
     sog_mps: float | None
     cog_deg: float | None
-    # **A `heading_deg` a 0.1 fokos érték** (a 9 bites mező / 10) →
-    # **a `pyais` a NYERS 9 bites értéket adja** (`heading=1` az 1
-    # fokot jelenti) → **az összevetésnél a `heading_deg * 10` a
-    # `pyais` értéke.**
+    # A true heading mező egész fokban van.
     heading_deg: float | None
     timestamp: int | None
     maneuver: int | None
@@ -299,9 +296,9 @@ def decode_position(payload: str, fill_bits: int = 0, *, physical: bool = False)
         nav_status=bits_to_int(bits, 38, 4),
         lat=lat,
         lon=lon,
-        sog_mps=None if sog_raw == 1023 else sog_raw / 10.0,
+        sog_mps=None if sog_raw == 1023 else sog_raw / 10.0 * (1852 / 3600),
         cog_deg=None if cog_raw == 3600 else cog_raw / 10.0,
-        heading_deg=None if head_raw == 511 else head_raw / 10.0,
+        heading_deg=None if head_raw == 511 else float(head_raw),
         timestamp=bits_to_int(bits, 137, 6),
         maneuver=bits_to_int(bits, 143, 2),
         raim=bool(bits_to_int(bits, 148, 1)),
@@ -581,6 +578,8 @@ def payload_to_bits(payload: str, fill_bits: int = 0, *, physical: bool = False)
         **A `fill_bits`:** a kitöltő bitek a payload **utolsó** bitjei →
     **a dekódolás előtt el kell távolítani őket.**
     """
+    if not 0 <= fill_bits <= 5:
+        raise ValueError("fill_bits must be between 0 and 5")
     values = decode_physical_6bit(payload) if physical else decode_standard_6bit(payload)
     bits: list[int] = []
     for value in values:

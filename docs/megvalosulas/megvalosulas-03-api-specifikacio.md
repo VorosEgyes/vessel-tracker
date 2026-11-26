@@ -387,6 +387,11 @@ jön).
 
 **A `GET /api/v1/vessels` szűrői (mind a query stringben):**
 
+Az alábbi táblázat a célállapotot írja le. A jelenlegi API a `moving`,
+`section`, `basin`, `home_section`, `home_basin` és `season` szűrőket
+még nem valósítja meg; ezekre és más ismeretlen paraméterekre 422-es
+választ ad, nem hagyja őket figyelmen kívül.
+
 | Paraméter | Típus | F-CAT / F-SRCH | Példa |
 |---|---|---|---|
 | `area` | `duna` \| `balaton` — **KÖTELEZŐ** | F-CAT-01, F-SRCH-07 | `duna` |
@@ -593,6 +598,13 @@ GET /api/v1/search?q=12345678&area=duna
 > végpont nem ad `hint`-et (a `03` §5.4a).
 
 ### 3.3 A referenciatáblák
+
+**Megvalósítás:** a listák `page` (1-től) és `per_page` (1–200)
+paraméterrel lapozhatók, a `lang` alapértéke `hu`. A `name_language`
+jelzi a felhasznált fordítást, a `name_fallback` a visszaesést; ha
+nincs kért, angol vagy magyar fordítás, a kód vagy a hivatalos név
+szerepel. A kikötőlista `q` paramétere névre, kódra és UN/LOCODE-ra
+keres. Az ismeretlen paraméterek 422-es választ eredményeznek.
 
 | Method | Path | Leírás |
 |---|---|---|
@@ -1408,6 +1420,10 @@ akkor következik, ha az `en` is hiányzik.)
 kliens nem keveri a „nincs adat" és a „nincs fordítás" esetet. A
 `data.description` a **fallback-szöveg**, a `meta` jelzi, hogy **nem a
 kért nyelven** érkezett.
+
+**Jelenlegi megvalósítás:** a `content` végpont már küldi ezt a
+metaadatot. A hajólista, kereső és adatlap a neveknél már használja a
+visszaesési sorrendet, de a mezőnkénti fallback-metaadatot még nem küldi.
 
 **A `null` csak akkor marad**, ha **nincs** fordítás és nincs
 fallback-szöveg sem (a kulcs nem létezik egyetlen nyelven sem) — és

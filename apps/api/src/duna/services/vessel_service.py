@@ -55,7 +55,7 @@ class VesselWriteResult:
 
 async def list_catalog(
     session: AsyncSession, filters: VesselFilters
-) -> tuple[list[VesselListItem], int | None]:
+) -> tuple[list[VesselListItem], int | None, bool]:
     """A katalóguslista (a F-CAT-02)."""
     return await list_vessels(session, filters)
 

@@ -1,6 +1,6 @@
 # Implementációs terv – 05: frontend-arkitektúra
 
-**Verzió:** 0.3 (a 05–09-es swarm review javításai: a nyelvválasztó süti/prefix, a rendezés, a bizonyossági badge, a `river_km` 3 forrás, a súgó, az `output: 'static'` + a Node adapter)
+**Verzió:** 0.3 (review utáni terv, a jelenlegi implementáció állapotával kiegészítve)
 **Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·
@@ -16,6 +16,16 @@
 > A dokumentum a repóban a `docs/megvalosulas/05-frontend-arkitektura.md`
 > útvonalon van — a relatív linkek ehhez képest számolnak.
 
+> **Megvalósítási állapot (2026-11-26):** az alábbi terv nagy része
+> továbbra is célállapot, nem kész funkció. A jóváhagyott első változat
+> statikus, buildkor API-ból betöltött katalógust és böngészőből indított,
+> élő API-s keresést, rendezést és lapozást használ. Hat oldal készült
+> (`hu`/`en`/`de` × `duna`/`balaton`), valamint egy választó kezdőlap.
+> A hajóadatlap, a rebuild-hook és az automatikus telepítés még hiányzik.
+> A build és a böngésző ellenőrzése teszt-API-val történt, nem éles
+> adatbázissal. Lásd a [frontend README-t](../../apps/web/README.md) és
+> az [állapotot](ALLAPOT.md).
+
 ---
 
 ## 1. Az alapelv: a SEO megköveteli a **build-kori** szerveroldali renderelést
@@ -25,10 +35,10 @@ hajóoldalak minden nyelven — 100%*"), és ez **nem** megvalósítható
 tiszta kliensoldali rendereléssel (a Google a JS-t renderszeli, de
 a kezdeti HTML üres).
 
-**Ezért: Astro `output: 'static'` + a Node adapter** — a `web`
-konténer a **build-kor** olvassa a DB-t, és **minden nyilvános oldal
-a build-ben szerveroldalon jön** (a `getStaticPaths` a DB-ből generálja
-a hajólistát, a hajóoldalak a build során renderelődnek).
+**Ezért Astro `output: 'static'`:** a jelenlegi katalógus a build során
+az API-ból kapja a kezdő adatokat, nem közvetlenül a DB-ből. A
+hajóoldalak buildkori generálása még terv. A jelenlegi alkalmazás nem
+használ Node adaptert; a kész statikus fájlokat webszerver szolgálhatja ki.
 
 > **A `F-USR-04` szerint** (a funkcióleírás §4.9) **a katalógus
 > F-IÓK NÉLKÜL is teljes értékű** → **ezért van a statikus kimenet**:
@@ -47,19 +57,16 @@ a hajólistát, a hajóoldalak a build során renderelődnek).
 > marad** (a `output: 'static'` a SEO-hoz kell) — az újraépítés a
 > tartalom változására triggerelődő deploy, **nem** per-request SSR"*.
 >
-> **A „a hajóoldalak folyamatosan változó adata" nem indokolja az
-> SSR-t** — a hajóoldalak `static` módban is a DB-ből olvasnak
-> (build-kor) → **a tartalom-újraépítés (a `01` §3.2.1) a katalógus
-> frissességét is biztosítja**: a hajóadat hetente változik (a F-NF-08),
-> a heti ingest **rebuildet triggerel**.
+> A tervezett tartalom-újraépítés biztosítaná a statikus oldalak
+> frissességét; a heti ingest által indított rebuild még nincs megvalósítva.
 
 | Renderelés | Hol | Mikor |
 |---|---|---|
-| **Build-kori szerveroldali** | a nyilvános oldalak **mind** (`getStaticPaths` + a DB a build-ben) | az Astro build során |
-| **Kliensoldali sziget** | a React-szigetek (a szűrő, a lapinyítás) | ahol a JavaScript valóban kell |
-| **Statikus kimenet** | a `docs/`, a fejlécek | a build során |
+| **Build-kori renderelés** | jelenleg a katalógus kezdő listája az API-ból | az Astro build során |
+| **Kliensoldali interakció** | keresés, rendezés, lapozás az élő API-val | böngészőben, JavaScripttel |
+| **Statikus kimenet** | katalógus- és választóoldalak | a build során |
 
-**A rebuild-mechanizmus (a `01` §3.2.1 szerint — R1-kötelező):**
+**A tervezett rebuild-mechanizmus (a `01` §3.2.1 szerint — még nem kész):**
 
 | Ki indítja | Hogyan | Mikor |
 |---|---|---|
@@ -67,8 +74,8 @@ a hajólistát, a hajóoldalak a build során renderelődnek).
 | **a heti ingest** (a `09` §3.2) | ugyanez a hook → a katalógus **hetente** frissül | hétfő 04:17 után |
 
 **Amit ez NEM zár ki:**
-- a `output: 'static'` **marad** (a `01` §3.2.1) → **a Node adapter**
-  a statikus kimenetet a `web` konténerben szolgálja ki;
+- a `output: 'static'` **marad**; a kiszolgálás módja a telepítés
+  részeként még megvalósítandó;
 - a `docs/megvalosulas/` és a `README.md` **statikus** marad (a
   GitHubon olvasható, nem a weboldalon).
 
@@ -460,19 +467,10 @@ nyelvi változat **nem létezik** (a hajóról nincs angol adatlap), akkor
 
 ### 4.4 A sitemap
 
-**Az `@astrojs/sitemap`** a `site` konfigurációból generálja — de
-**csak a statikus oldalakat** látja. Az SSR oldalak (a hajóadatlapok)
-**dinamikusan** kerülnek a sitemapbe → **egy `/sitemap.xml.ts` route**
-kell, ami a `vessel` táblából generálja.
-
-```ts
-// src/pages/sitemap.xml.ts
-export async function GET({ site }) {
-  const vessels = await apiFetch('/api/v1/vessels?per_page=200');
-  // ... a teljes lista paginggel
-  return new Response(xml, { headers: { 'Content-Type': 'application/xml' } });
-}
-```
+**Tervezett:** a statikus hajóadatlapok sitemapbe kerülése a teljes
+generált útvonal-listából. A hajóoldalak és a sitemap még nem készültek
+el; per-request SSR-re építő dinamikus route nem felelne meg a statikus
+kimenetnek.
 
 **Mely URL-eket tartalmazza?** — a **F-NF-04** (100% indexelhető)
 szerint a sitemap a **minden nyelvi változatot** tartalmazza, **a
@@ -502,6 +500,12 @@ Sitemap: https://vessel-tracker.example/sitemap.xml
 
 ### 5.1 A belső API kliens
 
+**Jelenlegi megoldás:** a buildhez kötelező `API_BASE_URL`, a böngésző
+alapértelmezésben ugyanazon eredeten hívja az API-t; eltérő eredethez
+buildkor `PUBLIC_API_BASE_URL` és megfelelő CORS szükséges. A build
+API-hiba esetén leáll, a böngésző hibaüzenetet mutat. Az alábbi
+`API_INTERNAL_URL`-os példa korábbi terv, nem a jelenlegi konfiguráció.
+
 ```ts
 // src/lib/api.ts
 const API_BASE = import.meta.env.API_INTERNAL_URL;  // http://api:8000
@@ -522,8 +526,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 ### 5.2 A build-kori adatlekérés (a `getStaticPaths`)
 
-**A `output: 'static'`-ban a `getStaticPaths` generálja az oldalak
-listáját** — a hajóoldalak a **build során** olvassák a DB-t:
+**Tervezett példa, nem megvalósított hajóadatlap:** a `getStaticPaths`
+a statikus oldalak listáját a build során generálná az API-ból.
 
 ```astro
 ---
@@ -599,7 +603,8 @@ a `docs/megvalosulas/` alatt van, és az Astro Markdown-ként kezeli.
 
 ### 6.2 A React-szigetek (ahol a JavaScript kell)
 
-**Csak három ilyen van R1-ben:**
+**Tervezett komponensek:** a jelenlegi katalógus nem React-szigeteket,
+hanem kliensoldali TypeScriptet használ.
 
 | Sziget | Miért kell a JS | A hydration |
 |---|---|---|
@@ -613,19 +618,18 @@ az első festés nem vár JS-re.
 **A szűrő a URL-t módosítja, nem a state-et** — ez a F-CAT-10
 („*a lista nézete megőrzi a szűrőt és a rendezést az URL-ben*").
 
-### 6.3 A szűrő → URL → szerveroldali feldolgozás
+### 6.3 A katalógus interaktív feldolgozása
 
 ```
-A felhasznalo megvaltoztatja a szuret
-   → a VesselFilters.tsx frissiti a URL-t (replaceState)
-   → az Astro navigacio ujra-rendereli a page komponenst
-   → a page komponens az API-val lekeri az uj adatot
-   → a lista frissul
+A felhasznalo keres, rendez vagy lapoz
+   → a bongeszo frissiti a URL allapotat
+   → a bongeszo meghivja az elo API-t
+   → a lista vagy a hibaallapot frissul
 ```
 
-**A teljes oldal újrarenderelődik** — nincs kliensoldali adatkezelés.
-**Ez a legegyszerűbb és a legbiztonságosabb** (a URL az egyetlen
-állapottartó), és a SEO-t is garantálja.
+Nincs kérésenkénti Astro-szerveroldali renderelés. JavaScript nélkül a
+buildkori kezdő lista látható, az interaktív műveletek nem működnek.
+Az API-híváshoz elérhető backend és szükség szerint proxy vagy CORS kell.
 
 ---
 
@@ -633,6 +637,8 @@ A felhasznalo megvaltoztatja a szuret
 
 ### 7.1 A lista oszlopai (a F-CAT-03)
 
+Az alábbi oszlopok és lehetőségek a teljes katalógus tervei; a jelenlegi
+első változat nem valósítja meg mindegyiket.
 | Oszlop | Forrás | Megjegyzés |
 |---|---|---|
 | A hajónév | `vessel_i18n.name` (a kért nyelven) | **nem fordul** → a latin hivatalos név (a 02-es terv §5.8.4) |
@@ -646,6 +652,9 @@ betöltése (300 hajós lista) < 800 ms p95*".
 
 ### 7.2 A szűrő és a rendezés az URL-ben
 
+Az alábbi példa a tervezett teljes szűrőkészletet szemlélteti. Jelenleg a
+katalógus útvonala `/{lang}/{area}/hajok/`, a keresés, a rendezés és a
+lapozás működik; a többi tervezett szűrő nincs mind megvalósítva.
 ```
 /hu/hajos?area=duna&type=INLAND_CARGO&operator=7&sort=name&order=asc&page=2
 ```

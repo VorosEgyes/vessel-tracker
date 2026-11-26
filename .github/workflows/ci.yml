@@ -43,7 +43,6 @@ jobs:
       # `pnpm/action-setup` (a 2026-11-24-i CI-futas hiba: "Unable to
       # locate executable file: pnpm")
       - uses: pnpm/action-setup@v4
-        with: {version: 10}
       # A `just` NINCS elore telepitve a GitHub Actions-en -> a
       # kanonikus parancsokhoz telepiteni kell (a 07 §4.2)
       - uses: extractions/setup-just@v1
@@ -52,13 +51,12 @@ jobs:
       # -> **a `uv sync` KELL** (a 2026-11-24-i CI-futas hiba:
       # "error: Failed to spawn: `ruff`")
       - run: uv sync --frozen --extra dev
-      # A pnpm-lock.yaml meg nincs a repoban (a frontend resze) ->
-      # a `--frozen-lockfile` a CI-ban elbukna -> a `just` recept
-      # maga ellenorzi (a 07 §3.1)
-      - run: if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else echo "a frontend meg nincs a repoban -> a pnpm install kihagyva"; fi
+      - run: pnpm install --frozen-lockfile
       - run: just lint
       - run: just lint-frontend
       - run: just typecheck
+      - run: pnpm api:check
+      - run: pnpm test
 
   # ==================================================================
   # 3–10c. a tesztek es a schema-ellenorzes (a 07 §8.1)

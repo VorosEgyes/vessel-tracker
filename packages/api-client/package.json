@@ -1,0 +1,30 @@
+{
+  "name": "@vessel-tracker/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
+    "lint": "tsc --noEmit",
+    "format:check": "prettier --check 'src/index.ts' 'tests/**/*.ts' 'scripts/**/*.mjs' '*.json'",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "openapi-typescript": "7.13.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

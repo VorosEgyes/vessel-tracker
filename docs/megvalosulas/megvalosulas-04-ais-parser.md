@@ -303,12 +303,12 @@ kódolással):**
 | 8–37 | 30 | `mmsi` | egész |
 | 38–41 | 4 | `nav_status` | 0–15 |
 | 42–49 | 8 | a manöverjelzés (a ROT) | előjeles |
-| 50–59 | 10 | `sog_mps` | egész, 1/10 m/s |
+| 50–59 | 10 | `sog_mps` | 1/10 csomó, m/s-ra átszámítva (1 csomó = 1852/3600 m/s) |
 | 60 | 1 | a pozíció pontossága | 0 = 10 m, 1 = < 10 m |
 | 61–88 | 28 | `lon` | előjeles, 1/10000 perc |
 | 89–115 | 27 | `lat` | előjeles, 1/10000 perc |
 | 116–127 | 12 | `cog_deg` | egész, 1/10 fok |
-| 128–136 | 9 | `heading_deg` | egész, 1/10 fok |
+| 128–136 | 9 | `heading_deg` | egész fok (511: nincs adat) |
 | 137–142 | 6 | az időbélyeg | egész |
 | 143–144 | 2 | a manöver | 0–3 |
 | 145–147 | 3 | a tartalék | |

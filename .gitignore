@@ -11,6 +11,7 @@
 
 # Node
 node_modules/
+.astro/
 dist/
 build/
 npm-debug.log*

@@ -1,0 +1,151 @@
+---
+import {
+  areas,
+  fetchCatalog,
+  languages,
+  messages,
+  translatedValue,
+  type Area,
+  type Language,
+} from "../../../lib/catalog";
+import "../../../styles/catalog.css";
+
+export async function getStaticPaths() {
+  return languages.flatMap((lang) =>
+    areas.map((area) => ({ params: { lang, area } })),
+  );
+}
+
+const lang = Astro.params.lang as Language;
+const area = Astro.params.area as Area;
+const t = messages[lang];
+const apiUrl = import.meta.env.API_BASE_URL;
+if (!apiUrl) throw new Error("API_BASE_URL is required to build the catalogue");
+const catalog = await fetchCatalog(apiUrl, area, lang, new URLSearchParams());
+---
+
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{t.title} · {t[area]}</title>
+    <meta name="description" content={t.subtitle} />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href={`/${lang}/duna/hajok`}
+        >VESSEL <span>TRACKER</span></a
+      >
+      <nav class="languages" aria-label="Languages">
+        {
+          languages.map((language) => (
+            <a
+              href={`/${language}/${area}/hajok`}
+              lang={language}
+              aria-current={language === lang ? "page" : undefined}
+            >
+              {language.toUpperCase()}
+            </a>
+          ))
+        }
+      </nav>
+    </header>
+    <main
+      id="catalog"
+      data-lang={lang}
+      data-area={area}
+      data-api-base={import.meta.env.PUBLIC_API_BASE_URL || ""}
+    >
+      <section class="intro">
+        <p class="eyebrow">VESSEL TRACKER / {t[area].toUpperCase()}</p>
+        <h1>{t.title}</h1>
+        <p>{t.subtitle}</p>
+        <nav class="area-tabs" aria-label={t.title}>
+          {
+            areas.map((item) => (
+              <a
+                href={`/${lang}/${item}/hajok`}
+                aria-current={area === item ? "page" : undefined}
+              >
+                {t[item]}
+              </a>
+            ))
+          }
+        </nav>
+      </section>
+      <section class="catalog-panel" aria-label={t.title}>
+        <form id="filters" class="filters" action="">
+          <label
+            >{t.search}<input
+              name="q"
+              type="search"
+              autocomplete="off"
+            /></label
+          >
+          <label
+            >{t.sort}
+            <select name="sort">
+              <option value="name">{t.name}</option>
+              <option value="type">{t.type}</option>
+              <option value="length">{t.length}</option>
+              <option value="updated_at">{t.updated}</option>
+            </select>
+          </label>
+          <label
+            >{t.order}
+            <select name="order">
+              <option value="asc">{t.ascending}</option>
+              <option value="desc">{t.descending}</option>
+            </select>
+          </label>
+          <button type="submit">{t.searchButton}</button>
+        </form>
+        <noscript><p class="notice">{t.nojs}</p></noscript>
+        <p id="feedback" role="status" aria-live="polite" hidden></p>
+        <div class="table-wrap">
+          <table>
+            <thead
+              ><tr
+                ><th scope="col">{t.name}</th><th scope="col">{t.type}</th><th
+                  scope="col">{t.identifier}</th
+                ><th scope="col">{t.operator}</th><th scope="col">{t.status}</th
+                ><th scope="col">{t.verification}</th></tr
+              ></thead
+            >
+            <tbody id="results">
+              {
+                catalog.data.map((vessel) => (
+                  <tr>
+                    <td class="vessel-name">{vessel.name}</td>
+                    <td>{vessel.vessel_type_name}</td>
+                    <td>{vessel.identifier ?? t.missing}</td>
+                    <td>{vessel.operator_name ?? t.missing}</td>
+                    <td>{translatedValue(lang, vessel.status)}</td>
+                    <td>
+                      {translatedValue(lang, vessel.verification_level)}
+                      {vessel.verification_source === "stored_stale" && (
+                        <span class="stale"> · {t.stale}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+        <p id="empty" hidden={catalog.data.length > 0}>{t.empty}</p>
+        <nav class="pagination" aria-label={t.page}>
+          <button id="previous" type="button" disabled>{t.previous}</button>
+          <span id="page-label">{t.page} {catalog.meta.page}</span>
+          <button id="next" type="button" disabled={!catalog.meta.has_more}
+            >{t.next}</button
+          >
+        </nav>
+      </section>
+    </main>
+    <script>
+      import "../../../scripts/catalog";
+    </script>
+  </body>
+</html>
