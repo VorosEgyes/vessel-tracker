@@ -9,9 +9,15 @@
 > és a logikai modell). **A konkrét, implementálható séma** — a 71
 > tábla, az indexek, a constraint-ek, a triggerek, a nézetek, a
 > DB-szerepkörök — **a [`docs/megvalosulas/megvalosulas-02-adatbazis-ddl.md`](docs/megvalosulas/megvalosulas-02-adatbazis-ddl.md)
-> tervben van (jelenleg **v1.7**, valódi PostgreSQL-en futtatva és
+> tervben van (jelenleg **v1.12**, valódi PostgreSQL-en futtatva és
 > tesztelve). **Két dokumentum, két szerep: itt a „miért", ott a „mi
 > van".**
+
+> **📍 AZ ÁLLAPOT:** **a „hol tartunk és mi a következő lépés"** →
+> **[`docs/megvalosulas/ALLAPOT.md`](docs/megvalosulas/ALLAPOT.md)** —
+> **a kész R1-es végpontok, a minőségi kapuk és a következő lépések
+> a részletes listájával.** (2026-11-26: **9 R1-es API-végpont**,
+> **101 teszt**, a `just check` zöld.)
 
 **Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/ais-vevo-terv.md`](docs/ais-vevo-terv.md) (saját AIS vevőhálózat) · [`docs/pi-eloallitas.md`](docs/pi-eloallitas.md) (Pi előállítás: AIS + ADS-B) · [`docs/ingest-terv.md`](docs/ingest-terv.md) (adatút: Pi-től az adatbázisig) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
 

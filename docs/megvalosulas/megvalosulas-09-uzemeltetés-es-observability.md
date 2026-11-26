@@ -1,6 +1,6 @@
 # Implementációs terv – 09: üzemeltetés és observability
 
-**Verzió:** 0.1 (terv-draft, swarm review előtt)
+**Verzió:** 0.3 (a 05–09-es swarm review javításai: a lehúzás-határ 8 → **4 nap**, a környezetfüggő heartbeat-határ, a restore-drill a **stagingben**, a 3 site kapacitás, a havi partíciókezelés)
 **Dátum:** 2026-11-23
 **Kapcsolódó dokumentumok:**
 [`../README.md`](../README.md) (adatbázis-terv) ·

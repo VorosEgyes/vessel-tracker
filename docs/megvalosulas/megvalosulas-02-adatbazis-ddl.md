@@ -1,6 +1,13 @@
 # Implementációs terv – 02: adatbázis-séma (DDL v1.1) és migrációk
 
-**Verzió:** 1.11 (2026-11-26 — **a kereső trigram-indexe** a
+**Verzió:** 1.12 (2026-11-26 — **a `sync_vessel_sort_name` trigger
+már nem írja felül a `sort_name`-t**: a `02` §8.1a szerint a
+`sort_name`-t az **alkalmazás** tölti be (a normalizált alakban) →
+**a trigger CSAK az üres `sort_name`-t állítja be** → **a DB-ben
+mindig a `lower(unaccent(name))` alak van** → **a trigram-index
+(használható) a F-SRCH-03 szerint)
+
+**A v1.11 (2026-11-26 — **a kereső trigram-indexe** a
 `vessel.sort_name`-ra: a F-SRCH-03 szerint a hajónév-keresés
 ékezet- és kis-nagybetű-független → **a `sort_name` a triggerben
 `lower(unaccent(name))`** → **a trigram index erre épül** (az

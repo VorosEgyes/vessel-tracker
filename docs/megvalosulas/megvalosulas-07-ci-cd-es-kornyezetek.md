@@ -1,7 +1,13 @@
 # Implementációs terv – 07: CI/CD és környezetek
 
-**Verzió:** 0.1 (terv-draft, swarm review előtt)
-**Dátum:** 2026-11-23
+**Verzió:** 0.4 (2026-11-26 — **a CI/CD él** — a `justfile` a kanonikus
+belépési pont, az Alembic-migráció fut, a PostgreSQL custom image
+(PostGIS + `pg_cron`) épül, a deploy workflow-k a környezet-ellenőrzéssel
+kihagyják a hiányzó VPS-t; **+ a rétegenkénti coverage-kapuk**, **a
+`just models-check`** (a modellek–séma drift), **a `just test-integration`
+a CI-ben** (a valódi PostgreSQL service-en), **a `just test-app`**
+(release-kapu))
+**Dátum:** 2026-11-23 (a verzó: 2026-11-26)
 **Kapcsolódó dokumentumok:**
 [`../README.md`](../README.md) (adatbázis-terv) ·
 [`megvalosulas-01-stack-es-struktura.md`](megvalosulas-01-stack-es-struktura.md) (a stack, a struktúra, a környezetek — **ez a terv abból épül**) ·

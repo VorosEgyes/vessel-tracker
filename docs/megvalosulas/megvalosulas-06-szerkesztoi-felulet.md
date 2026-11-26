@@ -1,6 +1,6 @@
 # Implementációs terv – 06: szerkesztői felület
 
-**Verzió:** 0.1 (terv-draft, swarm review előtt)
+**Verzió:** 0.2 (a 05–09-es swarm review javításai: az `admin_api` DB-szerepkör, az egy-session korlát, az AIS-import, a célállomás mező, az import limit)
 **Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·

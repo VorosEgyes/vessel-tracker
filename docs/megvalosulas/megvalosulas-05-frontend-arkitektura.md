@@ -1,6 +1,6 @@
 # Implementációs terv – 05: frontend-arkitektúra
 
-**Verzió:** 0.1 (terv-draft, swarm review előtt)
+**Verzió:** 0.3 (a 05–09-es swarm review javításai: a nyelvválasztó süti/prefix, a rendezés, a bizonyossági badge, a `river_km` 3 forrás, a súgó, az `output: 'static'` + a Node adapter)
 **Dátum:** 2026-11-19
 **Kapcsolódó dokumentumok:**
 [`../../README.md`](../../README.md) (adatbázis-terv v1.3) ·

@@ -1,8 +1,11 @@
 # Állapot – Vessel Tracker (Duna és Balaton)
 
-**Frissítve:** 2026-11-19
+**Frissítve:** 2026-11-26
 **Repo:** https://github.com/VorosEgyes/vessel-tracker
-**Aktuális munkaterület:** a **Pi + rádió megépítése** (a Budapesti AIS-vevő)
+**A `main` HEAD:** `0062220fcd` (a CI/Build zöld)
+**Aktuális munkaterület:** **az alkalmazás rétegeinek megépítése**
+(a `03` – API-specifikáció alapján) — **a Pi + rádió mérésével
+párhuzamosan**
 
 > Ez a dokumentum a **„hol állunk"** hivatkozási pont: mi kész, mi fut,
 > mi a következő lépés, és hol van minden. Frissítése a munkafolyamat
@@ -15,8 +18,15 @@
 **Hajókövető a Dunán és a Balatonon** — az R1 release egy **statikus
 hajókatalógus** (térkép és élő adat nélkül), három nyelven (hu/de/en).
 
-**Az R1-0 előkészítő fázis** (3–6 hónap, a `release-terv` 3.4.1)
-még **nincs elkezdve** — ez a mostani munkaterület.
+**A mérési fázis fut** (a `bud01` AIS-vevő, 2026-11-22 óta) —
+**és párhuzamosan az alkalmazás rétegei készülnek** (a `03`
+alapján): **a séma, a migráció, a CI, és az első 9 API-végpont
+valós kód.**
+
+**A két munkaág összefüggése:** a mérés **a fixture-öket adja**
+(a `04` – parser-terv) → **a mérésből jönnek az AIS-tesztadatok**,
+amikre a parser épül; **az alkalmazás rétegeire a mérés nem
+vár** → **ezért lehetett párhuzamosan dolgozni.**
 
 ---
 
@@ -75,20 +85,164 @@ PostgreSQL-en, majd füstöt hajt végre.
 **`--plan` kapcsolóval bármely tervet validál** (a live helyett a
 benyújtott fájlt olvassa).
 
+
 ---
+
+## 2b. A kódoldali állapot (2026-11-26)
+
+**Ez a fejezet a „melyik kódrész kész" rögzítése.** A fenti 2.1–2.2
+a **tervezési** oldal; **ez az implementációs**.
+
+### 2b.1 A repó szerkezete (a `01` §4.2 szerint)
+
+```
+apps/api/src/duna/
+├── config.py              ← a pydantic-settings (a DATABASE_URL)
+├── main.py                ← a FastAPI app + a CORS + a /health + a lifespan
+├── db/
+│   ├── models.py          ← 20 ORM modell (a 02 DDL ORM-reprezentációja)
+│   ├── session.py         ← az async engine (a lifespanben!) + a session-gyár
+│   └── views.py           ← a DB-nézetek (vessel_verification, vessel_last_position)
+├── api/v1/
+│   ├── vessel.py          ← GET /vessels, /vessels/{id} + 5 al-végpont
+│   ├── search.py          ← GET /search
+│   ├── content.py         ← GET /content/{key}
+│   └── export_openapi.py  ← az OpenAPI export (a just openapi)
+├── schemas/               ← a Page[T]/Data[T], a VesselListItem, a VesselDetail
+├── repositories/          ← a SQLAlchemy query-k (4 modul)
+├── services/              ← a service réteg (a 03 §5.1) — 4 modul
+├── domain/                ← a tiszta üzleti logika (verification, text, slug)
+└── ingest/                ← az AIS parser (a 04)
+```
+
+**A rétegsorrend (a `03` §5.1):** `router → service → repository → DB`.
+
+### 2b.2 A kész API-végpontok (9)
+
+| A végpont | A funkció | A státusz |
+|---|---|---|
+| `GET /health` | a DB elérhetősége (a 09 §4.1) | ✅ |
+| `GET /api/v1/vessels` | a katalóguslista (a F-CAT-02) | ✅ |
+| `GET /api/v1/vessels/{id}` | a hajóadatlap (a F-DET-01…16) | ✅ |
+| `GET /api/v1/vessels/{id}/aliases` | a történeti nevek (a F-DET-05) | ✅ |
+| `GET /api/v1/vessels/{id}/ownership` | a tulajdonosváltások (a F-DET-05) | ✅ |
+| `GET /api/v1/vessels/{id}/certificates` | az engedélyek (a F-DET-02) | ✅ |
+| `GET /api/v1/vessels/{id}/identifiers` | az azonosítók (a F-DET-02, -15) | ✅ |
+| `GET /api/v1/vessels/{id}/data-origin` | a mezőnkénti eredet (a F-DET-15) | ✅ |
+| `GET /api/v1/search` | a globális kereső (a F-SRCH-01…07) | ✅ |
+| `GET /api/v1/content/{key}` | a fordítás-fallback-lánc (a F-NF-01…15) | ✅ |
+
+**A `GET /api/v1/search/suggest`** (a F-SRCH-08) ⏳ **R3** — nem R1.
+
+### 2b.3 A kész infrastruktúra
+
+| A rész | A státusz |
+|---|---|
+| **a `justfile`** (a kanonikus belépési pont) | ✅ **~36 recept** |
+| **az Alembic-migráció** (a `db/migrations/`) | ✅ **a `0001` a teljes sémát hozza létre** — a `just db-migrate` fut, a `just test-reversible` igazolja a visszafordíthatóságot |
+| **a `db/ddl/schema-v1.1.sql`** | ✅ **GENERÁLT** a `02` tervből (a `just ddl-generate`) — **a `just ddl-diff` ellenőrzi a driftet** |
+| **a CI** (a `.github/workflows/ci.yml`) | ✅ **a lint + a typecheck + a test + a build jobok** — **a PostgreSQL service-en fut a migráció + az integrációs teszt + a `models-check`** |
+| **a Build** (a `build.yml`) | ✅ **a PostgreSQL custom image (a PostGIS + a `pg_cron`) + az API image** |
+| **a deploy workflow-k** | ✅ **a staging (a környezet-ellenőrzéssel kihagyja a hiányzó VPS-t) + a production (manuális)** |
+| **a `scripts/ci/pytest_or_skip.py`** | ✅ **nem maszkolja a hibákat** (csak a „nincs gyűjtött teszt" esetet nyeli el) |
+| **a `scripts/ci/check_models.py`** (a `just models-check`) | ✅ **kétirányú modell–séma drift-ellenőrzés** |
+| **a `scripts/ci/check_reversible.py`** | ✅ **a valódi migráció-visszafordítás teszt** |
+
+### 2b.4 A tesztek és a minőségi kapuk
+
+| A szint | A tesztek | A státusz |
+|---|---|---|
+| **unit** | **64** (a `verification`, a `decoder`, a `text`, a `slug`) | ✅ |
+| **property** | **5** (a 6 bites round-trip, a `hypothesis`) | ✅ |
+| **integrációs** | **32** (valódi PostgreSQL-lel) | ✅ |
+| **összesen** | **101** | ✅ |
+
+| A kapu | A küszöb | A mért |
+|---|---|---|
+| a `duna.domain` coverage | 90% | **100%** |
+| a `duna.ingest` coverage | 90% | **99,03%** |
+| az alkalmazásréteg coverage | 70% | **89,89%** (DB-vel) |
+| a teljes `duna` coverage | 85% | **a release-kapu** (a `just test-app`) |
+| a `mypy` | hibátlan | ✅ **32 forrásfájl** |
+| a `ruff` | hibátlan | ✅ |
+
+**A `just check` EXIT 0** — **ez a teljes minőségi kapu egy parancsban.**
+
+### 2b.5 A mérési oldal (a 2026-11-24-i állapot)
+
+| A mérés | Az eredmény |
+|---|---|
+| **a mérés időtartama** | **40 óra** (2026-11-22 → 11-24) |
+| **az üzenetek száma** | **482 036** |
+| **a hajók száma** | **263** |
+| **a statikus ütem mediánja** | **361 mp** |
+| **a lefedettség** | **64,59%** (a 37 órás mérésben) |
+| **a névlefedettség** | **82,6%** |
+| **az ENI-arány** | **0,4%** (a városi helyen — a szűvízben mérni kell) |
+
+> **A 30 napos mérés fut** (2026-12-22-ig) — **a heti lehúzás működik**
+> (a Pi → NAS, a `command=` korlátozással).
+
+### 2b.6 A ma délelőtti munka eredménye (a 9 végpont)
+
+**A `main` HEAD:** `0062220fcd` — **a CI és a Build zöld.**
+
+| A lépés | A commit |
+|---|---|
+| az Alembic-migráció (a séma a forrás) | `5d1c9e4c3e` |
+| a TCP-csatlakozás javítása (a CI-hiba) | `6eb0af64ce` |
+| az extensionök telepítése (a CI-hiba) | `dd0fb35823` |
+| a trigram-index javítása (a CI-hiba) | `7b5934b4e7` |
+| **az `api/` réteg** (a katalóguslista) | `0f5ecf29db` |
+| **a hajóadatlap + 5 al-végpont** | `bb9cc0cc2e` |
+| **a globális kereső** | `57912356e6` |
+| **a service réteg + a content végpont** | `0062220fcd` |
+
+**A talált és javított valódi hibák (mind a tesztek és a `mypy` kapták el):**
+
+| # | A hiba | A javítás |
+|---|---|---|
+| 1 | a `psql` a socketet kereste (a CI service TCP-n fut) | a `PGHOST`/`PGPORT`/`PGPASSWORD` a teljes URL-ből |
+| 2 | `unaccent(text) does not exist` | a migráció telepíti a szükséges extensionöket |
+| 3 | „index expression must be marked IMMUTABLE" (az `unaccent` nem IMMUTABLE) | a `02` v1.10: az index-kifejezés `lower(x)` |
+| 4 | a globális `lru_cache`-elt engine → „Event loop is closed" | az engine a FastAPI lifespanben (architekturális hiba) |
+| 5 | a `verification_level` label-ütközés (a tárolt érték jött) | egyedi label → a SZÁMÍTOTT érték |
+| 6 | 4 hibás ORM modell (`country.name`, `operator.legal_name`, a `port` neve, a `waterway`) | javítva + **a `just models-check` elkapja a driftet** |
+| 7 | a trigger felülírta az alkalmazás normalizált `sort_name`-jét | a `02` v1.12: csak az üres `sort_name`-t állítja |
+| 8 | a `pgserver` egyetlen extensiont sem tartalmaz | a kereső a `sort_name` mellett a `vessel_i18n.name`-re is keres |
+| 9 | a router közvetlenül a repository-t hívta (a `03` §5.1 eltérés) | a service réteg (4 modul) |
+| 10 | az `UPDATE` `rowcount`-ja nem megbízható | a `RETURNING`-es upsert |
+| 11 | a `vessel_identifier.source_id` hiányzott a `models.py`-ből | javítva (a `mypy` kapta el) |
 
 ## 3. Mi fut
 
 | Mi | Hol | Állapot |
 |---|---|---|
 | **A bud01 AIS-vevő** | a Pi-n (`ais-receiver.service`) | ✅ **fut** 2026-11-22 19:19 óta — 38 000+ üzenet/óra, 199 hajó |
-| **A heti lehúzás** | a Pi bootja után (`ExecStartPost`) → a NAS (`/opt/data/martin/work/ais-data/`) | ✅ **működik** (a legutóbbi: `ais-20261123-2328.db`, 99 MB, **382 968 üzenet**, 245 hajó) (a `command=` korlátozással) — hétfő 04:17-kor |
+| **A heti lehúzás** | a Pi bootja után (`ExecStartPost`) → a NAS (`/opt/data/martin/work/ais-data/`) | ✅ **működik** (a legutóbbi: `ais-20261124-1155.db`, **125 MB**, **482 036 üzenet**, 263 hajó) (a `command=` korlátozással) — hétfő 04:17-kor |
 | **A mérési elemző** | a NAS-on (`analyze_measurement.py`) | ✅ fut — a read-only (`immutable=1`) nyitás nem hagy `-wal`/`-shm` fájlokat |
 | **A 30 napos mérés** | a `bud01` telephelyen | **2026-12-22-ig** — a go/no-go küszöbön (69,8% ≥ 50%) |
 
 **A mérés első órája:** 44 000 üzenet, 199 hajó (78 neves), 106
 navigációs lámpa, 767 FI 10 (ENI) üzenet, **69,8% földrajzi lefedettség**
 → **a go/no-go küszöbön** (a `docs/measurement_2026-11-22.md`).
+
+**A 40 órás mérés (2026-11-24):** **482 036 üzenet**, **263 hajó**,
+**a statikus ütem mediánja 361 mp** — a részletek a
+`docs/measurement_2026-11-22.md`-ben.
+
+### 3.1 A kódoldal (2026-11-26)
+
+| Mi | Hol | Állapot |
+|---|---|---|
+| **a FastAPI app** | `apps/api/src/duna/` | ✅ **9 R1-es végpont**, valódi PostgreSQL-en igazolva |
+| **a séma + a migráció** | `db/migrations/` + `db/ddl/` | ✅ **a `just db-migrate` fut, a visszafordítás igazolt** |
+| **a CI** | `.github/workflows/ci.yml` | ✅ **zöld** (a lint + a typecheck + a test + a build) |
+| **a Build** | `.github/workflows/build.yml` | ✅ **zöld** (a PostGIS + `pg_cron` image) |
+| **a minőségi kapu** | `just check` | ✅ **EXIT 0** (101 teszt, 3 coverage-kapu) |
+| **a `main` HEAD** | a GitHubon | `0062220fcd` |
+
+**A részletek:** a [2b. fejezet](#2b-a-kódoldali-állapot-2026-11-26).
 
 > **A 03-as és a 04-es swarm review lezárult** — a findingek mind
 > be vannak írva (a 03 → v0.3, a 04 → v1.0).
@@ -319,33 +473,45 @@ terv §8.3).
 
 | Hol | Mi | Hogyan érem el |
 |---|---|---|
-| **A Mac repó** | `/Users/modmj/dev/duna-hajokoveto` — a forrás | SSH: `modmj@192.168.1.172` (a wifi-címen; a `192.168.0.135` a fix LAN) |
-| **A GitHub** | `VorosEgyes/vessel-tracker` — a publikus forrás | a `main` branch védett |
-| **A NAS munkakönyvtár** | `/opt/data/martin/work/duna-plan/` — a tervek élő változata | a `stage_for_mac.py` script másolja a Macre |
+| **A fejlesztői munkakönyvtár** | `/opt/data/martin/work/vt-clone/` — **a kód és a tervek élő változata** | a NAS konténerben |
+| **A tervek forrása** | `/opt/data/martin/work/duna-plan/` — a tervek master másolata | a `vt-clone/docs/megvalosulas/` ide szinkronizál |
+| **A GitHub** | `VorosEgyes/vessel-tracker` — **a kanonikus forrás** | a `main` branch védett (a force-push tiltva) |
+| **A push-segéd** | `/opt/data/martin/work/gh_commit.py` — **a GitHub API-val pushol** | a fine-grained PAT-tal (a `.git-credentials`-ből) |
+| **A Pi vevő** | `bud01` (`192.168.1.172`) — a fizikai AIS-vevő | a NAS-ról a `mac_to_pi_ed25519` kulccsal |
+| **A NAS fogadó** | `/opt/data/martin/work/ais-data/` — a heti AIS-adatbázisok | a fogadó script a `command=` korlátozással |
+| **A DDL-validáló** | a `pgserver` (a `pgdata` mappában) — az élő PostgreSQL | a `just ddl-validate` |
 | **A swarm board** | `/opt/data/kanban/boards/review-swarm/` — a review-k | a `hermes kanban` parancs |
-| **A review-kivonatok** | `/tmp/swarm/<run>/output/` — a findingek | HEREDOC-ral írták |
-| **A DDL-validáló** | `/opt/data/martin/work/pgtest/` — az élő PostgreSQL | a `pgserver` (a `pgdata` mappában) |
-| **A Mac mount** | `/opt/data/mnt/mac/` — **halott** (a konténerben nincs `SYS_ADMIN`) | **SSH/SCP helyett** — a `stage_for_mac.py` SSH-ágát használjuk |
 
-### 5.1 A Mac repo és a GitHub kapcsolat
+### 5.1 A kód → GitHub kapcsolat (2026-11-26)
 
-**A Macen nincs GitHub-hitelesítés** → a push a `git bundle`-en
-keresztül történik:
+**A Mac offline** (a `192.168.0.135` és a `192.168.1.172` nem
+elérhető a NAS-ról) → **a teljes fejlesztés a NAS konténerben
+folyik** → **a push a GitHub API-n keresztül** (a `gh_commit.py`),
+**nem** a `git`-en keresztül.
 
 ```bash
-# a Macen
-git bundle create /tmp/vt.bundle --all
-# a NAS-on
-scp modmj@192.168.1.172:/tmp/vt.bundle .
-cd /opt/data/martin/work/vessel-tracker
-git fetch ../vt.bundle 'refs/heads/*:refs/remotes/bundle/*'
-git reset --hard bundle/main
-GIT_ASKPASS=/opt/data/martin/home/bin/askpass_gh.sh \
-  git -c credential.helper= push origin main
+# a NAS-on, a vt-clone-ból
+cd /opt/data/martin/work/vt-clone
+MSG=$(cat /opt/data/martin/work/_commit_msgNN.txt)
+python3 /opt/data/martin/work/gh_commit.py "$MSG" --root /opt/data/martin/work/vt-clone \
+  <fájl1> <fájl2> ...
 ```
 
-**A `push_to_github.sh` script** (`/opt/data/martin/work/duna-plan/`)
-az egyszerű útvonalat végzi (a remote beállítása + a push).
+**A `gh_commit.py` a GitHub API `git/trees` + `git/commits` +
+`git/refs` végpontjait használja** → **a `base_tree` a távoli HEAD-ből
+származik** → **a lokális git repo nincs szinkronban** → **a `git
+status` itt nem a valós diffet mutatja!**
+
+**A valós diff** (a távoli HEAD fa vs. a munkafa, a `.gitignore`-ot
+betartva) → **a `gh_commit.py` előtt** → **ez a jóváhagyás alapja.**
+
+**A PAT:** a fine-grained PAT a `VorosEgyes/*` repókra korlátozott
+(code/contents/issues/pull_requests) → **a workflow YAML-ok push-a
+NEM megy** → **azokat Alfred pusholja** (a klasszikus workflow PAT-tal).
+
+> **A `git` a lokális repóban a formázás/teszt futtatáshoz kell**
+> (a `ruff`, a `pytest`, a `just`) — **de a PUSH-hoz a
+> `gh_commit.py` a kanonikus út.**
 
 ---
 
@@ -355,6 +521,10 @@ az egyszerű útvonalat végzi (a remote beállítása + a push).
 |---|---|---|---|
 | 1 | A GitHub-repo létrejött és a `main` védett | ✅ **lezárva** (2026-11-19) | — |
 | 2 | A projekt neve `vessel-tracker` (magyarul: Hajókövető — Duna és Balaton) | ✅ **lezárva** | — |
+| 2b | **A `slug` a hajónévből legyen vagy az MMSI-ből?** (a `02` §8.1a: az alkalmazás generálja) | ✅ **lezárva** — **a név az elsőbbség, az MMSI a tartalék** (a hajót átnevezik, a MMSI nem) | a `duna/domain/slug.py` |
+| 2c | **A `sort_name`-t a DB trigger vagy az alkalmazás töltse be?** | ✅ **lezárva** — **az alkalmazás** (a `02` §8.1a: "a `sort_name`-t az ingest tölti be") → **a trigger csak az üres `sort_name`-t állítja** | a `02` v1.12 |
+| 2d | **A `verification` szűrő a tárolt vagy a számított értékre épüljön?** | ✅ **lezárva** — **a szűrő a TÁROLT értékre** (indexelt), **a megjelenített érték a SZÁMÍTOTT** (a `verification_source` jelzi az eltérést) | a `03` §3.1 |
+| 2e | **A `datamodel-code-generator` bevezetése** (a `03` §5.1a: a modellek generáltak) — **egyelőre kézzel vannak, a `just models-check` ellenőrzi a driftet** | **Miklós** (a generátor a `datamodel-code-generator` dev-függőség) | a `03` §5.1a |
 | 3 | A `position` TTL 90 nap, de a README 5.4 „60 nap"-ot ír | **Miklós** | a 02-es terv §14 Q9 |
 | 4 | A `water_level` TTL 90 nap (a README-ből nem vezethető le) | **Miklós** | a 02-es terv §14 Q10 |
 | 5 | A `release-terv` 3.3 mondatának pontosítása (a `position` R1/R2 helye) | **Miklós** | a 01-es terv §12 |
@@ -368,36 +538,83 @@ az egyszerű útvonalat végzi (a remote beállítása + a push).
 
 ```
 ┌─ TERVEZÉS — a sorozat TELJES (01–09) ─────────────────────┐
-│ 01 stack  →  02 séma (VALIDÁLVA, v1.5)  →  03 API (v0.3)  │
+│ 01 stack  →  02 séma (v1.12, VALIDÁLVA)  →  03 API (v0.7)  │
 │                                       ↓                    │
-│ 04 parser (v1.0)  05 frontend  06 szerkesztő  07 CI        │
-│ 08 teszt  09 üzemeltetés                                   │
+│ 04 parser (v1.0)  05 frontend  06 szerkesztő  07 CI (v0.2) │
+│ 08 teszt (v0.2)  09 üzemeltetés                              │
 └─────────────────────────────────────────────────────────────┘
                             ↓
-┌─ MEGÉPÍTÉS (a mostani szakasz) ────────────────────────────┐
+┌─ ALKALMAZÁS ───────────────────────────────────────────────┐
+│ ✅ séma + migráció   ✅ CI/CD   ✅ service réteg            │
+│ ✅ 9 API-végpont     ✅ 101 teszt   ✅ a just check zöld    │
+│                     ↓                                       │
+│ ⬜ referenciavégpontok → ⬜ frontend → ⬜ szerkesztő          │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─ A MÉRÉS (a másik munkaág, párhuzamosan) ──────────────────┐
 │ hardver ✅ → Pi előállítás ✅ → 30 NAPOS MÉRÉS ⏳ FUT        │
 │ (2026-11-22 óta, a go/no-go 69,8%-on)                       │
 │                              ↓                               │
-│              a saját parser → az ingest → az API             │
+│              a saját parser → az ingest → a statikus adat    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**A megépítés nem vár a tervekre** — a Pi + rádió **független** a
-sémától és az API-tól. A mérés viszont **vár** a parserre (a
-fixture-ök a mérésből jönnek) — tehát a sorrend:
+**A két munkaág FÜGGETLEN:** a Pi + rádió **nem vár** a sémától
+vagy az API-tól; **az alkalmazás rétegei nem várnak** a mérésre
+(kivéve az `ingest`-et, a `04` – parser-terv szerint).
 
-**hardver → Pi előállítás → mérés (30 nap) → parser → ingest → API**
+**A mérésből jövő fixture-ök** (az AIS-tesztadatok) **az `ingest`
+réteghez kell** → **a mérés lezárása után** (2026-12-22).
 
-**A közben** elkészültek a 07–09 tervek és a 03-as/04-es
-review-javítások — **a tervezés gyakorlatilag kész**.
+**A tervezés gyakorlatilag kész** — **a 03–09 tervek a kódhoz
+igazítva vannak** (a `03` v0.7, a `02` v1.12, a `07` v0.2, a `08`
+v0.2).
 
-### 7.1 A következő három lépés
+### 7.1 A következő lépések (2026-11-26)
+
+**Két párhuzamos munkaág:** **a mérés** (a hardver, határidő: 2026-12-22)
+és **az alkalmazás rétegei** (a `03` alapján).
+
+#### A) Az alkalmazás rétegei (a `03` szerint)
+
+| # | A lépés | A méret | A függőség |
+|---|---|---|---|
+| A1 | **a referenciatáblák végpontjai** (a `03` §3.3): `/api/v1/ports`, `/locks`, `/waterways`, `/river-sections`, `/basins`, `/vessel-types`, `/operators`, `/routes`, `/cargo-types` | 9 végpont | **nincs** (a séma kész) — **a `reference.py` router** |
+| A2 | **a `vessel_service` write-oldalának használatba vétele** (a `sort_name` + a `slug` betöltése) | kicsi | az A1 után (a szerkesztői felülethez kell) |
+| A3 | **az `ingest` réteg** (a `04`): a parser → a `position`/`vessel_static` írása | nagy | **a mérésből jövő fixture-ök** |
+| A4 | **a `apps/web`** (a `05`): az Astro frontend, a katalógusoldal | nagy | **az A1 után** (a `packages/api-client` az OpenAPI-ból) |
+| A5 | **a szerkesztői felület** (a `06`): az `/api/admin/v1/` | nagy | az A2 + az A4 után |
+| A6 | **a `packages/api-client`** (a generált TS kliens az OpenAPI-ból) | kicsi | **a `just openapi` már fut** → **bárhogyan megírható** |
+
+**A sorrend javasoltan:** **A6 → A1 → A4 → A2 → A5** → **a frontend
+tudja használni a kész API-t** → **az A3 (a parser) párhuzamosan,
+a mérés végén.**
+
+#### B) A mérés és a hardver
 
 | # | A lépés | A mikor |
 |---|---|---|
-| 1 | **a mérés fut** — a heti lehúzás ellenőrzése hétfőnként | **2026-12-22-ig** |
-| 2 | **a 05–09 terv swarm review-ja** (a draftok) | a mérés alatt, párhuzamosan |
-| 3 | **a saját parser implementálása** (a 04-es terv v1.0 szerint) | a mérés után (a fixture-ök készen állnak) |
+| B1 | **a mérés fut** — a heti lehúzás ellenőrzése hétfőnként | **2026-12-22-ig** |
+| B2 | **a TCXO-s dongle** (a PPM ≤ 2) — a mérés lezárása után | a mérés után |
+| B3 | **a 162 MHz SAW szűrő** — a döntés a mérés végén | a mérés után |
+| B4 | **a 2. site a szűvízen** (az ENI-arány 0,4% → kell) | a mérés után |
+
+#### C) A tervezési oldal (a háttérben)
+
+| # | A lépés | A mikor |
+|---|---|---|
+| C1 | **a 05–09 terv swarm review-ja** (a draftok) | a mérés alatt, párhuzamosan |
+| C2 | **a `release-terv` frissítése** (a kész R1-es végpontok listájával) | az A1 után |
+
+#### D) A nyitott kérdések (Miklós döntése)
+
+| A kérdés | A határ |
+|---|---|
+| a `position` TTL 90 nap, de a README 5.4 „60 nap"-ot ír | a 02-es terv §14 Q9 |
+| a `water_level` TTL 90 nap | a 02-es terv §14 Q10 |
+| a `release-terv` 3.3 mondatának pontosítása (a `position` R1/R2 helye) | a 01-es terv §12 |
+| az R1 sprint-szám (4 vagy 5) | a `release-terv` 3.7 |
+| a projekt saját licence (Q12) | a 01-es terv §5.3 |
 
 ### 7.2 A mérésből jövő döntések
 

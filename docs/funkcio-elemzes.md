@@ -26,6 +26,45 @@
 
 ---
 
+## 0b. A ténylegesen KÓDOLT F-kódok (2026-11-26)
+
+**A fenti táblázat a TERVEKBEN való említést számolja** → **nem a
+kódban lévő implementációt.** → **ez a blokk a valós kódállapot.**
+
+**A kész R1-es végpontok (9) → az általuk lefedett F-kódok:**
+
+| A végpont | A lefedett F-kódok | A státusz |
+|---|---|---|
+| `GET /api/v1/vessels` | **F-CAT-01, F-CAT-02, F-CAT-03, F-CAT-08, F-CAT-10, F-CAT-14** | ✅ |
+| `GET /api/v1/vessels/{id}` | **F-DET-01…F-DET-16** (a bizonyossági szint, a méretek, a célállomás, a „hol van") | ✅ |
+| `GET /api/v1/vessels/{id}/aliases` | **F-DET-05** | ✅ |
+| `GET /api/v1/vessels/{id}/ownership` | **F-DET-05** | ✅ |
+| `GET /api/v1/vessels/{id}/certificates` | **F-DET-02** | ✅ |
+| `GET /api/v1/vessels/{id}/identifiers` | **F-DET-02, F-DET-15** | ✅ |
+| `GET /api/v1/vessels/{id}/data-origin` | **F-DET-15** | ✅ |
+| `GET /api/v1/search` | **F-SRCH-01…F-SRCH-07** | ✅ |
+| `GET /api/v1/content/{key}` | **F-NF-01…F-NF-15** | ✅ |
+| a `duna/ingest/decoder.py` | **a 6 bites dekódolás** (a `04` §10) — **egy unit + property tesztekkel** | ✅ |
+| a `duna/domain/verification.py` | **a bizonyossági szint számítása** (a `05` §8.2) | ✅ |
+
+**A domain-logika (a `duna/domain/`):** a `verification` (a badge),
+a `text` (a kereső normalizálás), a `slug` (a mély link).
+
+**A NEM kódolt R1-es funkciók (a `03` §3.1–3.4 alapján):**
+
+| A funkció | A terület |
+|---|---|
+| a referenciatáblák végpontjai (a kikötők, a zsilipek, a folyószakaszok, a medencék, a hajótípusok, az üzemeltetők, az útvonalak, a rakománytípusok) | a `03` §3.3 |
+| a `GET /api/v1/search/suggest` (a F-SRCH-08) | **R3** |
+| a `moving` szűrő (a `03` §3.1) | a `vessel.last_position_ts` kell |
+| a `season` szűrő (a `03` §3.1) | a `vessel_service_period` kell |
+| a szerkesztői felület (a `06`) | az `/api/admin/v1/` |
+| a blog/tartalom végpontok (a `03` §3.4) | a `content_text` kész, a router még nem |
+
+**A státusz-hivatkozás:** az [`megvalosulas/ALLAPOT.md`](megvalosulas/ALLAPOT.md).
+
+---
+
 ## 1. A 20 nem-funkcionális követelmény
 
 | ID | Terület | Követelmény | Célérték | A tervekben |

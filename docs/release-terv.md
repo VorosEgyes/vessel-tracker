@@ -65,6 +65,28 @@ A release sikerkritériuma: **a hajóról szóló tények már elérhetők és e
 > **A teljes R1-es funkciólista** (az 56 R1-es F-kód a 12 modulból)
 > **a funkcióelemzésben van, tervenkénti bontásban.**
 
+#### Az implementációs állapot (2026-11-26)
+
+**A fenti 17 pontból a 12 API-oldali funkció kész** (a `03` – API-terv
+szerint, valós PostgreSQL-en igazolva):
+
+| A pont | A kész rész |
+|---|---|
+| 1, 2, 5 | ✅ a `GET /api/v1/vessels` (a két katalógus, a szűrők, a lapozás) |
+| 3 | ✅ a `GET /api/v1/vessels/{id}` + az 5 al-végpont |
+| 4 | ✅ a `GET /api/v1/search` |
+| 6, 16 | ✅ a fallback-lánc (a `GET /api/v1/content/{key}`) — **a frontend még hátra** |
+| 12 | ✅ a JSON API v1 (a `Page[T]`/`Data[T]` burkolókkal) |
+| 9 | ✅ a mezőnkénti eredet (a `/data-origin`) |
+| 17 | 🟡 a `port_vessel` nézet megvan (a `02`), **a végpont még nem** |
+
+**Még hátra (a frontend + a szerkesztő):** a 6 (az URL-prefix, a
+`hreflang`), a 7 (a szerkesztői felület), a 8 (a felhasználói
+észrevétel), a 10 (a kikötő/zsilip/szakasz oldalak), a 11 (a blog),
+a 13 (a SEO), a 14 (a nyelvválasztó), a 15 (a fiók nélküli katalógus).
+
+**A részletes állapot:** az [`megvalosulas/ALLAPOT.md`](megvalosulas/ALLAPOT.md).
+
 ### 3.3 Az R1-ben **nincs** benne (szándékosan)
 
 | Nincs | Miért | Mikor |
