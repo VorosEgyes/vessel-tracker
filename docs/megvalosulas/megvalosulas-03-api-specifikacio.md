@@ -1,8 +1,8 @@
 # Implementációs terv – 03: API-specifikáció (OpenAPI v1)
 
-**Verzió:** 0.3 (a 3 reviewer 1. körű swarm review-jának **96 findingje**
-javítva: `bori` 34, `preshaz` 24, `prof` 27 + a szintézis — a 8 blokkoló
-a `bori` review-ból, a maradék a `preshaz` és a `prof` review-ból)
+**Verzió:** 0.4 (a **katalóguslista végrehajtva**: a `GET /api/v1/vessels`
+a valós kód, a `just check` zöld, a 91%-os alkalmazásréteg-coverage a
+CI-ben)
 **Dátum:** 2026-11-22
 **A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.3** (71 tábla,
 150 index, 121 FK, 28 trigger — **a `home_river_section_id` +
@@ -324,6 +324,29 @@ jön).
 ## 3. A belső API végpontjai (R1)
 
 ### 3.1 A katalógus
+
+> **IMPLEMENTÁCIÓS ÁLLAPOT (2026-11-25):**
+>
+> | A rész | Az állapot |
+> |---|---|
+> | a `GET /api/v1/vessels` | ✅ **VALÓS KÓD** (`duna/api/v1/vessel.py`) |
+> | a `duna/db/models.py` | ✅ **11 ORM modell** (a `vessel`, a `vessel_i18n`, a `vessel_type`(+`_i18n`), az `operator`(+`_i18n`), a `country`, a `port`, a `vessel_identifier`, a `language`) |
+> | a `duna/repositories/vessel_repo.py` | ✅ **a JOIN-ek + a szűrők + a lapozás** |
+> | a `duna/schemas/common.py` | ✅ **a `Page[T]`/`Data[T]`** (a §5.5 — két burkoló) |
+> | a `duna/main.py` | ✅ **a FastAPI app + a CORS + a `/health` + a lifespan** |
+> | az integrációs teszt | ✅ **7 teszt**, valódi PostgreSQL-lel |
+> | az alkalmazásréteg-coverage | ✅ **91%** (a CI-ben, a `DATABASE_URL`-lel) |
+> | a `GET /api/v1/vessels/{id}` és a többi 7 végpont | ⏳ **NEM KÉSZ** (a következő kör) |
+> | a `GET /api/v1/search` | ⏳ **NEM KÉSZ** (a trigram-alapú keresés) |
+>
+> **A `verification_level` a SZÁMÍTOTT érték** (a `vessel_verification`
+> nézetből) → **a `verification_source` jelzi, ha a tárolt érték
+> eltér** (`stored_stale`) → **ez a `bori` reviewer C-8 findingje.**
+>
+> **A `verification` SZŰRŐ a TÁROLT értékre épül** (a §3.1 szerint
+> indexelt) → **a szűrő és a megjelenített érték különbözhet** →
+> **a `verification_source` ezt jelzi.**
+
 
 | Method | Path | Leírás | Funkció |
 |---|---|---|---|

@@ -1,0 +1,8 @@
+A db/migrations/ — az Alembic migrációk (a 01 §4.3: a séma FORRÁSA).
+
+**A `db/ddl/schema-v1.1.sql` a GENERÁLT olvasható másolat** -> a
+`just ddl-generate` a `02` DDL-tervből generálja, a `just ddl-diff`
+ellenőrzi a driftet (a 07 §8.1 10b. lépése).
+
+**A migrációk:**
+- `20241124_0001_initial_schema.py` — az első séma (a `02` DDL-je).

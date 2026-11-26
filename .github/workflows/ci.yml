@@ -104,6 +104,13 @@ jobs:
       - run: just db-migrate
       - run: just test-reversible
 
+      # **Az alkalmazasreteg integracios tesztjei** (a 08 §2.1a) ->
+      # **a `DATABASE_URL` a fenti PostgreSQL service-re mutat** ->
+      # **a `just db-migrate` MINT letrehozta a semat** ->
+      # **a `just test-integration` a valodi DB-n fut** ->
+      # **a 70%-os alkalmazasreteg-kapu a CI-ben ervenyes**
+      - run: just test-integration
+
       # A 3–6. lepes: a 4 gyors tesztszint (a coverage flaggel)
       - run: just test
 

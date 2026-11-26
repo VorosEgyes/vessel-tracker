@@ -154,7 +154,7 @@ szórva a workflow-ban).
 | `just db-migrate-down` | az Alembic `downgrade base` (a visszafordítás — a `07` §8.1 8. lépése) |
 | `just db-seed` | a referenciaadat-seed (`02` – DDL-terv §12) |
 | `just db-reset` | a DB újra (a `down -v` + `up` + migrate + seed) |
-| `just test` | a `pytest` (a unit + az integrációs) **a coverage flaggel** |
+| `just test` | a `pytest` (a unit + a property + a komponens) **a coverage flaggel** — **a mérhető részre** (a `domain/` + az `ingest/`) → **a teljes `duna` 85% a `just test-app` (a release-kapu)** |
 | `just test-api` | az API-tesztek (a `testcontainers` DB-vel) |
 | `just test-frontend` | a `pnpm test` (a Vitest) |
 | `just lint-frontend` | a frontend lint (az eslint + a prettier) |
@@ -171,10 +171,11 @@ szórva a workflow-ban).
 | `just test-ingest` | **az `ingest/` 90%-os coverage-küszöbe** (a 08 §8.1: az AIS parser, a 04) — a `pytest --cov=duna.ingest --cov-fail-under=90` | ~10 s |
 | `just test-property` | a property (a `hypothesis`) | ~20 s |
 | `just test-component` | a komponens (a `pytest tests/component`) | ~2 perc |
-| `just test-integration` | az integrációs (a `testcontainers` + a PostGIS) | ~3 perc |
+| `just test-integration` | az integrációs (a **valódi PostgreSQL** — a `DATABASE_URL` a CI service-ből jön) → **a 70%-os alkalmazásréteg-coverage-kapu** (a 08 §8.1) | ~3 perc |
 | `just test-e2e` | az e2e (a `playwright`) | ~8 perc |
 | `just test-perf` | a teljesítmény (a `locust`) | ~5 perc |
 | `just test-regression` | az adat-regresszió (a `08` §7) | ~1 perc |
+| `just test-app` | **a TELJES `duna` 85%-os coverage-kapuja** (a 08 §8.1: a release-kapu) — a `just check-release` futtatja | ~4 perc |
 | `just test-api` | az API-tesztek (a `testcontainers` DB-vel) | ~3 perc |
 | `just test-frontend` | a frontend (a `pnpm test`, a Vitest) | ~1 perc |
 
@@ -362,7 +363,7 @@ fájlok a `nginx`ben, **a szerveroldali szigetek** az
 
 | A probléma | A hatás | A javítás |
 |---|---|---|
-| **a repóban nincs alkalmazáskód** (`apps/api/`, `apps/web/`, `alembic.ini`, a Dockerfile-ok) | a `just db-migrate`, a `just test`, a `just build` mind elbukna → **a CI a 3. lépésen túl** | **a `justfile` receptjei feltételesek** (`if [ -f … ]`) → **a hiányzó rész kihagyódik, nem bukik el** (a 07 §3.1 elve) |
+| **a repóban nincs alkalmazáskód** (`apps/web/`, a Dockerfile-ok) — **a `apps/api/` már megvan** (a `03` §3.1) | a `just build` mind elbukna → **a CI a 3. lépésen túl** | **a `justfile` receptjei feltételesek** (`if [ -f … ]`) → **a hiányzó rész kihagyódik, nem bukik el** (a 07 §3.1 elve) |
 | **a `db/ddl/schema-v1.1.sql` nem létezett** | a `just ddl-diff` (a 10b. lépés) nem tudta volna ellenőrizni a séma-driftet | **az új `db/tools/gen_ddl.py`** → a `db/ddl/` a **tervből** generálódik → a `--check` a driftet ellenőrzi |
 
 > **A `db/ddl/` generálása a tervből, nem a `pg_dump`-ból:**
@@ -538,6 +539,12 @@ jobs:
       # egyezzen** (a `make_type_case.py --check`).
       - run: just check-type-case
       - run: just db-migrate
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/duna_test
+      # **Az alkalmazasreteg integracios tesztjei** (a 08 §2.1a) ->
+      # **a `just db-migrate` MINT letrehozta a semat** ->
+      # **a 70%-os alkalmazasreteg-coverage-kapu** (a 08 §8.1)
+      - run: just test-integration
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/duna_test
       - run: just test

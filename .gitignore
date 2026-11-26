@@ -36,3 +36,8 @@ coverage.xml
 htmlcov/
 .pytest_cache/
 .hypothesis/
+
+# A mypy es a ruff cache-e (a 2026-11-25: ezek a `just check` utan
+# keletkeznek -> **nem kerulhetnek a repoba**)
+.mypy_cache/
+.ruff_cache/
