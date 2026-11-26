@@ -52,10 +52,11 @@ def seeded_vessel() -> int:
                 text(
                     "INSERT INTO vessel (mmsi, eni, slug, sort_name, vessel_type_code,"
                     " operating_area, flag_country_code, status, verification_level,"
-                    " length_m, beam_m) VALUES (243070510, '87654321', 'test-hajo',"
-                    " 'TEST HAJO', (SELECT code FROM vessel_type WHERE ais_type_code = 60 LIMIT 1),"
+                    " length_m, beam_m, destination) VALUES (243070510, '87654321',"
+                    " 'test-hajo', 'TEST HAJO',"
+                    " (SELECT code FROM vessel_type WHERE ais_type_code = 60 LIMIT 1),"
                     " 'duna', (SELECT code FROM country LIMIT 1), 'active', 'name_only',"
-                    " 85.5, 11.2) ON CONFLICT (slug) DO NOTHING"
+                    " 85.5, 11.2, 'Budapest') ON CONFLICT (slug) DO NOTHING"
                 )
             )
             await conn.execute(
@@ -102,6 +103,43 @@ def seeded_vessel() -> int:
                     "INSERT INTO vessel_identifier (vessel_id, identifier_type,"
                     " value, is_primary, origin) SELECT id, 'eni', '87654322', true,"
                     " 'ais' FROM vessel WHERE slug = 'test-hajo-2'"
+                    " ON CONFLICT DO NOTHING"
+                )
+            )
+            # **A `vessel_data_origin`** (a F-DET-15) -> **ket forras,
+            # ket kulonbozo ertek** -> **a konfliktus latatasahoz**
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_data_origin (vessel_id, field_name, origin,"
+                    " value_snapshot, source_id, observed_at, confidence, is_current)"
+                    " SELECT id, 'length_m', 'ais', '85.50',"
+                    " (SELECT id FROM data_source LIMIT 1), now(), 0.90, true"
+                    " FROM vessel WHERE slug = 'test-hajo'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_data_origin (vessel_id, field_name, origin,"
+                    " value_snapshot, source_id, observed_at, confidence, is_current)"
+                    " SELECT id, 'length_m', 'operator_claimed', '87.00',"
+                    " (SELECT id FROM data_source LIMIT 1), now(), 0.80, true"
+                    " FROM vessel WHERE slug = 'test-hajo'"
+                )
+            )
+            # **A `vessel_ownership`** (a F-DET-05) -> **a tulajdonosvaltasok**
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_ownership (vessel_id, operator_id, valid_from,"
+                    " valid_to) SELECT id, (SELECT id FROM operator LIMIT 1),"
+                    " '2015-01-01', '2020-12-31' FROM vessel WHERE slug = 'test-hajo'"
+                    " ON CONFLICT DO NOTHING"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_ownership (vessel_id, operator_id, valid_from,"
+                    " valid_to) SELECT id, (SELECT id FROM operator LIMIT 1),"
+                    " '2021-01-01', NULL FROM vessel WHERE slug = 'test-hajo'"
                     " ON CONFLICT DO NOTHING"
                 )
             )
@@ -216,3 +254,90 @@ def test_az_openapi_sema_elkesz(client: TestClient):
     ]["schema"]["$ref"]
     name = ref.split("/")[-1]
     assert name.startswith("Page")
+
+
+def test_az_adatlap_visszaadja_a_hajot(client: TestClient, seeded_vessel: int):
+    """A `GET /api/v1/vessels/{id}` a hajo adatlapjat adja (a F-DET-01)."""
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # **a `Data[T]` burkolo** (a 03 §5.5) -> **nem a `Page[T]`**
+    assert "data" in body and "meta" in body
+    assert body["meta"]["total"] == 1
+
+    detail = body["data"]
+    assert detail["id"] == seeded_vessel
+    assert detail["slug"] == "test-hajo"
+    assert detail["name"] == "TESZTHAJÓ"
+    assert detail["status"] == "active"
+    assert detail["operating_area"] == "duna"
+    assert detail["destination"] == "Budapest"
+
+
+def test_a_decimal_stringkent_megy_ki(client: TestClient, seeded_vessel: int):
+    """**A `Decimal` -> `string`** (a `prof` reviewer M-4 findingje) ->
+    **a JSON-ban nem a `85.5` float, hanem a `"85.50"` string** ->
+    **a `length_m` a tipusa is `str | None`**.
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}")
+    detail = resp.json()["data"]
+
+    assert isinstance(detail["length_m"], str)
+    assert detail["length_m"] == "85.50"
+    assert isinstance(detail["beam_m"], str)
+
+
+def test_a_bizonyossagi_szint_a_szamított(client: TestClient, seeded_vessel: int):
+    """**A `verification_level` a SZÁMÍTOTT érték** (a 03 §5.4) ->
+    **a `vessel_verification` nézetből** -> **a tárolt `name_only`
+    ellenére `ais_identified`** (az AIS-eredetű ENI miatt).
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}")
+    detail = resp.json()["data"]
+
+    assert detail["verification_level"] == "ais_identified"
+    assert detail["verification_source"] == "stored_stale"
+
+
+def test_a_mezonekenti_eredet_a_konfliktust_lattatja(client: TestClient, seeded_vessel: int):
+    """**A `vessel_data_origin`** (the F-DET-15) -> **a ket forras, a ket
+    kulonbozo ertek** -> **a konfliktus LATTHATO** (a `prof` reviewer
+    C-3 findingje).
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}")
+    detail = resp.json()["data"]
+
+    origins = detail["origins"]
+    assert len(origins) == 2
+
+    by_origin = {o["origin"]: o for o in origins}
+    assert "ais" in by_origin
+    assert "operator_claimed" in by_origin
+    assert by_origin["ais"]["value_snapshot"] == "85.50"
+    assert by_origin["operator_claimed"]["value_snapshot"] == "87.00"
+
+    # **a megfigyeles idopontja** (a `observed_at`) -> **a datetime**
+    assert by_origin["ais"]["observed_at"]
+    assert by_origin["ais"]["confidence"] == 0.9
+
+
+def test_a_tulajdonosvaltasok_a_legutolso_elol(client: TestClient, seeded_vessel: int):
+    """**A `vessel_ownership`** (a F-DET-05) -> **a datumtartomannyal**
+    -> **a legutolso elol** (a jelenlegi a legelso).
+    """
+    resp = client.get(f"/api/v1/vessels/{seeded_vessel}")
+    detail = resp.json()["data"]
+
+    ownership = detail["ownership"]
+    assert len(ownership) == 2
+    assert ownership[0]["valid_from"] == "2021-01-01"
+    assert ownership[0]["valid_to"] is None
+    assert ownership[1]["valid_from"] == "2015-01-01"
+    assert ownership[1]["valid_to"] == "2020-12-31"
+
+
+def test_a_nem_letezo_hajo_404(client: TestClient):
+    """**A 404**, ha nincs ilyen hajo (the F-DET-01)."""
+    resp = client.get("/api/v1/vessels/99999999")
+    assert resp.status_code == 404

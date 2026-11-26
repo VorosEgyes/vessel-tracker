@@ -97,7 +97,7 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 | **unit** | ~400 | **50** | a `duna/domain/verification.py` (a bizonyossági szint, 20 teszt) + a `duna/ingest/decoder.py` (a 6 bites kódolás, a pozíció, a statikus és a 21-es üzenet, 30 teszt) → **a `domain/` és az `ingest/` réteg is 100%-os coverage** |
 | property | ~40 | **5** | a `hypothesis` a dev-függőségek között van → **a 6 bites round-trip teszt** (a GPSD armorra) + **a `pyais` referencia-összevetés** (a `04` §11 Q6) |
 | komponens | ~80 | **0** | a service-ek még nincsenek |
-| integrációs | ~60 | **7** | **a `GET /api/v1/vessels` valódi PostgreSQL-lel** (a `03` §3.1) → **a `just test-integration`** → **a `DATABASE_URL` hiányában kihagyja magát** |
+| integrációs | ~60 | **13** | **a `GET /api/v1/vessels` valódi PostgreSQL-lel** (a `03` §3.1) → **a `just test-integration`** → **a `DATABASE_URL` hiányában kihagyja magát** |
 | e2e | ~25 | **0** | a frontend még nincs |
 | teljesítmény | ~6 | **0** | a `locust` a dev-függőségek között van |
 | regresszió | 1 | **0** | a mérési adat megvan, a replay még nincs |

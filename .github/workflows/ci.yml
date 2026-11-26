@@ -111,6 +111,12 @@ jobs:
       # **a 70%-os alkalmazasreteg-kapu a CI-ben ervenyes**
       - run: just test-integration
 
+      # **A MODELLEK ELLENORZESE** (a 03 §5.1a) -> **a `db/models.py`
+      # a `02` DDL ORM-reprezentacioja** -> **a kezi modellek
+      # elcsuszasat a CI elkapja** (pl. a `country.name` vs. a
+      # `name_local`, az `operator.legal_name`) -> **a DB-bol olvasunk**
+      - run: just models-check
+
       # A 3–6. lepes: a 4 gyors tesztszint (a coverage flaggel)
       - run: just test
 

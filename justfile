@@ -201,6 +201,13 @@ test-ingest:
     {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit {{TESTS}}/property --cov=duna.ingest --cov-report=term-missing --cov-fail-under=90
 
 # a migráció-visszafordíthatóság (a 07 §8.1 8. lépése)
+# **A MODELLEK ELLENORZESE** (a 03 §5.1a) -> **a `db/models.py` a
+# `02` DDL ORM-reprezentacioja** -> **a kezi modellek elcsuszasat a
+# CI elkapja** -> **a DB-bol olvasunk** (nem a fajlbol) -> **a
+# migracio utáni valos allapotot ellenorizzuk**
+models-check:
+    if [ -z "$${DATABASE_URL:-}" ]; then echo "a DATABASE_URL nincs beallitva -> a models-check kihagyva"; else {{UV}} python scripts/ci/check_models.py; fi
+
 test-reversible:
     # **a migracio VISSZAFORDITATOSAGA** (a 07 §8.1 8. lepese) ->
     # a `db-migrate` -> a `db-migrate-down` -> a `db-migrate` ciklus,
@@ -211,7 +218,8 @@ test-reversible:
 
 # a teljes minőségi kapu egy parancsban (a 01 §11.3 és a 08 §6.1)
 check: lint lint-frontend typecheck test-unit test-property test-component \
-       test-domain test-ingest test-integration ddl-validate ddl-diff
+       test-domain test-ingest test-integration ddl-validate ddl-diff \
+       models-check
 
 # a release teljes kapuja (a 08 §6.1 — hetente)
 check-release: check test-app test-e2e test-perf test-regression

@@ -334,9 +334,12 @@ jön).
 > | a `duna/repositories/vessel_repo.py` | ✅ **a JOIN-ek + a szűrők + a lapozás** |
 > | a `duna/schemas/common.py` | ✅ **a `Page[T]`/`Data[T]`** (a §5.5 — két burkoló) |
 > | a `duna/main.py` | ✅ **a FastAPI app + a CORS + a `/health` + a lifespan** |
-> | az integrációs teszt | ✅ **7 teszt**, valódi PostgreSQL-lel |
+> | az integrációs teszt | ✅ **13 teszt**, valódi PostgreSQL-lel |
 > | az alkalmazásréteg-coverage | ✅ **91%** (a CI-ben, a `DATABASE_URL`-lel) |
-> | a `GET /api/v1/vessels/{id}` és a többi 7 végpont | ⏳ **NEM KÉSZ** (a következő kör) |
+> | **a `models-check`** (a `just models-check`) | ✅ **a modell–séma drift-ellenőrzés** (a §5.1a) — **a kézzel írt modellek elcsúszását a CI kapja el** |
+> | a `GET /api/v1/vessels/{id}` (a hajóadatlap) | ✅ **VALÓS KÓD** (`duna/repositories/vessel_detail_repo.py`) |
+> | a `GET /api/v1/vessels/{id}/aliases` és a többi 6 végpont | ⏳ **NEM KÉSZ** (a következő kör) |
+> | **a `scripts/ci/check_models.py`** (a `just models-check`) | ✅ **a modellek és a séma driftjét elkapja** (a §5.1a) — **kétirányú**: a modell oszlopa a DB-ben, a DB NOT NULL oszlopa a modellben |
 > | a `GET /api/v1/search` | ⏳ **NEM KÉSZ** (a trigram-alapú keresés) |
 >
 > **A `verification_level` a SZÁMÍTOTT érték** (a `vessel_verification`

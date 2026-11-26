@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
+from duna.repositories.vessel_detail_repo import get_vessel_detail
 from duna.repositories.vessel_repo import VesselFilters, list_vessels
-from duna.schemas.common import Page, PageMeta
-from duna.schemas.vessel import VesselListItem
+from duna.schemas.common import Data, ObjectMeta, Page, PageMeta
+from duna.schemas.vessel import VesselDetail, VesselListItem
 
 router = APIRouter(prefix="/vessels", tags=["vessels"])
 
@@ -66,3 +67,23 @@ async def list_vessels_endpoint(
             has_more=total is not None and page * per_page < total,
         ),
     )
+
+
+@router.get("/{vessel_id}", response_model=Data[VesselDetail])
+async def get_vessel_endpoint(
+    vessel_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
+) -> Data[VesselDetail]:
+    """A hajó adatlapja (a F-DET-01…16).
+
+    **A `meta.total` `None`** (egy objektum nincs lapozva) → **a
+    `Data[T]` burkoló a `03` §5.5 szerint** (a `Page[T]` csak
+    listához való).
+
+    **A `404`, ha nincs ilyen hajó.**
+    """
+    detail = await get_vessel_detail(session, vessel_id, lang)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="a hajo nem talalhato")
+    return Data[VesselDetail](data=detail, meta=ObjectMeta(total=1))

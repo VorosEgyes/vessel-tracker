@@ -19,12 +19,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, Column, String, Table, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from duna.db.models import (
-    Base,
     Operator,
     OperatorI18n,
     Vessel,
@@ -33,17 +32,8 @@ from duna.db.models import (
     VesselType,
     VesselTypeI18n,
 )
+from duna.db.views import VESSEL_VERIFICATION
 from duna.schemas.vessel import VesselListItem
-
-# **a `vessel_verification` nézet** (a 02 §6.2) -> **a számított
-# bizonyossági szint + a `is_stale` eltérés jelzése**
-VESSEL_VERIFICATION = Table(
-    "vessel_verification",
-    Base.metadata,
-    Column("vessel_id", BigInteger, primary_key=True),
-    Column("computed_verification_level", String),
-    Column("is_stale", Boolean),
-)
 
 
 @dataclass(frozen=True, slots=True)
