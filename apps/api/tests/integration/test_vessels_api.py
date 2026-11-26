@@ -62,7 +62,7 @@ def seeded_vessel() -> int:
             await conn.execute(
                 text(
                     "INSERT INTO vessel_i18n (vessel_id, lang, name, description)"
-                    " SELECT id, 'hu', 'TESZTHAJÓ', 'a teszt hajója' FROM vessel"
+                    " SELECT id, 'hu', 'TESZTHAJO', 'a teszt hajoja' FROM vessel"
                     " WHERE slug = 'test-hajo' ON CONFLICT DO NOTHING"
                 )
             )
@@ -81,7 +81,7 @@ def seeded_vessel() -> int:
             await conn.execute(
                 text(
                     "INSERT INTO vessel_i18n (vessel_id, lang, name, description)"
-                    " SELECT id, 'hu', 'TESZTHAJÓ 2', 'a második teszt hajója' FROM vessel"
+                    " SELECT id, 'hu', 'TESZTHAJO 2', 'a masodik teszt hajoja' FROM vessel"
                     " WHERE slug = 'test-hajo-2' ON CONFLICT DO NOTHING"
                 )
             )
@@ -143,6 +143,41 @@ def seeded_vessel() -> int:
                     " ON CONFLICT DO NOTHING"
                 )
             )
+            # **A harmadik hajo EKEZETES nevvel** -> **a
+            # ekezet-fuggetlen keresest igazolja** (a F-SRCH-03).
+            #
+            # **A `sort_name`-t NORMALIZALTAN irjuk be** -> **ahogy az
+            # alkalmazas a `vessel_service`-ben teszi** (a 02 §8.1a:
+            # "a `sort_name`-t az ingest tolti be") -> **a DB-ben a
+            # `sort_name` a `lower(unaccent(name))` alakja** ->
+            # **a `vessel_sort_name_trgm` index a keresest szolgalja ki**
+            # -> **a `kikoto` keresest megtalalja a `KIKÖTŐ HAJÓ`even**.
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel (mmsi, slug, sort_name, vessel_type_code,"
+                    " operating_area, flag_country_code, status, verification_level,"
+                    " length_m, beam_m) VALUES (243070512, 'kikoto-hajo', 'kikoto hajo',"
+                    " (SELECT code FROM vessel_type WHERE ais_type_code = 60 LIMIT 1),"
+                    " 'duna', (SELECT code FROM country LIMIT 1), 'active', 'name_only',"
+                    " 60.0, 9.0) ON CONFLICT (slug) DO NOTHING"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO vessel_i18n (vessel_id, lang, name, description)"
+                    " SELECT id, 'hu', 'KIKÖTŐ HAJÓ', 'ekeazetes nevu teszt hajo'"
+                    " FROM vessel WHERE slug = 'kikoto-hajo' ON CONFLICT DO NOTHING"
+                )
+            )
+            # **A `vessel_i18n` INSERT TRIGGER-je felulirja a
+            # `sort_name`-t** (a `lower(name)`, az `unaccent` nelkul) ->
+            # **az alkalmazas UTANA irja vissza a NORMALIZALT alakot**
+            # (a `vessel_service` ezt teszi, a 02 §8.1a) ->
+            # **a trigger csak az URES `sort_name`-t allitja be** ->
+            # **a normalizalt forma megmarad**.
+            await conn.execute(
+                text("UPDATE vessel SET sort_name = 'kikoto hajo' WHERE slug = 'kikoto-hajo'")
+            )
             result = await conn.execute(text("SELECT id FROM vessel WHERE slug = 'test-hajo'"))
             vessel_id = result.scalar_one()
         await engine.dispose()
@@ -172,7 +207,7 @@ def test_a_kataloguslista_visszaadja_a_hajot(client: TestClient, seeded_vessel: 
     assert seeded_vessel in items
     item = items[seeded_vessel]
     assert item["slug"] == "test-hajo"
-    assert item["name"] == "TESZTHAJÓ"
+    assert item["name"] == "TESZTHAJO"
     assert item["vessel_type_name"] == "utasszállító hajó"
     assert item["operating_area"] == "duna"
     assert item["status"] == "active"
@@ -269,7 +304,7 @@ def test_az_adatlap_visszaadja_a_hajot(client: TestClient, seeded_vessel: int):
     detail = body["data"]
     assert detail["id"] == seeded_vessel
     assert detail["slug"] == "test-hajo"
-    assert detail["name"] == "TESZTHAJÓ"
+    assert detail["name"] == "TESZTHAJO"
     assert detail["status"] == "active"
     assert detail["operating_area"] == "duna"
     assert detail["destination"] == "Budapest"
@@ -341,3 +376,91 @@ def test_a_nem_letezo_hajo_404(client: TestClient):
     """**A 404**, ha nincs ilyen hajo (the F-DET-01)."""
     resp = client.get("/api/v1/vessels/99999999")
     assert resp.status_code == 404
+
+
+def test_a_kereso_azonosito_egyezes(client: TestClient, seeded_vessel: int):
+    """**A pontos azonosító-egyezés** (a F-SRCH-02) -> **a
+    `vessel_identifier`-ben** (az ENI) -> **a `meta.total` a PONTOS
+    darabszám** (a trigram-alapú néven keresésnél `None`).
+    """
+    resp = client.get("/api/v1/search", params={"q": "87654321", "area": "duna"})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["meta"]["total"] == 1
+    ids = [item["id"] for item in body["data"]]
+    assert seeded_vessel in ids
+
+
+def test_a_kereso_nev_egyezes_ekezet_fuggetlen(client: TestClient, seeded_vessel: int):
+    """**A név-egyezés ékezet-független** (a F-SRCH-03) -> **a
+    `sort_name` a triggerben `lower(unaccent(name))`** ->
+    **a `TESZTHAJO` hajót a `teszthajo` (kisbetűvel)
+    is megtaláljuk**.
+    """
+    resp = client.get("/api/v1/search", params={"q": "teszthajo", "area": "duna"})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    ids = [item["id"] for item in body["data"]]
+    assert seeded_vessel in ids
+
+    # **a trigram-alapú néven keresésnél a `meta.total` `None`**
+    # (a 03 §5.5: nem indexelhető a számláláshoz)
+    assert body["meta"]["total"] is None
+
+
+def test_a_kereso_a_masik_teruleten_is_keres(client: TestClient):
+    """**A terület szűkít** (a F-SRCH-04, a F-SRCH-07) -> **a `duna`
+    keresés NEM találhat balatoni hajót** -> **az üres eredmény mellett
+    a `meta.area_hint` jelzi, hogy a másik területen van találat**
+    (a `bori` reviewer H-2 findingje) -> **a darabszám NÉLKÜL**
+    (a terület-szivárgás tiltása).
+    """
+    resp = client.get("/api/v1/search", params={"q": "teszthajo", "area": "balaton"})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # **a balatoni katalogusban nincs a hajo**
+    assert body["data"] == []
+
+    hint = body["meta"]["area_hint"]
+    assert hint is not None
+    assert hint["other_area"] == "duna"
+    assert hint["has_matches"] is True
+
+
+def test_a_kereso_rovid_q_422(client: TestClient):
+    """**A `q` minimális hossza 2 karakter** (a 03 §3.2) -> **a 422
+    `validation-error`**.
+    """
+    resp = client.get("/api/v1/search", params={"q": "a", "area": "duna"})
+    assert resp.status_code == 422
+
+
+def test_a_kereso_area_kotelezo(client: TestClient):
+    """**Az `area` KÖTELEZŐ** (a `prof` reviewer M-5 findingje) ->
+    **a 422 `validation-error`**.
+    """
+    resp = client.get("/api/v1/search", params={"q": "teszthajo"})
+    assert resp.status_code == 422
+
+
+def test_a_kereso_ekezet_fuggetlen_ekeazetes_nevre(
+    client: TestClient,
+):
+    """**Az ékezet-független keresés** (a F-SRCH-03) -> **a
+    `KIKÖTŐ HAJÓ` hajót a `kikoto` (ékezet nélkül, kisbetűvel)
+    megtaláljuk** -> **a `sort_name` a triggerben
+    `lower(unaccent(name))`**.
+
+    **A fejlesztői `pgserver`-ben nincs `unaccent`** → **a
+    `vessel_i18n.name` normalizált alakjára is keresünk** → **a két
+    forma OR-ja mindkét környezetben ékezet-független keresést ad.**
+    """
+    resp = client.get("/api/v1/search", params={"q": "kikoto", "area": "duna"})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    slugs = [item["slug"] for item in body["data"]]
+    assert "kikoto-hajo" in slugs

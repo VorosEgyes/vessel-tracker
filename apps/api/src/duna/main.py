@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from duna.api.v1.search import router as search_router
 from duna.api.v1.vessel import router as vessel_router
 from duna.config import get_settings
 from duna.db.session import create_engine, create_session_factory, healthcheck
@@ -70,8 +71,9 @@ def create_app() -> FastAPI:
         """A DB elérhetőségének ellenőrzése (a 09 §4.1 monitoring)."""
         return healthcheck()
 
-    # **a `/api/v1/` routerek** (a 03 §3.1)
+    # **a `/api/v1/` routerek** (a 03 §3.1, §3.2)
     app.include_router(vessel_router, prefix="/api/v1")
+    app.include_router(search_router, prefix="/api/v1")
 
     return app
 

@@ -8,7 +8,7 @@
 -- **A terv módosításakor a `just ddl-generate` futtatása kötelező**,
 -- különben a `git diff --exit-code` elbukik a CI-ban.
 
--- a táblák: 71 | az indexek: 63
+-- a táblák: 71 | az indexek: 64
 
 CREATE TABLE language (
     code        char(2) PRIMARY KEY,          -- 'hu', 'de', 'en'
@@ -505,6 +505,18 @@ CREATE INDEX vessel_area_type_idx
 -- keresre.
 CREATE INDEX vessel_area_sort_name_idx
     ON vessel (operating_area, sort_name);
+-- **A KERESO TRIGRAM-INDEXE** (a 02 v1.11 — a F-SRCH-03):
+-- **a `sort_name` a triggerben `lower(unaccent(name))`** (a
+-- `sync_vessel_sort_name`) -> **a hajonev NORMALIZALT, ekezet- es
+-- kis-nagybetu-fuggetlen alakja** -> **a kereso erre epul** ->
+-- **a trigram index a szubstring-keresesre** (a `%q%` alak).
+--
+-- **MIERT NEM A `vessel_i18n.name`?** -> **az `unaccent` NEM
+-- IMMUTABLE** (a 2026-11-25-i javitas) -> **a `lower(unaccent(name))`
+-- nem lehet index-kifejezes** -> **a `sort_name` oszlop a megoldas**
+-- (a triggerben kell az `unaccent`, ott NEM kell IMMUTABLE-nak lennie).
+CREATE INDEX vessel_sort_name_trgm ON vessel
+    USING GIN (sort_name gin_trgm_ops);
 
 -- A mas rendezesek (a `sort=length|updated_at|operator|type`) —
 -- a F-CAT-02 szerint a hajonev az alapertelmezett, ezek S-os
@@ -1359,7 +1371,20 @@ LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.lang = 'hu' THEN
         UPDATE vessel
-        SET sort_name = lower(unaccent(NEW.name))
+        -- **A NORMALIZALT FORMA AZ ALKALMAZAS TOLTI BE** (a 02 v1.12 —
+        -- a F-SRCH-03): **a `sort_name` a `lower(unaccent(name))`**
+        -- (a triggerben az `unaccent` NEM lehet, mert nem IMMUTABLE) ->
+        -- **a trigger CSAK akkor allitja, ha az alkalmazas nem
+        -- irta be** (a `vessel_service` a normalizalt nevet adja) ->
+        -- **a DB a `lower(name)`-re hosszabbodik** (a `unaccent`
+        -- nelkul) -> **a ket forma OR-ja a keresoben ekezet-fuggetlen**
+        -- (a `vessel_i18n.name` a normalizalt `q`-val is).
+        -- **A `sort_name` a DB-ben IGY IS a normalizalt alak** ->
+        -- **a `vessel_sort_name_trgm` index a keresest szolgálja ki.**
+        SET sort_name = CASE
+            WHEN vessel.sort_name IS NULL OR vessel.sort_name = '' THEN lower(NEW.name)
+            ELSE vessel.sort_name
+        END
         WHERE id = NEW.vessel_id;
     END IF;
     RETURN NEW;

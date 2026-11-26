@@ -10,6 +10,22 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class AreaHint(BaseModel):
+    """A terület-hint (a `bori` reviewer H-2 findingje).
+
+    **A `not-found-in-area` hibakód KIKERÜLT** (a terület-szivárgás
+    tiltása, a `release-terv` 3.5) → **az üres eredmény a `meta`-ban
+    egy `area_hint`-et ad** → **a felhasználó tudja, hogy területet
+    kell váltania, de NEM tudja meg, melyik hajóról van szó** (a
+    darabszám szándékosan nincs).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    other_area: str = Field(description="a masik terulet: 'duna' | 'balaton'")
+    has_matches: bool = Field(description="van-e talalat a masik teruleten (a darabszam nelkul)")
+
+
 class PageMeta(BaseModel):
     """A lapozás metaadatai."""
 
@@ -25,6 +41,14 @@ class PageMeta(BaseModel):
     page: int = Field(default=1, description="az oldalszám (1-alapú)")
     per_page: int = Field(default=50, description="az oldal elemszáma")
     has_more: bool = Field(default=False, description="van-e a következő oldal")
+    area_hint: AreaHint | None = Field(
+        default=None,
+        description=(
+            "a kereso eredmenye: a masik teruleten van-e talalat "
+            "(a `bori` H-2 findingje — a darabszam nelkul, hogy ne "
+            "legyen terulet-szivargas)"
+        ),
+    )
 
 
 class ObjectMeta(BaseModel):

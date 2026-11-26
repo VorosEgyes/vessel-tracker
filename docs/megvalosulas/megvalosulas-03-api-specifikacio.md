@@ -1,8 +1,9 @@
 # Implementációs terv – 03: API-specifikáció (OpenAPI v1)
 
-**Verzió:** 0.4 (a **katalóguslista végrehajtva**: a `GET /api/v1/vessels`
-a valós kód, a `just check` zöld, a 91%-os alkalmazásréteg-coverage a
-CI-ben)
+**Verzió:** 0.5 (a **katalóguslista + a hajóadatlap + a globális
+kereső végrehajtva**: a `GET /api/v1/vessels`, a
+`GET /api/v1/vessels/{id}` és a `GET /api/v1/search` a valós kód, a
+`just check` zöld, a 19 integrációs teszt valódi PostgreSQL-lel)
 **Dátum:** 2026-11-22
 **A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.3** (71 tábla,
 150 index, 121 FK, 28 trigger — **a `home_river_section_id` +
@@ -340,7 +341,10 @@ jön).
 > | a `GET /api/v1/vessels/{id}` (a hajóadatlap) | ✅ **VALÓS KÓD** (`duna/repositories/vessel_detail_repo.py`) |
 > | a `GET /api/v1/vessels/{id}/aliases` és a többi 6 végpont | ⏳ **NEM KÉSZ** (a következő kör) |
 > | **a `scripts/ci/check_models.py`** (a `just models-check`) | ✅ **a modellek és a séma driftjét elkapja** (a §5.1a) — **kétirányú**: a modell oszlopa a DB-ben, a DB NOT NULL oszlopa a modellben |
-> | a `GET /api/v1/search` | ⏳ **NEM KÉSZ** (a trigram-alapú keresés) |
+> | a `GET /api/v1/search` | ✅ **VALÓS KÓD** (`duna/repositories/search_repo.py`) |
+> | **a `duna/domain/text.py`** (a kereső normalizálás) | ✅ **a `lower(unaccent(name))` alakja** — **a `sort_name`-ével egyezik** |
+> | **a `meta.area_hint`** | ✅ **a `bori` H-2 findingje: a másik területen van-e találat, a darabszám nélkül** |
+> | a `GET /api/v1/search/suggest` (a F-SRCH-08) | ⏳ **NEM KÉSZ** (R3) |
 >
 > **A `verification_level` a SZÁMÍTOTT érték** (a `vessel_verification`
 > nézetből) → **a `verification_source` jelzi, ha a tárolt érték

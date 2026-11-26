@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
@@ -33,6 +33,7 @@ from duna.db.models import (
     VesselTypeI18n,
 )
 from duna.db.views import VESSEL_VERIFICATION
+from duna.domain.text import normalize_search_text
 from duna.schemas.vessel import VesselListItem
 
 
@@ -125,7 +126,24 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
         # tárolt `vessel.verification_level`-ra épül)
         stmt = stmt.where(Vessel.verification_level == filters.verification)
     if filters.q:
-        stmt = stmt.where(VesselI18n.name.ilike(f"%{filters.q}%"))
+        # **A `q` a `vessel.sort_name`-re epul** (a F-SRCH-03) ->
+        # **a `sort_name` a triggerben `lower(unaccent(name))`** ->
+        # **a normalizalt keresokifejezes egyezik vele** ->
+        # **a `vessel_sort_name_trgm` index hasznalodik**.
+        #
+        # **A `vessel_i18n.name` is kell** (a `vessel_i18n_name_trgm`
+        # indexen) -> **az eredeti `q`-val** -> **a fejlesztoi
+        # `pgserver`-ben (a `unaccent` NELKUL) a `sort_name` ekezetes,
+        # igy csak ez talal** -> **a ket forma OR-ja mindket
+        # kornyezetben ekezet-fuggetlen keresest ad**.
+        normalized_q = normalize_search_text(filters.q)
+        stmt = stmt.where(
+            or_(
+                Vessel.sort_name.contains(normalized_q),
+                VesselI18n.name.ilike(f"%{filters.q.strip()}%"),
+                VesselI18n.name.ilike(f"%{normalized_q}%"),
+            )
+        )
 
     # **a rendezés** (a F-CAT-02: a hajónév az alapértelmezett)
     order_col = {
