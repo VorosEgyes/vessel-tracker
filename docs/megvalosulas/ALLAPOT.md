@@ -326,6 +326,34 @@ fejlesztői kapu) → **a DB-függő lépések a `pgserver`-t indítják.**
 2. **a várt sorszám a gyűjtőreset után `1` volt** `2` helyett → **a második sor mindig hibásnak számított**;
 3. **a `parse_sentence` máshol bontotta a mezőket**, mint a `frame_count`/`frame_number` → **egy közös `_sentence_fields` helper** (egy helyen a mezőfelbontás).
 
+### 2b.4e A fejlesztői előnézet (2026-11-27)
+
+**A frontend a valós mérési adatokkal** — **a `bud01` vevő 244 hajója**
+(a `ais-20261127-0905.db`).
+
+**A `scripts/dev/load_measurement.py`** a mérési SQLite-ból a
+`decoder.py`-vel dekódolja a neveket (a fizikai 6 bites formából) →
+**a `vessel` + a `vessel_i18n` + a `vessel_identifier` táblákba.**
+
+**A `scripts/dev/preview.py`** egy parancs az egész előnézethez:
+a `pgserver` → a migráció → a betöltés → az API → a frontend build
+(a NAS-IP-vel) → a statikus kiszolgálás.
+
+| A címek | |
+|---|---|
+| **a frontend** (a NAS-on) | `http://192.168.0.207:8931/hu/duna/hajok` |
+| **az API** (a NAS-on) | `http://192.168.0.207:8000/api/v1/vessels?area=duna` |
+| **a Macen** (SMB mount) | `/Volumes/Media/Shared/outbox/previews/Martin_duna_web_preview/` |
+
+> **A portok:** a **8080 a Zigbee2MQTT**, a **8090 a Pi-hole** (a
+> NAS-on) → **a `preview.py` a 8931-et használja** → **a port
+> ütközésével egy világos hibát ad** (a 07 §3.1: ne maszkoljunk).
+
+> **A Macen (a hálózaton kívül):** a `Shared` mappába másolt statikus
+> build → **a `file://` URL-en a buildkori lista (50 hajó a
+> neveivel) LÁTSZIK** → **a keresés/lapozás nem (az API a NAS-on
+> van)** → **a `README.md` a mappában mindent elmond.**
+
 ### 2b.5 A mérési oldal (a 2026-11-24-i állapot)
 
 | A mérés | Az eredmény |
@@ -743,7 +771,7 @@ készült el; az aktuális implementációt a 2b. fejezet írja le.
 |---|---|---|---|
 | A1 | **a referenciatáblák végpontjai** (a `03` §3.3): `/api/v1/ports`, `/locks`, `/waterways`, `/river-sections`, `/basins`, `/vessel-types`, `/operators`, `/routes`, `/cargo-types` | 9 lista + 2 adatlap | **elkészült** — a `reference.py` router |
 | A2 | **a `vessel_service` write-oldalának használatba vétele** (a `sort_name` + a `slug` betöltése) | kicsi | az A1 után (a szerkesztői felülethez kell) |
-| A3 | **az `ingest` réteg** (a `04`): **a frame-validáció KÉSZ** (a `frames.py`, 2026-11-27) → **a normalizált rekord** (a §5) → **a pipeline** (a mérési SQLite → a PostgreSQL backfill, a §8.2) | nagy | **a mérési adat már megvan** (a NAS-on az `ais-20261127-0905.db`, 222 MB, 893 457 üzenet) → **nem kell megvárni a mérés végét** |
+| A3 | **az `ingest` réteg** (a `04`): **a frame-validáció KÉSZ** (a `frames.py`) → **a hajóvéglegesítés KÉSZ** (a `load_measurement.py`: a mérési SQLite → a `vessel`/`vessel_i18n`/`vessel_identifier`, 244 hajó) → **a POZÍCIÓK írása** (a `position`/`ais_state` partíciókba) → **a `vessel_last_position` nézet** → **a „hol van" szöveg** | nagy | **a mérési adat megvan** (a NAS-on az `ais-20261127-0905.db`, 222 MB, 893 457 üzenet) → **nem kell megvárni a mérés végét** |
 | A4 | **a `apps/web`** (a `05`): az Astro frontend, a katalógusoldal | nagy | **első változat:** statikus katalógus, élő API-s keresés, rendezés és lapozás; az adatlap és a rebuild-hook még hátravan |
 | A5 | **a szerkesztői felület** (a `06`): az `/api/admin/v1/` | nagy | az A2 + az A4 után |
 | A6 | **a `packages/api-client`** (a generált TS kliens az OpenAPI-ból) | kicsi | **elkészült** — generálás, típusellenőrzés és CI driftkapu |

@@ -256,6 +256,32 @@ futtatja az `API_BASE_URL`-lel.
 **a `/opt/data/bin/pnpm` symlinkkel** → **a PATH-on** (a `just` is
 ott van).
 
+### 3.1b A fejlesztői előnézet (a `scripts/dev/`)
+
+**A `scripts/dev/` a helyi fejlesztői eszközöket tartalmazza** (nem
+a CI-t — a CI a `scripts/ci/`).
+
+| A script | A feladata |
+|---|---|
+| **`load_measurement.py`** | **a mérési SQLite → a PostgreSQL** → a haj neveket a `decoder.py`-vel dekódolja (a fizikai 6 bites formából) → a `vessel`/`vessel_i18n`/`vessel_identifier` táblákba → **a `sort_name` normalizáltan** (a `02` v1.12) |
+| **`preview.py`** | **a `pgserver` + a migráció + a betöltés + az API + a frontend build (a NAS-IP-vel) + a statikus kiszolgálás** → **egy parancs az egész előnézethez** |
+
+```sh
+# a NAS-on
+cd /opt/data/martin/work/vt-clone
+uv run python scripts/dev/preview.py --public-url http://192.168.0.207:8000
+```
+
+| A címek | |
+|---|---|
+| a frontend | `http://192.168.0.207:8931/hu/duna/hajok` |
+| az API | `http://192.168.0.207:8000/api/v1/vessels?area=duna` |
+
+> **A portok:** a **8080 a Zigbee2MQTT**, a **8090 a Pi-hole** (a
+> NAS-on) → **a `preview.py` a 8931-et használja** → **a port
+> ütközésével **egy világos hibát** ad (a `--api-port` /
+> `--web-port` opcióval) → **a migráció előtt** (gyors a hiba).
+
 ### 3.2 A Docker image-ek
 
 **Három image** (a `01` – stack-terv §6.1):
