@@ -18,7 +18,7 @@ adja → **a szűrő `valid_to IS NOT NULL`** → **a `name_type='official'`
 
 from __future__ import annotations
 
-from sqlalchemy import case, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.models import (
@@ -30,6 +30,7 @@ from duna.db.models import (
     VesselIdentifier,
     VesselOwnership,
 )
+from duna.repositories.expressions import language_order
 from duna.schemas.vessel import (
     FieldOrigin,
     OwnershipPeriod,
@@ -81,15 +82,7 @@ async def list_ownership(session: AsyncSession, vessel_id: int, lang: str) -> li
             OperatorI18n.operator_id == VesselOwnership.operator_id,
             OperatorI18n.display_name.is_not(None),
         )
-        .order_by(
-            case(
-                (OperatorI18n.lang == lang, 0),
-                (OperatorI18n.lang == "en", 1),
-                (OperatorI18n.lang == "hu", 2),
-                else_=3,
-            ),
-            OperatorI18n.lang,
-        )
+        .order_by(language_order(lang, OperatorI18n.lang), OperatorI18n.lang)
         .limit(1)
         .correlate(VesselOwnership)
         .scalar_subquery()

@@ -1,8 +1,69 @@
-A db/migrations/ — az Alembic migrációk (a 01 §4.3: a séma FORRÁSA).
+A db/migrations/ — az Alembic migrációk a telepített séma forrásai.
 
-**A `db/ddl/schema-v1.1.sql` a GENERÁLT olvasható másolat** -> a
-`just ddl-generate` a `02` DDL-tervből generálja, a `just ddl-diff`
-ellenőrzi a driftet (a 07 §8.1 10b. lépése).
+**A `db/ddl/schema-v1.1.sql`** a `02` tervből generált, olvasható
+alapséma; a `just ddl-diff` azt ellenőrzi, hogy egyezik-e a tervvel.
+Ez nem ellenőrzi az Alembic `head` és a terv közti eltérést:
+a későbbi migrációk módosíthatják a telepített sémát.
 
 **A migrációk:**
-- `20241124_0001_initial_schema.py` — az első séma (a `02` DDL-je).
+- `20241124_0001_initial_schema.py` — a mellette lévő, rögzített
+  `20241124_0001_initial_schema.sql` pillanatképet futtatja. A fájl a
+  korábbi generált alapséma byte-pontos másolata; nem újragenerálható.
+  A migrációs transzformációk is a revízióban maradnak.
+- `20261127_0002_partition_retention.py` — a partíciók megőrzési
+  függvényét javítja.
+- `20261127_0003_retention_schedule.py` — a `pg_cron` megléte esetén
+  telepíti a három heti megőrzési feladatot; az ismét futtatható SQL
+  ugyanebben a könyvtárban található.
+
+Új sémaváltozáshoz új Alembic-revízió kell, nem a régi SQL-pillanatkép
+vagy az eredeti migráció átírása. A terv és a generált DDL frissítése
+önmagában nem migrálja a meglévő adatbázist. A sémateszteket friss és
+korábban migrált adatbázison is futtatni kell.
+
+A `0001` külön `psql` folyamatot és a környezetben elérhető extensionöktől
+függő transzformációkat használ; a pillanatkép rögzítése nem teszi a
+különböző PostgreSQL-környezeteket azonossá. Hiba esetén a részben
+végrehajtott `0001` nem feltétlenül tranzakcionálisan visszavont.
+
+## A megőrzés üzemeltetése
+
+A `0003` a nyers AIS-re 14, a vízállásra és pozíciókra 90 napos
+megőrzést állít be; a feladatok hetente futnak. A teljesen lejárt
+partíciókat véglegesen törlik, a default partícióból pedig sorokat
+törölnek. A részben lejárt partíciók a teljes lejáratig megmaradnak,
+a default partíció törlése zárolhatja az írásokat. Az időpontok a
+`cron.timezone` beállítástól függnek.
+
+A `pg_cron` csomagot telepíteni, a `shared_preload_libraries` beállításban
+betölteni, a `cron.database_name`-t az alkalmazás adatbázisára állítani,
+majd az extensiont abban az adatbázisban létrehozni kell. A migrációt
+superuserrel kell futtatni: a jobok ezzel a szerepkörrel futnak, amelynek
+LOGIN-joga és a pg_cron által használt kapcsolat vagy background worker
+beállítása is szükséges. A megfelelő jogosultságok és az adatbázishoz való
+kapcsolódás üzemeltetői felelősség; a job regisztrálása nem bizonyítja
+a tényleges sikeres futást.
+
+Ha a csomag nincs jelen, a migráció figyelmeztetéssel továbbmegy, de
+**nem lesz automatikus törlés**. Ha a csomag elérhető, de az extension
+nem létezik az aktuális adatbázisban, a migráció hibával leáll. Ha egy
+korábban pg_cron nélkül migrált adatbázishoz később telepítik a
+kiterjesztést, a már elért `head` önmagában nem futtatja újra a migrációt.
+Ugyanazzal a superuserrel az alkalmazás adatbázisára kapcsolódva futtatni kell:
+
+```sh
+psql -X -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f db/migrations/versions/20261127_0003_retention_schedule.sql
+```
+
+Az SQL ismételt futtatása nem duplikálja az azonos jobokat. Azonos nevű,
+de eltérő tulajdonosú, adatbázisú, tartalmú, ütemezésű vagy inaktív job
+esetén hibával leáll: az ütközést előbb kézzel tisztázni kell. Az éles
+környezetben ellenőrizni kell a `cron.job` bejegyzéseit és a
+`cron.job_run_details` tényleges eredményeit, továbbá riasztani kell a
+kimaradt vagy hibás futásokra és a tárolóhely fogyására.
+
+A `0003` visszaléptetése a három nevesített jobot eltávolítja, de a
+kiterjesztést nem. Más tulajdonosú vagy más adatbázishoz tartozó
+azonos nevű job esetén a visszaléptetés leáll. A `0002` visszaléptetése
+a korábbi, hibás megőrzési függvényt állítja vissza; már törölt adatokat
+egyik visszaléptetés sem tud helyreállítani.

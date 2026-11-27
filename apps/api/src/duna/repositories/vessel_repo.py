@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
@@ -95,7 +96,7 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
         )
         .outerjoin(
             VesselIdentifier,
-            VesselIdentifier.id == display_identifier_id(),
+            VesselIdentifier.id == display_identifier_id(filters.area),
         )
         .outerjoin(
             VESSEL_VERIFICATION,
@@ -150,6 +151,23 @@ def build_vessel_query(filters: VesselFilters) -> Select[Any]:
     return stmt
 
 
+def vessel_list_item(row: Row[Any]) -> VesselListItem:
+    """Map a catalog query row consistently for listing and search."""
+    return VesselListItem(
+        id=row.id,
+        slug=row.slug,
+        name=row.name,
+        vessel_type_name=row.vessel_type_name,
+        identifier=row.identifier,
+        identifier_type=row.identifier_type,
+        operator_name=row.operator_name,
+        operating_area=row.operating_area,
+        status=row.status,
+        verification_level=row.computed_verification_level,
+        verification_source="stored_stale" if row.is_stale else "computed",
+    )
+
+
 async def list_vessels(
     session: AsyncSession, filters: VesselFilters
 ) -> tuple[list[VesselListItem], int | None, bool]:
@@ -171,20 +189,5 @@ async def list_vessels(
     has_more = len(rows) > filters.per_page
     rows = rows[: filters.per_page]
 
-    items = [
-        VesselListItem(
-            id=row.id,
-            slug=row.slug,
-            name=row.name,
-            vessel_type_name=row.vessel_type_name,
-            identifier=row.identifier,
-            identifier_type=row.identifier_type,
-            operator_name=row.operator_name,
-            operating_area=row.operating_area,
-            status=row.status,
-            verification_level=row.computed_verification_level,
-            verification_source="stored_stale" if row.is_stale else "computed",
-        )
-        for row in rows
-    ]
+    items = [vessel_list_item(row) for row in rows]
     return items, total, has_more

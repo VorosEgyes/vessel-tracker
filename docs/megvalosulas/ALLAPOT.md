@@ -163,7 +163,7 @@ tartozik; a kért nyelv után angol, majd magyar szöveg következik.
 | **a `justfile`** (a kanonikus belépési pont) | ✅ **~36 recept** |
 | **az Alembic-migráció** (a `db/migrations/`) | ✅ **a `0001` a teljes sémát hozza létre** — a `just db-migrate` fut, a `just test-reversible` igazolja a visszafordíthatóságot |
 | **a `db/ddl/schema-v1.1.sql`** | ✅ **GENERÁLT** a `02` tervből (a `just ddl-generate`) — **a `just ddl-diff` ellenőrzi a driftet** |
-| **a CI** (a `.github/workflows/ci.yml`) | létezik; a helyi változat kliens- és frontendellenőrzésekkel bővült, GitHubon még nem futott |
+| **a CI** (a `.github/workflows/ci.yml`) | a `46b3dd5` CI-futása elbukott két SQLite-teszten; a helyi javítás távoli CI-n még nem futott |
 | **a Build** (a `build.yml`) | a PostgreSQL image épül; az API és a web Dockerfile hiányzik, image-buildjük kimarad |
 | **a deploy workflow-k** | léteznek, de a környezetek és a telepítés működését most nem ellenőriztük |
 | **a `scripts/ci/pytest_or_skip.py`** | ✅ **nem maszkolja a hibákat** (csak a „nincs gyűjtött teszt" esetet nyeli el) |
@@ -174,16 +174,16 @@ tartozik; a kért nyelv után angol, majd magyar szöveg következik.
 
 | Ellenőrzés | Legutóbbi helyi eredmény a jelenlegi fejlesztés során |
 |---|---|
-| Python `pytest` | **88 sikeres, 43 kihagyott**; a kihagyottak PostgreSQL-t igényelnek |
+| Python `pytest` | **144 sikeres** frissen migrált, izolált PostgreSQL 16.2-vel, 2026-11-27-én |
 | API-kliens | 2 Vitest-teszt sikeres; TypeScript típusellenőrzés és generált séma driftellenőrzés sikeres |
 | Frontend | 4 Vitest-teszt sikeres; ebből egy ellenőrzi a hat statikus oldal buildjét és az elérhetetlen API miatti buildhibát |
 | Böngésző | a keresés, az üres eredmény és az API-hiba helyi teszt-API-val ellenőrizve |
 | Statikus ellenőrzés | Python Ruff és mypy, Astro/TypeScript típusellenőrzés és Prettier sikeres |
 
-A PostgreSQL-es integrációs tesztek és a teljes `just check` **nem
-futottak le ebben a munkamenetben**; a korábbi commitra vonatkozó CI- és
-coverage-eredmények nem igazolják a jelenlegi munkafát. Az új integrációs
-tesztek CI-ben is futtatandók.
+A helyi PostgreSQL-példányban nem volt PostGIS, unaccent és pg_cron,
+ezért az első migráció ezek nélküli fejlesztői változata futott; az éles
+extensionökkel és az időzített jobbal külön ellenőrzés szükséges. A
+teljes `just check` és a jelenlegi munkafa GitHub CI-je nem futott le.
 
 ### 2b.4a Az új frontend és kliens
 
@@ -205,6 +205,93 @@ a hiányzó és téves nyelvű fordítások; a keresési lapozás és a másik
 terület azonosítós jelzése; a nem támogatott szűrők csendes figyelmen
 kívül hagyása; valamint az adatlap szöveges pozíciója. A hibákhoz
 regressziós tesztek kerültek; a PostgreSQL-specifikus igazolás még nyitott.
+
+### 2b.4c Adatmodell-felülvizsgálat (2026-11-27)
+
+**Keret:** a jelenlegi API és a későbbi funkciók megtartása a cél; a
+felhasználó szerint nincs megőrzendő éles adatbázis. A vizsgálat a
+sémára, az R1-adatigényre és az alkalmazás jelenlegi adatfelhasználására
+épült, nem egy feltöltött adatbázis mérésére. A táblák kihasználtsága,
+az adatok kitöltöttsége és az indexek valódi költsége ezért nem mért.
+
+| Adatkör | Célszerűség és státusz |
+|---|---|
+| Hajó, azonosító, név, típus, terület, státusz | a kereshető R1-katalógus alapja; az ismeretlen típus és zászlóország kezelését az ingest tervezésekor tisztázni kell, mert a jelenlegi séma kötelezővé teszi őket |
+| Üzemeltető, méretek, kapacitás, építési év, forrás és megfigyelési idő | hasznos katalógusadatok, de nem garantált az AIS-ból való kitöltésük; az ismeretlen érték nem azonos a nullával vagy a hamissal |
+| Fordítások, korábbi nevek, forrástörténet | a többnyelvűséghez, hajótörténethez és ellenőrizhetőséghez indokolt; a név több helyen való tárolásának következetességét biztosítani kell |
+| Kikötők, zsilipek, vízterületek, útvonalak, rakománytípusok | a jelenlegi referencia-API használja őket; nem tekinthetők egyszerűen törölhető, kihasználatlan tábláknak |
+| Pozíció, nyers AIS és vízállás idősor | R1-ben a részletes, tartós mozgástörténet nem alapkövetelmény, későbbi funkciókhoz hasznos lehet; a tényleges gyűjtés előtt megőrzési időt, tárolási költséget és adatminimalizálást kell eldönteni |
+| Menetrend, esemény, vízállás, pénznem és árfolyam | többnyire későbbi igényeket szolgálnak; a jelenlegi Python-kódban nincs teljes feldolgozási folyamatuk. Megőrzésük tudatos kompatibilitási döntés, nem bizonyíték arra, hogy most adatot is kell gyűjteni |
+| Szerkesztő, audit, visszajelzés, üzemeltetés | a tervezett szerkesztési és üzemi működéshez tartoznak; a teljes munkafolyamat még nem készült el |
+
+**Prioritásos megállapítások és további javaslatok:**
+
+1. **Megőrzési hiba javítva, helyi PostgreSQL-teszttel:** a régi
+   `drop_expired_partitions` a partíció
+   nevét napi tartománynak feltételezi, miközben a `position_p20261101`
+   havi partíció. Emiatt egy havi partíció a teljes időtartama lejárta
+   előtt törölhető. A default partíciókat a függvény nem törli, és a
+   sémában látható `position_default`-törlés csak a séma létrehozásakor
+   fut. A nyers AIS és vízállás default partíciójára sincs itt ütemezett
+   sortörlés. A `20261127_0002` migráció a tényleges partícióhatár alapján
+   töröl, a default partíciót takarítja, és a hibát nem nyeli el.
+   A részben lejárt partícióban az adatok a teljes partíció lejártáig
+   megmaradnak; nagy default partíció takarítása blokkolhatja az írásokat.
+2. **Azonosítók két helyen:** a kanonikus `vessel_identifier` mellett a
+   `vessel.mmsi`, `eni`, `imo` oszlopokat triggerek szinkronizálják.
+   Ez egyszerűbb olvasást ad, de plusz inkonzisztencia- és migrációs
+   kockázat; a `vessel` bármely UPDATE-je újraolvassa az aktív primer
+   azonosítókat. Egységes forrásra váltás előtt a detail API-t, indexeket,
+   importot és történeti adatokat együtt kell átállítani.
+3. **Bizonyossági szint kétféleképp:** a szűrő a tárolt, a megjelenítés
+   a számított értéket használja, ezért eltéréskor egy elem nem a látható
+   badge szerint szűrődik. Ezt a jelenlegi szerződés és teszt szándékosan
+   rögzíti; egységesítéséhez API-viselkedési döntés és regressziós teszt
+   szükséges, nem pusztán egy oszlop eltávolítása.
+4. **Források és történet:** a `vessel_data_origin` aktív egyedisége
+   eredettípusra, nem `source_id`-ra vonatkozik, így ugyanazon típus
+   több egyidejű forrása nem tárolható. A konfliktusnézet több eredetet
+   számol, nem feltétlenül eltérő értékeket. A `vessel_ownership`
+   üzemeltetőre hivatkozik, ami nem bizonyít tulajdonjogot.
+5. **Migrációs reprodukálhatóság:** a `0001` korábban a változtatható
+   generált DDL-t olvasta. Most a revízióhoz tartozó rögzített SQL-másolatot
+   és saját, rögzített transzformációkat használ; a hash-t teszt védi.
+   A terv–generált DDL ellenőrzés nem igazolja az Alembic `head` sémáját,
+   és a terv megváltoztatása nem migrálja a meglévő adatbázist. A `0001`
+   külön `psql` folyamatot használ, így hibánál részleges séma maradhat;
+   az extensionök elérhetősége is befolyásolja az eredményt. A helyi
+   ellenőrzéskor felfedezett socketes
+   kapcsolathiba és `PGPGBIN`-útvonalkezelés javítva: a `psql` a
+   `DATABASE_URL` szerinti adatbázist használja.
+6. **Adatforrás-ellentmondás:** a parserterv korábban ugyanazon oldalon
+   állította, hogy az AIS Msg 5 tartalmaz és nem tartalmaz nevet.
+   A bitmezők és a dekóder alapján az állítást javítottuk; az
+   [R1 adatterv](../r1-adat-terv.md) FI 10-hez rendelt egyéb mezőit
+   forrásonként külön ellenőrizni kell az ingest megépítése előtt.
+
+A kódban a katalógus és a keresés közös sorkonverziót, a hajó és a
+történeti üzemeltető pedig közös nyelvi sorrendet használ. A felülvizsgálat
+nem törölt táblát, mezőt vagy API-t. A nagyobb sémaegyszerűsítés továbbra is
+összehangolt migrációt és integrációs ellenőrzést igényel.
+Az integrációs tesztek újrafuttatása azonos tesztadatbázison jelenleg
+nem megbízható: a hajóteszt fixture egyes forrásrekordokat nem takarít
+és újból beszúr. A fenti teljes futás ezért friss tesztadatbázison történt.
+
+**Megőrzési ütemezés:** a `0001` a `pg_cron`-hívásokat továbbra is
+eltávolítja, ezért a `0003` migráció állítja be a három heti feladatot.
+A nyers AIS 14, a vízállás és a pozíció 90 napos megőrzését a felhasználó
+jóváhagyta. A migráció pg_cron nélküli környezetben figyelmeztet, elérhető,
+de az adatbázisba nem telepített kiterjesztésnél hibázik. Utólagos
+telepítéskor az SQL külön futtatandó; a konfigurációt, a futtató
+szerepkört és a tényleges futások ellenőrzését a
+[migrációk leírása](../../db/migrations/README) részletezi.
+
+Helyi PostgreSQL 16.2 és pg_cron 1.6 környezetben a migrációt, az
+idempotenciát, az ütközéskezelést, a visszaléptetést és egy ténylegesen
+futó, tesztadatot törlő cron-jobot is ellenőriztük: a teljes Python-suite
+150 sikeres és 1 kihagyott teszttel zárult. PostGIS ebben a környezetben
+nem volt; a pg_cron nélküli teljes futás 146 sikeres és 2 kihagyott
+tesztet adott a cron-specifikus tesztek további bővítése előtt.
 
 ### 2b.5 A mérési oldal (a 2026-11-24-i állapot)
 

@@ -1,20 +1,9 @@
-"""Az első séma (a `02` – adatbázis-terv DDL-je).
-
-**A séma FORRÁSA a `02` DDL-terv** (a 01 §4.3: „a `db/migrations/`
-(Alembic) a séma **forrása**; a `db/ddl/` a teljes sémát egy olvasható
-fájlban mutatja") → **a migráció a `db/ddl/schema-v1.1.sql`-t futtatja**,
-ami a `02` terv SQL-blokkjaiból generált (a `just ddl-generate`).
-
-**A `downgrade` (a visszafordítás):** a séma teljes eldobása →
-**a `DROP SCHEMA public CASCADE` + a `CREATE SCHEMA public`**
-(a `07` §8.1 8. lépése: a migráció visszafordíthatóság).
-
-**Revízió:** 20241124_0001
-"""
+"""Az első séma; a revízióhoz tartozó SQL-pillanatképet futtatja."""
 
 from __future__ import annotations
 
 import pathlib
+import re
 
 import sqlalchemy as sa
 from alembic import op
@@ -26,11 +15,7 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-# a séma fájlja (a repo gyökerében)
-# a `db/migrations/versions/<fajl>.py` -> a `versions` (0), a
-# `migrations` (1), a `db` (2), a repo gyökere (3)
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-SCHEMA_SQL = REPO_ROOT / "db" / "ddl" / "schema-v1.1.sql"
+SCHEMA_SQL = pathlib.Path(__file__).with_suffix(".sql")
 
 
 def _run_sql(sql: str) -> None:
@@ -46,18 +31,11 @@ def _run_sql(sql: str) -> None:
     logika).
     """
     import os
-    import shutil
     import subprocess
 
-    psql = os.environ.get("PGPGBIN") or shutil.which("psql")
+    psql = _psql()
     if not psql:
-        # a venv pgserver-e (a fejlesztoi DB)
-        try:
-            import pgserver
-
-            psql = str(pathlib.Path(pgserver.__file__).parent / "pginstall" / "bin" / "psql")
-        except Exception as exc:  # pragma: no cover
-            raise RuntimeError("a psql nem talalhato (a PGPGBIN / a PATH / a pgserver)") from exc
+        raise RuntimeError("a psql nem talalhato (a PGPGBIN / a PATH / a pgserver)")
 
     env = dict(os.environ)
     env.setdefault("PGUSER", "postgres")
@@ -98,55 +76,48 @@ def _apply_db_url_to_env(env: dict[str, str]) -> None:
     kapcsolat a TCP-n megy, de a `psql` a socketen keresne** → **ez
     a kiegyeztetés kell.**
     """
-    import os
-    from urllib.parse import unquote, urlparse
+    from sqlalchemy.engine import make_url
 
-    url = os.environ.get("DATABASE_URL", "")
+    url = env.get("DATABASE_URL", "")
     if not url:
         return
 
-    # a query-stringben a `host=` (a socketes forma)
-    if "host=" in url:
-        env["PGHOST"] = url.split("host=")[1].split("&")[0]
-        if "port=" in url:
-            env["PGPORT"] = url.split("port=")[1].split("&")[0]
-        return
-
-    # a netloc (a TCP-s forma): a hoszt:port
-    parsed = urlparse(url.replace("postgresql+psycopg://", "postgresql://"))
-    if parsed.hostname:
-        env["PGHOST"] = unquote(parsed.hostname)
-    if parsed.port:
-        env["PGPORT"] = str(parsed.port)
+    parsed = make_url(url)
+    host = parsed.query.get("host", parsed.host)
+    port = parsed.query.get("port", parsed.port)
+    if isinstance(host, tuple) or isinstance(port, tuple):
+        raise ValueError("a DATABASE_URL tobb host vagy port erteket tartalmaz")
+    if host:
+        env["PGHOST"] = host
+    if port is not None:
+        env["PGPORT"] = str(port)
     if parsed.username:
-        env["PGUSER"] = unquote(parsed.username)
+        env["PGUSER"] = parsed.username
     if parsed.password:
-        # **a `psql` a TCP-n jelszot ker** (a CI-ben a PostgreSQL
-        # service: a postgres/postgres) -> **a `PGPASSWORD` kell**
-        env["PGPASSWORD"] = unquote(parsed.password)
-    if parsed.path and parsed.path != "/":
-        env["PGDATABASE"] = unquote(parsed.path.lstrip("/"))
+        env["PGPASSWORD"] = parsed.password
+    if parsed.database:
+        env["PGDATABASE"] = parsed.database
 
 
-def _preprocessors():
-    """A `db/tools/validate_ddl.py` preprocesszorai (a `strip_gis`,
-    a `strip_unaccent`, a `strip_crypto`).
+def _strip_gis(sql: str) -> str:
+    sql = re.sub(r"geometry\s*\(\s*\w+\s*,\s*4326\s*\)", "text", sql)
+    sql = re.sub(r"geometry\s*\(\s*\w+\s*\)", "text", sql)
+    return re.sub(
+        r"CREATE INDEX (\w+) ON (\w+) USING GIST \((\w+)\);", r"CREATE INDEX \1 ON \2 (\3);", sql
+    )
 
-    **Egy helyen van a logika:** a migráció és a validátor ugyanazt a
-    preprocesszort használja → **a séma azonos** (a `02` §12).
 
-    **A `db/tools/` a `sys.path`-be kerül** → **a `pgserver` importja
-    a `sys.path`-et módosítja** → **a migráció subprocessban fut, így
-    ez nem számít.**
-    """
-    import sys
+def _strip_unaccent(sql: str) -> str:
+    sql = re.sub(r"lower\(unaccent\(([^)]+)\)\)", r"lower(\1)", sql)
+    sql = re.sub(r"unaccent\(([^)]+)\)", r"\1", sql)
+    sql = re.sub(r"\s+gin_trgm_ops\)", ")", sql)
+    return re.sub(r"USING GIN\s*\(", "USING BTREE (", sql)
 
-    tools_dir = str(REPO_ROOT / "db" / "tools")
-    if tools_dir not in sys.path:
-        sys.path.insert(0, tools_dir)
-    from validate_ddl import strip_crypto, strip_gis, strip_unaccent
 
-    return strip_gis, strip_unaccent, strip_crypto
+def _strip_crypto(sql: str) -> str:
+    sql = sql.replace("digest(", "md5(")
+    sql = sql.replace(",\n            'sha256'\n        )", "\n        )")
+    return sql.replace(", 'sha256')", ")")
 
 
 def _psql() -> str | None:
@@ -222,8 +193,6 @@ def _strip_cron(sql: str) -> str:
     szétbomlana** → **a minta a dollar-quote végéig megy** (a
     `validate_ddl.py` megjegyzése szerint).
     """
-    import re
-
     sql = re.sub(
         r"CREATE EXTENSION IF NOT EXISTS pg_cron;",
         "-- (pg_cron kimaradt: nem elerheto a stock PostgreSQL-ben)",
@@ -245,7 +214,7 @@ def _strip_cron(sql: str) -> str:
 
 
 def upgrade() -> None:
-    """A séma létrehozása (a `02` DDL-je).
+    """A séma létrehozása a revízió rögzített DDL-jéből.
 
     **A `pg_cron` opcionális:** ha az extension nincs telepítve (a
     fejlesztői `pgserver` DB-ben), a `pg_cron` hívások kimaradnak →
@@ -285,16 +254,15 @@ def upgrade() -> None:
 
     # **A GIS csak akkor marad, ha van PostGIS** (a CI-ben és a
     # productionben van; a fejlesztői `pgserver`-ben nincs)
-    strip_gis, strip_unaccent, strip_crypto = _preprocessors()
     if not _has_extension("postgis"):
         print("  a postgis extension nem elérhető -> a GIS-részek text-re cserélve")
-        sql = strip_gis(sql)
+        sql = _strip_gis(sql)
     if not _has_extension("unaccent"):
         print("  az unaccent extension nem elérhető -> a normalizálás kimarad")
-        sql = strip_unaccent(sql)
+        sql = _strip_unaccent(sql)
     if not _has_extension("pgcrypto"):
         print("  a pgcrypto extension nem elérhető -> a hash kiszámítása kimarad")
-        sql = strip_crypto(sql)
+        sql = _strip_crypto(sql)
 
     _run_sql(_strip_cron(sql))
 

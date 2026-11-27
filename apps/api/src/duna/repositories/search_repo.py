@@ -11,7 +11,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from duna.db.models import Vessel, VesselIdentifier
 from duna.domain.text import normalize_search_text
 from duna.repositories.expressions import vessel_name
-from duna.repositories.vessel_repo import VesselFilters, build_vessel_query
+from duna.repositories.vessel_repo import VesselFilters, build_vessel_query, vessel_list_item
 from duna.schemas.vessel import VesselListItem
 
 
@@ -51,22 +51,6 @@ def _name_match(raw: str, lang: str) -> ColumnElement[bool]:
     return or_(*conditions)
 
 
-def _to_item(row: Any) -> VesselListItem:
-    return VesselListItem(
-        id=row.id,
-        slug=row.slug,
-        name=row.name,
-        vessel_type_name=row.vessel_type_name,
-        identifier=row.identifier,
-        identifier_type=row.identifier_type,
-        operator_name=row.operator_name,
-        operating_area=row.operating_area,
-        status=row.status,
-        verification_level=row.computed_verification_level,
-        verification_source="stored_stale" if row.is_stale else "computed",
-    )
-
-
 async def search(
     session: AsyncSession, params: SearchParams
 ) -> tuple[list[VesselListItem], int | None, bool, bool]:
@@ -80,7 +64,7 @@ async def search(
         count_stmt = select(func.count()).select_from(identifier_stmt.order_by(None).subquery())
         total = (await session.execute(count_stmt)).scalar_one()
         return (
-            [_to_item(row) for row in rows[: params.limit]],
+            [vessel_list_item(row) for row in rows[: params.limit]],
             total,
             False,
             len(rows) > params.limit,
@@ -92,7 +76,7 @@ async def search(
         .order_by(Vessel.sort_name, Vessel.id)
     )
     rows = (await session.execute(name_stmt.limit(params.limit + 1))).all()
-    items = [_to_item(row) for row in rows[: params.limit]]
+    items = [vessel_list_item(row) for row in rows[: params.limit]]
     other_has_matches = False
     if not items:
         other_area = "balaton" if params.area == "duna" else "duna"

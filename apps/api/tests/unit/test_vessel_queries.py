@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
@@ -12,6 +12,7 @@ from duna.main import app
 from duna.repositories.search_repo import SearchParams, search
 from duna.repositories.vessel_detail_repo import get_vessel_detail
 from duna.repositories.vessel_repo import VesselFilters, list_vessels
+from duna.repositories.vessel_sub_repo import list_ownership
 
 
 @pytest.fixture
@@ -64,7 +65,8 @@ def session():
         "INSERT INTO operator_i18n VALUES (1, 'hu', 'Magyar'), (1, 'en', 'English')",
         """INSERT INTO vessel_identifier VALUES
             (1, 1, 'eni', '12345678', 1, NULL), (2, 1, 'mmsi', '243000001', 1, NULL),
-            (3, 3, 'eni', '87654321', 1, NULL)""",
+            (3, 3, 'eni', '87654321', 1, NULL),
+            (4, 3, 'national_reg_no', 'BAL-1', 0, NULL)""",
         """INSERT INTO vessel_verification VALUES
             (1, 'name_only', 0), (2, 'name_only', 0), (3, 'name_only', 0)""",
         "INSERT INTO country VALUES ('HU', 'Magyarország')",
@@ -117,6 +119,33 @@ async def test_search_identifier_matches_non_displayed_identifier_and_other_area
     items, _, _, more = await search(session, SearchParams("duna", "teszthajo", limit=1))
     assert len(items) == 1
     assert more
+
+
+@pytest.mark.asyncio
+async def test_display_identifier_preference_by_area_and_active_status(session):
+    await session.execute(
+        text("INSERT INTO vessel_identifier VALUES (5, 1, 'eni', 'old', 1, '2020-01-01')")
+    )
+    duna, _, _ = await list_vessels(session, VesselFilters(area="duna"))
+    balaton, _, _ = await list_vessels(session, VesselFilters(area="balaton"))
+    assert (duna[0].identifier_type, duna[0].identifier) == ("eni", "12345678")
+    assert (balaton[0].identifier_type, balaton[0].identifier) == ("national_reg_no", "BAL-1")
+
+
+@pytest.mark.asyncio
+async def test_catalog_and_search_map_the_same_row(session):
+    await session.execute(text("UPDATE vessel_verification SET is_stale = 1 WHERE vessel_id = 1"))
+    catalog, _, _ = await list_vessels(session, VesselFilters(area="duna", lang="en"))
+    results, _, _, _ = await search(session, SearchParams("duna", "243000001", "en"))
+    assert results == [catalog[0]]
+    assert results[0].verification_source == "stored_stale"
+
+
+@pytest.mark.asyncio
+async def test_ownership_uses_the_same_language_fallback(session):
+    await session.execute(text("INSERT INTO vessel_ownership VALUES (1, 1, '2020-01-01', NULL)"))
+    assert (await list_ownership(session, 1, "hu"))[0].operator_name == "Magyar"
+    assert (await list_ownership(session, 1, "de"))[0].operator_name == "English"
 
 
 @pytest.mark.asyncio

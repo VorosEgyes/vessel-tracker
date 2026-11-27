@@ -417,12 +417,11 @@ a számszerű mezőktől:** a szöveg karaktere a `pyais`
 `SIXBIT_ENCODING` szerint értendő (a `T` a 20-as érték), a
 kitöltő az `@` (64) → **a `decode_text_field` külön függvény.**
 
-**A nev és a hívójel (a `vessel_i18n.name`):** a Msg 5 **nem tartalmaz
-nevet**! A nevet az **Inland FI 10 (DAC 200, FID 10)** üzenet hordozza
-(`name`, `callsign`) — ez a belvízi statikus üzenet.
-
-**A hívójel a Msg 5-ben van** — és az FI 10-ban is. **A `vessel_identifier`
-a kanonikus** (a 02-es terv §8.2a szinkron).
+**A név és a hívójel:** a fenti bitmezők szerint mindkettő szerepel a
+Msg 5-ben; a dekóder ezeket `shipname` és `callsign` néven adja vissza.
+Más üzenettípusok mezőit külön kell azonosítani, nem szabad a Msg 5
+mezőit automatikusan FI 10-ként kezelni. A `vessel_identifier` a
+kanonikus azonosítótár (a 02-es terv §8.2a szinkron).
 
 ### 4.4a A külső referencia: az AIS szabályok és a minőségi problémák
 

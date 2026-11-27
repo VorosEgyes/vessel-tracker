@@ -2270,6 +2270,24 @@ terv dolga).
 
 ### 8.3 A `drop_expired_partitions` függvény
 
+> **Aktuális implementáció (2026-11-27):** az alábbi régi DDL és
+> elnevezési leírás az első sémarevízióhoz tartozik, nem a `head`
+> szerinti működéshez. A `20261127_0002` Alembic-revízió a függvényt
+> lecseréli: a tényleges PostgreSQL partícióhatárokat vizsgálja, és
+> csak a teljesen lejárt, véges felső határú partíciókat dobja el.
+> A default partícióból a határnál régebbi sorokat törli. A részben
+> lejárt partícióban az adatok a teljes partíció lejártáig megmaradnak,
+> a heti ütemezés mellett további késéssel. A művelet a szülőt kizárólagosan
+> zárolja, ezért nagy default partíción az írások késhetnek. A hibák
+> nem maradnak észrevétlenül.
+>
+> A régi revízióra visszalépés visszaállítja a hibás régi függvényt:
+> a retention cronokat előbb le kell állítani. A visszalépés a már
+> törölt adatokat nem állítja vissza. A `0001` a saját, rögzített
+> SQL-pillanatképéből épül; a tervből generált DDL nem frissíti a már
+> migrált adatbázist. A `0001` a cron-hívásokat minden esetben eltávolítja,
+> ezért az időzítést külön kell biztosítani.
+
 IF to_date(substring(r.partition_name FROM '_p(\d{8})$'), 'YYYYMMDD') < v_boundary THEN
                 EXECUTE format('DROP TABLE %I', r.partition_name);
                 v_dropped := v_dropped + 1;
