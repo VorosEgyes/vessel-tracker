@@ -103,6 +103,25 @@ def _load_measurement(url: str) -> None:
         print(f"a betöltés nem sikerült: {proc.stderr[-500:]}")
 
 
+def _check_port_free(port: int) -> None:
+    """**A port szabad-e?** -> **egy vilagos hiba**, ha nem.
+
+    **A `0.0.0.0`-on figyelünk** -> **a localhoston ellenorzés
+    elég** (a `SO_REUSEADDR` nélküli bind elbukik, ha a port
+    foglalt).
+    """
+    import socket
+
+    with socket.socket() as sock:
+        try:
+            sock.bind(("0.0.0.0", port))
+        except OSError as exc:
+            raise SystemExit(
+                f"HIBA: a {port}. port foglalt ({exc}).\n"
+                f"  a megoldas: `--api-port 8001` (vagy egy masik szabad port)"
+            ) from exc
+
+
 def _free_port() -> int:
     """Egy szabad TCP port."""
     import socket
@@ -147,9 +166,22 @@ class _StaticServer(socketserver.ThreadingTCPServer):
 
 
 def _serve_static(directory: pathlib.Path, port: int) -> _StaticServer:
-    """**A statikus `dist/` kiszolgalasa** a `0.0.0.0:port`-on."""
+    """**A statikus `dist/` kiszolgalasa** a `0.0.0.0:port`-on.
+
+    **A port foglaltsaga** -> **egy VILAGOS hiba** (a nyers
+    `OSError` nem mondja meg, hogy a NAS-on a 8080 a Zigbee2MQTT, a
+    8090 a Pi-hole) -> **a `preview.py` a `--web-port` opciot
+    javasolja.**
+    """
     handler = functools.partial(_QuietHandler, directory=str(directory))
-    return _StaticServer(("0.0.0.0", port), handler)
+    try:
+        return _StaticServer(("0.0.0.0", port), handler)
+    except OSError as exc:
+        raise SystemExit(
+            f"HIBA: a {port}. port foglalt ({exc}).\n"
+            f"  a NAS-on a 8080 a Zigbee2MQTT, a 8090 a Pi-hole.\n"
+            f"  a megoldas: `--web-port 8931` (vagy egy masik szabad port)"
+        ) from exc
 
 
 def _build_frontend(public_url: str, api_port: int) -> None:
@@ -189,6 +221,12 @@ def main() -> int:
     ap.add_argument("--no-load", action="store_true", help="a betöltés kihagyása")
     args = ap.parse_args()
 
+    # **A PORT ELLENORZESE ELSOBB** (a 07 §3.1: ne maszkoljunk) ->
+    # **a migracio (a `psql` subprocessszel) 1-2 percet tart** ->
+    # **igy a hiba azonnal jön**
+    _check_port_free(args.api_port)
+    _check_port_free(args.web_port)
+
     if not os.environ.get("DATABASE_URL"):
         url = _start_pgserver()
         os.environ["DATABASE_URL"] = url
@@ -219,6 +257,9 @@ def main() -> int:
     api: subprocess.Popen[bytes] | None = None
     static: _StaticServer | None = None
     try:
+        # **A PORT ELLENORZESE** (a `uvicorn` elbukna egy nyers
+        # traceback-kel) -> **egy vilagos hiba**
+        _check_port_free(api_port)
         api = subprocess.Popen(
             [
                 sys.executable,
