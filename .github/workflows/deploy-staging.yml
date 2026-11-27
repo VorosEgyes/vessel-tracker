@@ -38,12 +38,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          # **A `cache: pnpm` NEM hasznalhato itt**: a `setup-node` a
-          # pnpm-et keresi a cache beallitasakor -> a `pnpm/action-setup`
-          # elott ez elbukik ("Unable to locate executable file: pnpm",
-          # a 2026-11-24-i CI-futas). A frontend meg nincs a repoban ->
-          # a cache nem kell.
-          # (a pnpm cache a `pnpm/action-setup` utan allithato be)
+      - uses: pnpm/action-setup@v4
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.5"

@@ -293,6 +293,11 @@ futó, tesztadatot törlő cron-jobot is ellenőriztük: a teljes Python-suite
 nem volt; a pg_cron nélküli teljes futás 146 sikeres és 2 kihagyott
 tesztet adott a cron-specifikus tesztek további bővítése előtt.
 
+A `90013f7` commit CI- és Build-workflow-ja sikeres volt, de az utána
+induló staging workflow a hiányzó `pnpm` miatt elbukott. A staging és
+production workflow ezért a CI-hez hasonlóan telepíti a csomagkezelőt;
+a staging új futásának eredményét a GitHub Actions mutatja.
+
 ### 2b.5 A mérési oldal (a 2026-11-24-i állapot)
 
 | A mérés | Az eredmény |
