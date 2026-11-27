@@ -157,6 +157,8 @@ szórva a workflow-ban).
 | `just up` | a teljes compose (a DB migrációval) |
 | `just down` | a compose leállítása (a volume-okkal) |
 | `just db-migrate` | az Alembic `upgrade head` (a `db/migrations/` a séma FORRÁSA — a 01 §4.3) |
+| `just db-seed` | **a referenciaadat-seed a MIGRÁCIÓBAN van** (a 02 §12) → **a recept no-op** (a `duna.db.seed` modul nem létezik) |
+| `just build-frontend` | **a statikus Astro build** → **a `scripts/ci/build_frontend.py`** elindítja a `pgserver`-t + a migrációt + az `uvicorn`-t → **a `getStaticPaths` a valódi API-t hívja** (a 05 §5.2) → **a `API_BASE_URL` a build környezeti változója** (a 05 §5.1) |
 | `just db-migrate-down` | az Alembic `downgrade base` (a visszafordítás — a `07` §8.1 8. lépése) |
 | `just db-seed` | a referenciaadat-seed (`02` – DDL-terv §12) |
 | `just db-reset` | a DB újra (a `down -v` + `up` + migrate + seed) |
@@ -224,6 +226,35 @@ test:
 | `just build` | a Docker image-ek buildje |
 | `just openapi` | az OpenAPI export (`docs/api/v1/openapi.json`) |
 | `just ddl-validate` | a `db/tools/validate_ddl.py` futtatása (a `02` – DDL-terv §12) |
+
+### 3.1a A DB nélküli fejlesztői kapu (a `pgserver`)
+
+**A `just check` a DB nélkül is zöld kell legyen** (a 07 §3.1: a
+fejlesztői kapu) → **a DB-függő lépések a `pgserver`-t indítják** →
+**a `DATABASE_URL` megadva** (a CI-ben a PostgreSQL service) → **azt
+használják**.
+
+| A recept | A helper | Mit indít |
+|---|---|---|
+| `just test-integration` | `scripts/ci/run_integration.py` | a `pgserver` + a migráció (`alembic upgrade head`) |
+| `just build-frontend` | `scripts/ci/build_frontend.py` | a `pgserver` + a migráció + az `uvicorn duna.main:app` |
+
+**A `run_integration.py` miért kellett:** a 70%-os alkalmazásréteg-
+coverage-kapu (a 08 §8.1) **a DB-s integrációs tesztekből mérhető** →
+**a `skipif` miatt DB nélkül a tesztek kihúzódtak** → **a gate
+69,25%-ra esett** → **a helper a DB-t mindig biztosítja** → **a gate
+mindig mérhető** (a CI-ben 88,92%).
+
+**A `build_frontend.py` miért kellett:** a `hajok.astro` a
+`getStaticPaths`-ben tölti a katalógust (a 05 §5.2) → **a buildhez
+futnia kell egy API-nak** → **a helper elindítja az `uvicorn`-t egy
+szabad porton**, megvárja a `/health`-et, majd a `pnpm build`-et
+futtatja az `API_BASE_URL`-lel.
+
+**A `pnpm` a NAS konténerben** (a Node 26-ból eltűnt a `corepack`)
+→ **`npm install -g --prefix ~/.local pnpm@10.33.0`** →
+**a `/opt/data/bin/pnpm` symlinkkel** → **a PATH-on** (a `just` is
+ott van).
 
 ### 3.2 A Docker image-ek
 

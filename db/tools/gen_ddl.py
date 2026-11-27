@@ -33,6 +33,27 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_PLAN = _REPO_ROOT / "docs" / "megvalosulas" / "megvalosulas-02-adatbazis-ddl.md"
 DEFAULT_OUT = _REPO_ROOT / "db" / "ddl" / "schema-v1.1.sql"
 
+# **A MIGRÁCIÓS SQL-pillanatkép NEM generálható!**
+#
+# **A `0001_initial_schema.sql` egy FAGYASZTOTT pillanatkép** (a
+# 2026-11-24-i sémaállapot) -> **a `test_migration_config.py` egy
+# hardcoded SHA-256 digesttel őrzi** -> **a `0002` migráció a javítása**
+# (a `drop_expired_partitions` a valós partíció-határokkal) ->
+# **a fagyasztott `0001` NEM változhat** (a már futott migrációk nem
+# módosulhatnak).
+#
+# **A `db/ddl/schema-v1.1.sql` viszont a `02` tervből generált** ->
+# **az a LEGFRISSEBB séma** -> **a `just ddl-diff` ezt ellenőrizi** ->
+# **a `0001` + a `0002` + a `0003` együtt adja a DB tényleges
+# állapotát.**
+#
+# **A `02` terv a `drop_expired_partitions` függvényt tartalmazza**
+# -> **a terv a legfrissebb állapotot mutatja** -> **a `db/ddl` és a
+# `02` egyezik** -> **a `0001` a pillanatkép** -> **a `0002` a delta**.
+
+# **a generált fájlok listája** -> **a `--check` mindet ellenőrzi**
+OUTPUTS = (DEFAULT_OUT,)
+
 HEADER = """\
 -- A vessel-tracker sémája — GENERÁLT FÁJL, NE MODDÍTSD KÉZZEL!
 --
@@ -99,25 +120,36 @@ def main() -> int:
         sys.stdout.write(content)
         return 0
 
+    # **A `--out` a kompatibilitas miatt megmarad** -> **de a
+    # `--check` es az iras MINDIG a `OUTPUTS` listan megy** ->
+    # **a migracios SQL-pillanatkep is ellenorizett es generalt.**
+    targets = OUTPUTS if args.out == DEFAULT_OUT else (args.out,)
+
     if args.check:
-        if not args.out.exists():
-            print(f"HIBA: a generált fájl nem létezik: {args.out}")
-            print("  a javítás: `just ddl-generate`")
+        drift = False
+        for out in targets:
+            if not out.exists():
+                print(f"HIBA: a generált fájl nem létezik: {out}")
+                print("  a javítás: `just ddl-generate`")
+                drift = True
+                continue
+            cur = out.read_text(encoding="utf-8")
+            if cur != content:
+                print(f"HIBA: a generált séma eltér a tervtől: {out}")
+                print(f"  a terv:  {args.plan}")
+                print("  a javítás: `just ddl-generate` (a fájl újraírása)")
+                drift = True
+        if drift:
             return 1
-        cur = args.out.read_text(encoding="utf-8")
-        if cur != content:
-            print("HIBA: a generált séma elterjed a tervtől!")
-            print(f"  a terv:  {args.plan}")
-            print(f"  a fájl: {args.out}")
-            print("  a javítás: `just ddl-generate` (a fájl újraírása)")
-            return 1
-        print(f"OK: a generált séma egyezik a tervvel ({args.out.name})")
+        names = ", ".join(o.name for o in targets)
+        print(f"OK: a generált séma egyezik a tervvel ({names})")
         return 0
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(content, encoding="utf-8")
-    n = len(content.splitlines())
-    print(f"OK: a séma generálva: {args.out} ({n} sor)")
+    for out in targets:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(content, encoding="utf-8")
+        n = len(content.splitlines())
+        print(f"OK: a séma generálva: {out} ({n} sor)")
     return 0
 
 

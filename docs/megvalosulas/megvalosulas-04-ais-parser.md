@@ -182,6 +182,24 @@ a 6-os/8-as `msg_type` + a `msg_subtype=10`** (a DAC 200), a Class B a
 
 ## 3. A frame-szintű validáció (a NMEA 0183 körvonal)
 
+> **IMPLEMENTÁCIÓS ÁLLAPOT (2026-11-27):**
+>
+> | A rész | Az állapot |
+> |---|---|
+> | **a `duna/ingest/frames.py`** | ✅ **VALÓS KÓD** — a checksum (XOR), a mezőszám, az `n`/`r` ellenőrzés, a `fill_bits` (0–5), a payload ≤ 82 karakter, **a számozott sorok összefűzése** |
+> | **a `duna/ingest/decoder.py`** | ✅ **VALÓS KÓD** — a 6 bites fizikai + standard forma, a pozíció, a statikus, a 21-es |
+> | **a `duna/ingest/models.py`** (a normalizált rekord, a §5) | ⏳ **NEM KÉSZ** |
+> | **a pipeline** (a mérési SQLite → a PostgreSQL, a §8.2) | ⏳ **NEM KÉSZ** |
+>
+> **A `frames.py` 11 unit tesztje a `bud01` vevő VALÓS mérési
+> NMEA soraira** (a `ais-20261127-0905.db` → `ais_message.nmea`) →
+> **a fizikai 6 bites formát** (a §4.2) → **a frame-szinten ez nem
+> látszik.**
+>
+> **A `frame_is_first` a SORSZÁMOT nézi** (az `r == 1`), **nem a
+> prefixet** → **a `!AIVDM,2,1,...` (az `n=2`, `r=1`) is az első sor**
+> → **a prefix-alapú ellenőrzés a többsoros üzeneteket elrontaná.**
+
 ### 3.1 A formátum
 
 ```

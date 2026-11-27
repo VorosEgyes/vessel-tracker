@@ -1,9 +1,10 @@
 # Állapot – Vessel Tracker (Duna és Balaton)
 
-**Frissítve:** 2026-11-26
+**Frissítve:** 2026-11-27
 **Repo:** https://github.com/VorosEgyes/vessel-tracker
-**A fejlesztések alapcommitja:** `7fb5c26`; az alább jelzett fejlesztéseket
-a dokumentum frissítésekor a GitHub CI még nem ellenőrizte.
+**A fejlesztések alapcommitja:** `cfc6f4b1` (a szünet utáni 3 commit);
+az azóta végzett munkát a [2b.4d](#2b4d-a-szunet-utani-javitások-2026-11-27)
+fejezet írja le — **a GitHub CI még nem ellenőrizte.**
 **Aktuális munkaterület:** **az alkalmazás rétegeinek megépítése**
 (a `03` – API-specifikáció alapján) — **a Pi + rádió mérésével
 párhuzamosan**
@@ -115,7 +116,9 @@ apps/api/src/duna/
 ├── repositories/          ← a lekérdezések, köztük a referenciák
 ├── services/              ← a service réteg
 ├── domain/                ← a tiszta üzleti logika (verification, text, slug)
-└── ingest/                ← az AIS parser (a 04)
+└── ingest/
+    ├── decoder.py         ← a 6 bites dekódolás (a fizikai + a standard forma)
+    └── frames.py          ← az NMEA frame-validáció (a 04 §3) — a 2026-11-27
 ```
 
 **A rétegsorrend (a `03` §5.1):** `router → service → repository → DB`.
@@ -172,18 +175,24 @@ tartozik; a kért nyelv után angol, majd magyar szöveg következik.
 
 ### 2b.4 A tesztek és a minőségi kapuk
 
-| Ellenőrzés | Legutóbbi helyi eredmény a jelenlegi fejlesztés során |
+| Ellenőrzés | A legutóbbi helyi eredmény (2026-11-27) |
 |---|---|
-| Python `pytest` | **144 sikeres** frissen migrált, izolált PostgreSQL 16.2-vel, 2026-11-27-én |
-| API-kliens | 2 Vitest-teszt sikeres; TypeScript típusellenőrzés és generált séma driftellenőrzés sikeres |
-| Frontend | 4 Vitest-teszt sikeres; ebből egy ellenőrzi a hat statikus oldal buildjét és az elérhetetlen API miatti buildhibát |
-| Böngésző | a keresés, az üres eredmény és az API-hiba helyi teszt-API-val ellenőrizve |
-| Statikus ellenőrzés | Python Ruff és mypy, Astro/TypeScript típusellenőrzés és Prettier sikeres |
+| **a `just check`** | ✅ **EXIT 0** — **a teljes minőségi kapu egy parancsban** |
+| **a Python `pytest`** | ✅ **109 unit + 5 property** (a `frames.py` 11 új tesztje) |
+| **az integrációs tesztek** | ✅ **48 sikeres** valódi PostgreSQL-lel (a `pgserver`) |
+| **a coverage-kapuk** | ✅ a domain **100%** · az ingest **90,05%** · az alkalmazásréteg **88,92%** |
+| **a `models-check`** | ✅ a modellek megfelelnek a sémának (20 tábla, 152 oszlop) |
+| **a `ddl-validate` / a `ddl-diff`** | ✅ a séma lefut, a generált fájl egyezik a `02` tervvel |
+| **a `test-reversible`** | ✅ a migráció visszafordítható (72 tábla → 1 → 72) |
+| **a frontend** | ✅ **a `just build-frontend` 7 statikus oldalt generál** (a valódi API-ból) |
+| **az API-kliens** | ✅ 2 Vitest-teszt; a generált séma drift-ellenőrzés sikeres |
+| **a statikus ellenőrzés** | ✅ a Python Ruff + mypy, az Astro/TypeScript típusellenőrzés és a Prettier |
 
-A helyi PostgreSQL-példányban nem volt PostGIS, unaccent és pg_cron,
-ezért az első migráció ezek nélküli fejlesztői változata futott; az éles
-extensionökkel és az időzített jobbal külön ellenőrzés szükséges. A
-teljes `just check` és a jelenlegi munkafa GitHub CI-je nem futott le.
+**A helyi PostgreSQL-példányban nincs PostGIS, `unaccent` és
+`pg_cron`** → **az első migráció ezek nélküli fejlesztői változata
+futott** → **a `pg_cron`-os retention jobok (a `0003` migráció) a
+CI-ben sem futnak** (a stock PostGIS image-ben nincs `pg_cron`) →
+**a custom image-ben futnak** (a `07` §3.2).
 
 ### 2b.4a Az új frontend és kliens
 
@@ -297,6 +306,25 @@ A `90013f7` commit CI- és Build-workflow-ja sikeres volt, de az utána
 induló staging workflow a hiányzó `pnpm` miatt elbukott. A staging és
 production workflow ezért a CI-hez hasonlóan telepíti a csomagkezelőt;
 a staging új futásának eredményét a GitHub Actions mutatja.
+
+### 2b.4d A szünet utáni javítások (2026-11-27)
+
+**A `just check` a DB nélkül is zöld kell legyen** (a 07 §3.1: a
+fejlesztői kapu) → **a DB-függő lépések a `pgserver`-t indítják.**
+
+| A javítás | A részletek |
+|---|---|
+| **a `pnpm` a NAS konténerben** | a Node 26-ból eltűnt a `corepack` → **`npm install -g --prefix ~/.local pnpm@10.33.0`** → **a `/opt/data/bin/pnpm` symlinkkel** → **a PATH-on** (a `just` is ott van) → **a 414 függőség telepítve** |
+| **a `scripts/ci/run_integration.py`** | **a `pgserver` + a migráció** (`alembic upgrade head`) → **a `just test-integration` DB nélkül is fut** → **a 70%-os alkalmazásréteg-kapu (a 08 §8.1) MINDIG mérhető** (előtte DB nélkül 69,25% volt → **a `just check` elbukott**) |
+| **a `scripts/ci/build_frontend.py`** | **a `pgserver` + a migráció + az `uvicorn duna.main:app`** egy szabad porton → **a `getStaticPaths` a valódi API-t hívja** (a 05 §5.2) → **a `just build-frontend` a valódi katalógust generálja** (7 statikus oldal) |
+| **a `just db-seed` és a `just db-reset`** | **a nem létező `duna.db.seed` modult hívták** → **a referenciaadat a MIGRÁCIÓBAN van** (a 02 §12) → **a receptek no-op-ok** |
+| **a `gen_ddl.py`** | **a `0001` migrációs SQL-pillanatképet is generálta** → **az a FAGYASZTOTT pillanatkép** (a `test_migration_config.py` egy hardcoded SHA-256 digesttel őrzi) → **a generátor most csak a `db/ddl/schema-v1.1.sql`-t írja** → **a `02` terv a legfrissebb állapotot mutatja**, a `0001` a pillanatkép, a `0002` a delta |
+| **a `duna/ingest/frames.py`** | **az NMEA frame-validáció** (a 04 §3) — **a checksum (XOR), a mezőszám, az `n`/`r`, a `fill_bits` (0–5), a payload ≤ 82 karakter, a számozott sorok összefűzése** → **11 unit teszt a `bud01` vevő VALÓS mérési soraira** |
+
+**A `frames.py` közben 3 valódi hibát kapott el:**
+1. **a `frame_is_first` a PREFIXET nézte** a sorszám helyett → **a `!AIVDM,2,1,...` (az `n=2`, `r=1`) nem az első sor volt** → **a többsoros üzenetek (a type 5, 17 442 db a mérésben) nem fűződtek össze**;
+2. **a várt sorszám a gyűjtőreset után `1` volt** `2` helyett → **a második sor mindig hibásnak számított**;
+3. **a `parse_sentence` máshol bontotta a mezőket**, mint a `frame_count`/`frame_number` → **egy közös `_sentence_fields` helper** (egy helyen a mezőfelbontás).
 
 ### 2b.5 A mérési oldal (a 2026-11-24-i állapot)
 
@@ -704,7 +732,7 @@ réteghez kell** → **a mérés lezárása után** (2026-12-22).
 **A tervek rendelkezésre állnak**, de nem minden tervezett funkció
 készült el; az aktuális implementációt a 2b. fejezet írja le.
 
-### 7.1 A következő lépések (2026-11-26)
+### 7.1 A következő lépések (2026-11-27)
 
 **Két párhuzamos munkaág:** **a mérés** (a hardver, határidő: 2026-12-22)
 és **az alkalmazás rétegei** (a `03` alapján).
@@ -715,14 +743,18 @@ készült el; az aktuális implementációt a 2b. fejezet írja le.
 |---|---|---|---|
 | A1 | **a referenciatáblák végpontjai** (a `03` §3.3): `/api/v1/ports`, `/locks`, `/waterways`, `/river-sections`, `/basins`, `/vessel-types`, `/operators`, `/routes`, `/cargo-types` | 9 lista + 2 adatlap | **elkészült** — a `reference.py` router |
 | A2 | **a `vessel_service` write-oldalának használatba vétele** (a `sort_name` + a `slug` betöltése) | kicsi | az A1 után (a szerkesztői felülethez kell) |
-| A3 | **az `ingest` réteg** (a `04`): a parser → a `position`/`vessel_static` írása | nagy | **a mérésből jövő fixture-ök** |
+| A3 | **az `ingest` réteg** (a `04`): **a frame-validáció KÉSZ** (a `frames.py`, 2026-11-27) → **a normalizált rekord** (a §5) → **a pipeline** (a mérési SQLite → a PostgreSQL backfill, a §8.2) | nagy | **a mérési adat már megvan** (a NAS-on az `ais-20261127-0905.db`, 222 MB, 893 457 üzenet) → **nem kell megvárni a mérés végét** |
 | A4 | **a `apps/web`** (a `05`): az Astro frontend, a katalógusoldal | nagy | **első változat:** statikus katalógus, élő API-s keresés, rendezés és lapozás; az adatlap és a rebuild-hook még hátravan |
 | A5 | **a szerkesztői felület** (a `06`): az `/api/admin/v1/` | nagy | az A2 + az A4 után |
 | A6 | **a `packages/api-client`** (a generált TS kliens az OpenAPI-ból) | kicsi | **elkészült** — generálás, típusellenőrzés és CI driftkapu |
 
-**Következő javasolt sorrend:** a PostgreSQL-es integrációs tesztek és
-teljes minőségi kapu futtatása → a frontend hajóadatlapja és a build-hook →
-A2 és A5. Az A3 a mérési fixture-ökkel párhuzamosan folytatható.
+**Következő javasolt sorrend:** **a `just check` teljes lefutása** (a
+DB nélküli fejlesztői kapu, a 07 §3.1a) → **az A3 pipeline** (a
+mérési SQLite → a PostgreSQL, a `04` §8.2) → **a frontend hajóadatlapja
+és a build-hook** → **A2 és A5**.
+
+> **A `just check` 2026-11-27-én EXIT 0** (a teljes kapu, a
+> frontend-részekkel együtt) → **a fejlesztői kapu kész.**
 
 #### B) A mérés és a hardver
 

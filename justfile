@@ -66,13 +66,23 @@ db-migrate-down:
 
 # a referenciaadat-seed (a 02 §12)
 db-seed:
-    if [ -d apps/api/src/duna/db ]; then {{UV}} python -m duna.db.seed; else echo "az alkalmazaskod meg nincs a repoban -> a db-seed kihagyva"; fi
+    # **A referenciaadat-seed a MIGRACIOBAN van** (a 02 §12: a
+    # `schema-v1.1.sql` tartalmazza az `INSERT`-eket -> **a `just
+    # db-migrate` betolti**) -> **a `duna.db.seed` modul NEM letezik**
+    # -> **a receptacle a migracio utan felesleges**.
+    #
+    # **A HAJOK** (a `vessel` + a `vessel_i18n`) **nincsenek a
+    # seedben** -> **azok az AIS-ingestbol jonnek** (a 04) -> **a
+    # seed nem is tolt be hajot**.
+    @echo "a referenciaadat-seed a migraciora beepult (a 02 §12) -> a db-seed nem futtatando"
 
 # a DB újra (a down -v + up + migrate + seed)
 # a DB ujra (a down -v + up + migrate + seed)
 db-reset: down up
-    if [ -d apps/api/src/duna/db ]; then {{UV}} python -m duna.db.seed; fi
-    @echo "az adatbazis ujraindult (a migracio a `up` reszeben, a seed utana)"
+    # **A referenciaadat-seed a MIGRACIOBAN van** (a 02 §12) -> **a
+    # `up` (a `db-migrate`) betolti** -> **a seed kulon lepes nem
+    # kell** (a `duna.db.seed` modul nem letezik).
+    @echo "az adatbazis ujraindult (a migracio a `up` reszeben betolti a referenciaadatot)"
 
 #
 # a DDL-validacio: a DDL futtatasa egy elo PostgreSQL-en + a fustteszt
@@ -141,11 +151,12 @@ test-component:
 test-integration:
     # **Az alkalmazasreteg coverage-kapuja** (a 08 §8.1) ->
     # **a `db/`, az `api/`, a `repositories/`, a `schemas/`** ->
-    # **a `DATABASE_URL` nelkul a tesztek KIHAGYJAK magukat**
-    # (a `skipif`) -> **a lepes zold marad, de a gate NEM mer** ->
-    # **a CI-ben a `DATABASE_URL` a PostgreSQL service-bol jon**
-    # -> **a gate a CI-ben ervenyes**.
-    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/integration --cov=duna.db --cov=duna.api --cov=duna.repositories --cov=duna.schemas --cov=duna.config --cov=duna.main --cov-report=term-missing --cov-fail-under={{COVERAGE_APP_MIN}}
+    # **a `DATABASE_URL` nelkul a `run_integration.py` egy IDEIGLENES
+    # `pgserver`-t indit** (a dev-fugosegek kozott van) ->
+    # **a tesztek mindig futnak** -> **a gate MINDIG merhető** ->
+    # **a CI-ben a `DATABASE_URL` a PostgreSQL service-bol jon** ->
+    # **a service-en fut az is.**
+    {{UV}} python scripts/ci/run_integration.py {{TESTS}}/integration --cov=duna.db --cov=duna.api --cov=duna.repositories --cov=duna.schemas --cov=duna.config --cov=duna.main --cov-report=term-missing --cov-fail-under={{COVERAGE_APP_MIN}}
 
 # az e2e tesztek (a playwright)
 test-e2e:
@@ -236,7 +247,15 @@ build:
 
 # a frontend statikus build (a 05 §1)
 build-frontend:
-    if [ -f apps/web/package.json ]; then pnpm --filter ./apps/web build; else echo "a frontend meg nincs a repoban -> a build-frontend kihagyva"; fi
+    # **A statikus build a VALÓDI API-t hívja** (a 05 §5.2: a
+    # `getStaticPaths` betölti a katalógust) -> **a buildhez futnia
+    # kell egy API-nak** -> **a `build_frontend.py` a `pgserver`-t
+    # indítja + a migrációt futtatja + az `uvicorn`-t elindítja** ->
+    # **a `API_BASE_URL` a build kornyezeti valtozoja** (a 05 §5.1).
+    #
+    # **A `DATABASE_URL` megadva** (a CI-ben a PostgreSQL service) ->
+    # **azt hasznalja** -> **a service-en fut az is.**
+    if [ -f apps/web/package.json ]; then {{UV}} python scripts/ci/build_frontend.py; else echo "a frontend meg nincs a repoban -> a build-frontend kihagyva"; fi
 
 # az OpenAPI export (a 03 §5.1a)
 openapi:
