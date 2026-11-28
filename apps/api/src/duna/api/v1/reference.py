@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
@@ -68,8 +68,10 @@ async def ports(
     )
 
 
-@router.get("/ports/{port_id}", response_model=Data[PortDetail])
-async def port_detail(port_id: int, session: Session, lang: Language = "hu") -> Data[PortDetail]:
+@router.get("/ports/{id}", response_model=Data[PortDetail])
+async def port_detail(
+    session: Session, lang: Language = "hu", port_id: int = Path(alias="id")
+) -> Data[PortDetail]:
     result = await reference_service.get_item(session, "ports", PortDetail, port_id, lang)
     if result is None:
         raise HTTPException(status_code=404, detail="a kikoto nem talalhato")
@@ -83,8 +85,10 @@ async def locks(
     return await reference_service.list_items(session, "locks", Lock, lang, page, per_page)
 
 
-@router.get("/locks/{lock_id}", response_model=Data[LockDetail])
-async def lock_detail(lock_id: int, session: Session, lang: Language = "hu") -> Data[LockDetail]:
+@router.get("/locks/{id}", response_model=Data[LockDetail])
+async def lock_detail(
+    session: Session, lang: Language = "hu", lock_id: int = Path(alias="id")
+) -> Data[LockDetail]:
     result = await reference_service.get_item(session, "locks", LockDetail, lock_id, lang)
     if result is None:
         raise HTTPException(status_code=404, detail="a zsilip nem talalhato")

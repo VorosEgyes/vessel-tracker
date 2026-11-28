@@ -2623,17 +2623,17 @@
         ]
       }
     },
-    "/api/v1/content/{content_key}": {
+    "/api/v1/content/{key}": {
       "get": {
         "description": "Egy tartalmi kulcs fordítása (a F-NF-01…15).\n\n**A `meta.translation_fallback`** → **a `requested`, a `used` és\na `fallback` flag** (a `03` §6.3).\n\n**A 404**, ha a kulcsnak nincs publikált fordítása (a `03` §6.2a).",
-        "operationId": "get_content_api_v1_content__content_key__get",
+        "operationId": "get_content_api_v1_content__key__get",
         "parameters": [
           {
             "in": "path",
-            "name": "content_key",
+            "name": "key",
             "required": true,
             "schema": {
-              "title": "Content Key",
+              "title": "Key",
               "type": "string"
             }
           },
@@ -2746,16 +2746,16 @@
         ]
       }
     },
-    "/api/v1/locks/{lock_id}": {
+    "/api/v1/locks/{id}": {
       "get": {
-        "operationId": "lock_detail_api_v1_locks__lock_id__get",
+        "operationId": "lock_detail_api_v1_locks__id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "lock_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Lock Id",
+              "title": "Id",
               "type": "integer"
             }
           },
@@ -3004,16 +3004,16 @@
         ]
       }
     },
-    "/api/v1/ports/{port_id}": {
+    "/api/v1/ports/{id}": {
       "get": {
-        "operationId": "port_detail_api_v1_ports__port_id__get",
+        "operationId": "port_detail_api_v1_ports__id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "port_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Port Id",
+              "title": "Id",
               "type": "integer"
             }
           },
@@ -3544,17 +3544,17 @@
         ]
       }
     },
-    "/api/v1/vessels/{vessel_id}": {
+    "/api/v1/vessels/{id}": {
       "get": {
         "description": "A hajó adatlapja (a F-DET-01…16).\n\n**A `meta.total` `None`** (egy objektum nincs lapozva) → **a\n`Data[T]` burkoló a `03` §5.5 szerint** (a `Page[T]` csak\nlistához való).\n\n**A `404`, ha nincs ilyen hajó.**",
-        "operationId": "get_vessel_endpoint_api_v1_vessels__vessel_id__get",
+        "operationId": "get_vessel_endpoint_api_v1_vessels__id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "vessel_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Vessel Id",
+              "title": "Id",
               "type": "integer"
             }
           },
@@ -3599,17 +3599,17 @@
         ]
       }
     },
-    "/api/v1/vessels/{vessel_id}/aliases": {
+    "/api/v1/vessels/{id}/aliases": {
       "get": {
         "description": "A hajó **történeti** nevei (a F-DET-05).\n\n**A LEZÁRTak** (`valid_to IS NOT NULL`) → **a jelenlegi név a\n`vessel_i18n`-ből jön** (a `03` §3.1) → **nem duplikálódik.**",
-        "operationId": "get_vessel_aliases_api_v1_vessels__vessel_id__aliases_get",
+        "operationId": "get_vessel_aliases_api_v1_vessels__id__aliases_get",
         "parameters": [
           {
             "in": "path",
-            "name": "vessel_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Vessel Id",
+              "title": "Id",
               "type": "integer"
             }
           }
@@ -3642,17 +3642,17 @@
         ]
       }
     },
-    "/api/v1/vessels/{vessel_id}/certificates": {
+    "/api/v1/vessels/{id}/certificates": {
       "get": {
         "description": "A hajó engedélyei (a F-DET-02).\n\n**Szűrés NÉLKÜL** (a `03` §3.1) → **az aktív + a lezárt\nengedélyek egyaránt.**",
-        "operationId": "get_vessel_certificates_api_v1_vessels__vessel_id__certificates_get",
+        "operationId": "get_vessel_certificates_api_v1_vessels__id__certificates_get",
         "parameters": [
           {
             "in": "path",
-            "name": "vessel_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Vessel Id",
+              "title": "Id",
               "type": "integer"
             }
           }
@@ -3685,17 +3685,17 @@
         ]
       }
     },
-    "/api/v1/vessels/{vessel_id}/data-origin": {
+    "/api/v1/vessels/{id}/data-origin": {
       "get": {
         "description": "A mezőnkénti eredet (a F-DET-15).\n\n**Csak az aktuális források** (`is_current`) → **a történeti\nforrások a `vessel_data_origin`-ban maradnak, de nem jelennek meg.**",
-        "operationId": "get_vessel_data_origin_api_v1_vessels__vessel_id__data_origin_get",
+        "operationId": "get_vessel_data_origin_api_v1_vessels__id__data_origin_get",
         "parameters": [
           {
             "in": "path",
-            "name": "vessel_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Vessel Id",
+              "title": "Id",
               "type": "integer"
             }
           }
@@ -3728,17 +3728,17 @@
         ]
       }
     },
-    "/api/v1/vessels/{vessel_id}/identifiers": {
+    "/api/v1/vessels/{id}/identifiers": {
       "get": {
         "description": "Az összes azonosító + eredet (a F-DET-02, a F-DET-15).\n\n**Szűrés NÉLKÜL** (a `03` §3.1) → **az aktív + a lezárt\nazonosítók egyaránt** → **a `valid_to` megmutatja, melyik aktív.**",
-        "operationId": "get_vessel_identifiers_api_v1_vessels__vessel_id__identifiers_get",
+        "operationId": "get_vessel_identifiers_api_v1_vessels__id__identifiers_get",
         "parameters": [
           {
             "in": "path",
-            "name": "vessel_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Vessel Id",
+              "title": "Id",
               "type": "integer"
             }
           }
@@ -3771,17 +3771,17 @@
         ]
       }
     },
-    "/api/v1/vessels/{vessel_id}/ownership": {
+    "/api/v1/vessels/{id}/ownership": {
       "get": {
         "description": "A **tulajdonosváltások** (a F-DET-05) → **a dátumtartománnyal**\n→ **a legújabb elöl.**",
-        "operationId": "get_vessel_ownership_api_v1_vessels__vessel_id__ownership_get",
+        "operationId": "get_vessel_ownership_api_v1_vessels__id__ownership_get",
         "parameters": [
           {
             "in": "path",
-            "name": "vessel_id",
+            "name": "id",
             "required": true,
             "schema": {
-              "title": "Vessel Id",
+              "title": "Id",
               "type": "integer"
             }
           },

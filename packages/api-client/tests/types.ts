@@ -8,8 +8,8 @@ if (false) {
   client.GET("/api/v1/vessels", { params: { query: {} } });
   // @ts-expect-error only documented areas are accepted
   client.GET("/api/v1/vessels", { params: { query: { area: "ocean" } } });
-  client.GET("/api/v1/ports/{port_id}", {
-    // @ts-expect-error port_id is numeric
-    params: { path: { port_id: "bad" } },
+  client.GET("/api/v1/ports/{id}", {
+    // @ts-expect-error id is numeric
+    params: { path: { id: "bad" } },
   });
 }

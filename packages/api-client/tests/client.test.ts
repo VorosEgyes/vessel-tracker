@@ -30,8 +30,8 @@ describe("API client", () => {
       )
       .mockRejectedValueOnce(new Error("network unavailable"));
     const client = createApiClient({ baseUrl: "https://example.test", fetch });
-    const missing = await client.GET("/api/v1/ports/{port_id}", {
-      params: { path: { port_id: 999 } },
+    const missing = await client.GET("/api/v1/ports/{id}", {
+      params: { path: { id: 999 } },
     });
     expect(missing.response.status).toBe(404);
     expect(missing.error).toEqual({ detail: "missing" });

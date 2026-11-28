@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
@@ -24,11 +24,11 @@ from duna.services import content_service
 router = APIRouter(prefix="/content", tags=["content"])
 
 
-@router.get("/{content_key}", response_model=Data[dict[str, str | None]])
+@router.get("/{key}", response_model=Data[dict[str, str | None]])
 async def get_content(
-    content_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
+    content_key: str = Path(alias="key"),
 ) -> Data[dict[str, str | None]]:
     """Egy tartalmi kulcs fordítása (a F-NF-01…15).
 

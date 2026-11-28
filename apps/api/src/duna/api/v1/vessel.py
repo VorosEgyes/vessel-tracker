@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from duna.db.session import get_session
@@ -96,11 +96,11 @@ async def list_vessels_endpoint(
     )
 
 
-@router.get("/{vessel_id}", response_model=Data[VesselDetail])
+@router.get("/{id}", response_model=Data[VesselDetail])
 async def get_vessel_endpoint(
-    vessel_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
+    vessel_id: int = Path(alias="id"),
 ) -> Data[VesselDetail]:
     """A hajó adatlapja (a F-DET-01…16).
 
@@ -116,10 +116,10 @@ async def get_vessel_endpoint(
     return Data[VesselDetail](data=detail, meta=ObjectMeta(total=1))
 
 
-@router.get("/{vessel_id}/aliases", response_model=Page[VesselAlias])
+@router.get("/{id}/aliases", response_model=Page[VesselAlias])
 async def get_vessel_aliases(
-    vessel_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    vessel_id: int = Path(alias="id"),
 ) -> Page[VesselAlias]:
     """A hajó **történeti** nevei (a F-DET-05).
 
@@ -133,11 +133,11 @@ async def get_vessel_aliases(
     )
 
 
-@router.get("/{vessel_id}/ownership", response_model=Page[OwnershipPeriod])
+@router.get("/{id}/ownership", response_model=Page[OwnershipPeriod])
 async def get_vessel_ownership(
-    vessel_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     lang: Annotated[str, Query(description="a nyelv kódja")] = "hu",
+    vessel_id: int = Path(alias="id"),
 ) -> Page[OwnershipPeriod]:
     """A **tulajdonosváltások** (a F-DET-05) → **a dátumtartománnyal**
     → **a legújabb elöl.**
@@ -149,10 +149,10 @@ async def get_vessel_ownership(
     )
 
 
-@router.get("/{vessel_id}/certificates", response_model=Page[VesselCertDetail])
+@router.get("/{id}/certificates", response_model=Page[VesselCertDetail])
 async def get_vessel_certificates(
-    vessel_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    vessel_id: int = Path(alias="id"),
 ) -> Page[VesselCertDetail]:
     """A hajó engedélyei (a F-DET-02).
 
@@ -166,10 +166,10 @@ async def get_vessel_certificates(
     )
 
 
-@router.get("/{vessel_id}/identifiers", response_model=Page[VesselIdentifierDetail])
+@router.get("/{id}/identifiers", response_model=Page[VesselIdentifierDetail])
 async def get_vessel_identifiers(
-    vessel_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    vessel_id: int = Path(alias="id"),
 ) -> Page[VesselIdentifierDetail]:
     """Az összes azonosító + eredet (a F-DET-02, a F-DET-15).
 
@@ -183,10 +183,10 @@ async def get_vessel_identifiers(
     )
 
 
-@router.get("/{vessel_id}/data-origin", response_model=Page[FieldOrigin])
+@router.get("/{id}/data-origin", response_model=Page[FieldOrigin])
 async def get_vessel_data_origin(
-    vessel_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    vessel_id: int = Path(alias="id"),
 ) -> Page[FieldOrigin]:
     """A mezőnkénti eredet (a F-DET-15).
 

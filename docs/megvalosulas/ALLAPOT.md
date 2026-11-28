@@ -170,12 +170,27 @@ nyelv esetén visszaeső nevet használnak, de a mezőnkénti
 
 **A `GET /api/v1/search/suggest`** (a F-SRCH-08) ⏳ **R3** — nem R1.
 
-**Referenciakatalógus:** elkészült a `ports`, `locks`, `waterways`,
-`river-sections`, `basins`, `vessel-types`, `operators`, `routes` és
-`cargo-types` lista, továbbá a kikötő- és zsilipadatlap. A listák
-lapozhatók; a kikötőlista vízút-, típus-, ország- és szövegszűrést is
-támogat. A fordított nevekhez `name_language` és `name_fallback` jelzés
-tartozik; a kért nyelv után angol, majd magyar szöveg következik.
+**Referenciakatalógus (11 végpont):**
+
+| A végpont | A leírás |
+|---|---|
+| `GET /api/v1/ports` | a kikötők listája (a `waterway_id`, a `port_type`, a `country_code`, a `q` szűrés) |
+| `GET /api/v1/ports/{id}` | egy kikötő (a `berth`, a `terminal`, a `lock` együtt) |
+| `GET /api/v1/locks` | a zsilipek listája |
+| `GET /api/v1/locks/{id}` | egy zsilip (a `lock_status` idősorral) |
+| `GET /api/v1/waterways` | a vízutak |
+| `GET /api/v1/river-sections` | a folyószakaszok |
+| `GET /api/v1/basins` | a balatoni medencék |
+| `GET /api/v1/vessel-types` | a hajótípusok (fordítással) |
+| `GET /api/v1/operators` | az üzemeltetők |
+| `GET /api/v1/routes` | az útvonalak (a `route_stop`-okkal) |
+| `GET /api/v1/cargo-types` | a rakománytípusok |
+
+A listák lapozhatók; a kikötőlista vízút-, típus-, ország- és
+szövegszűrést is támogat. A fordított nevekhez `name_language` és
+`name_fallback` jelzés tartozik; a kért nyelv után angol, majd magyar
+szöveg következik. A nem támogatott szűrőparaméter **422-es
+választ** ad (nem csendben figyelmen kívül hagyja).
 
 ### 2b.3 A kész infrastruktúra
 

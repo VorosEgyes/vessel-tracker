@@ -38,7 +38,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/content/{content_key}": {
+    "/api/v1/content/{key}": {
         parameters: {
             query?: never;
             header?: never;
@@ -54,7 +54,7 @@ export interface paths {
          *
          *     **A 404**, ha a kulcsnak nincs publikált fordítása (a `03` §6.2a).
          */
-        get: operations["get_content_api_v1_content__content_key__get"];
+        get: operations["get_content_api_v1_content__key__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -80,7 +80,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/locks/{lock_id}": {
+    "/api/v1/locks/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -88,7 +88,7 @@ export interface paths {
             cookie?: never;
         };
         /** Lock Detail */
-        get: operations["lock_detail_api_v1_locks__lock_id__get"];
+        get: operations["lock_detail_api_v1_locks__id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -131,7 +131,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ports/{port_id}": {
+    "/api/v1/ports/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -139,7 +139,7 @@ export interface paths {
             cookie?: never;
         };
         /** Port Detail */
-        get: operations["port_detail_api_v1_ports__port_id__get"];
+        get: operations["port_detail_api_v1_ports__id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -250,7 +250,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/vessels/{vessel_id}": {
+    "/api/v1/vessels/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -267,7 +267,7 @@ export interface paths {
          *
          *     **A `404`, ha nincs ilyen hajó.**
          */
-        get: operations["get_vessel_endpoint_api_v1_vessels__vessel_id__get"];
+        get: operations["get_vessel_endpoint_api_v1_vessels__id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -276,7 +276,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/vessels/{vessel_id}/aliases": {
+    "/api/v1/vessels/{id}/aliases": {
         parameters: {
             query?: never;
             header?: never;
@@ -290,7 +290,7 @@ export interface paths {
          *     **A LEZÁRTak** (`valid_to IS NOT NULL`) → **a jelenlegi név a
          *     `vessel_i18n`-ből jön** (a `03` §3.1) → **nem duplikálódik.**
          */
-        get: operations["get_vessel_aliases_api_v1_vessels__vessel_id__aliases_get"];
+        get: operations["get_vessel_aliases_api_v1_vessels__id__aliases_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -299,7 +299,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/vessels/{vessel_id}/certificates": {
+    "/api/v1/vessels/{id}/certificates": {
         parameters: {
             query?: never;
             header?: never;
@@ -313,7 +313,7 @@ export interface paths {
          *     **Szűrés NÉLKÜL** (a `03` §3.1) → **az aktív + a lezárt
          *     engedélyek egyaránt.**
          */
-        get: operations["get_vessel_certificates_api_v1_vessels__vessel_id__certificates_get"];
+        get: operations["get_vessel_certificates_api_v1_vessels__id__certificates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -322,7 +322,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/vessels/{vessel_id}/data-origin": {
+    "/api/v1/vessels/{id}/data-origin": {
         parameters: {
             query?: never;
             header?: never;
@@ -336,7 +336,7 @@ export interface paths {
          *     **Csak az aktuális források** (`is_current`) → **a történeti
          *     források a `vessel_data_origin`-ban maradnak, de nem jelennek meg.**
          */
-        get: operations["get_vessel_data_origin_api_v1_vessels__vessel_id__data_origin_get"];
+        get: operations["get_vessel_data_origin_api_v1_vessels__id__data_origin_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -345,7 +345,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/vessels/{vessel_id}/identifiers": {
+    "/api/v1/vessels/{id}/identifiers": {
         parameters: {
             query?: never;
             header?: never;
@@ -359,7 +359,7 @@ export interface paths {
          *     **Szűrés NÉLKÜL** (a `03` §3.1) → **az aktív + a lezárt
          *     azonosítók egyaránt** → **a `valid_to` megmutatja, melyik aktív.**
          */
-        get: operations["get_vessel_identifiers_api_v1_vessels__vessel_id__identifiers_get"];
+        get: operations["get_vessel_identifiers_api_v1_vessels__id__identifiers_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -368,7 +368,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/vessels/{vessel_id}/ownership": {
+    "/api/v1/vessels/{id}/ownership": {
         parameters: {
             query?: never;
             header?: never;
@@ -380,7 +380,7 @@ export interface paths {
          * @description A **tulajdonosváltások** (a F-DET-05) → **a dátumtartománnyal**
          *     → **a legújabb elöl.**
          */
-        get: operations["get_vessel_ownership_api_v1_vessels__vessel_id__ownership_get"];
+        get: operations["get_vessel_ownership_api_v1_vessels__id__ownership_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1374,7 +1374,7 @@ export interface operations {
             };
         };
     };
-    get_content_api_v1_content__content_key__get: {
+    get_content_api_v1_content__key__get: {
         parameters: {
             query?: {
                 /** @description a nyelv kódja */
@@ -1382,7 +1382,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                content_key: string;
+                key: string;
             };
             cookie?: never;
         };
@@ -1441,14 +1441,14 @@ export interface operations {
             };
         };
     };
-    lock_detail_api_v1_locks__lock_id__get: {
+    lock_detail_api_v1_locks__id__get: {
         parameters: {
             query?: {
                 lang?: string;
             };
             header?: never;
             path: {
-                lock_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1544,14 +1544,14 @@ export interface operations {
             };
         };
     };
-    port_detail_api_v1_ports__port_id__get: {
+    port_detail_api_v1_ports__id__get: {
         parameters: {
             query?: {
                 lang?: string;
             };
             header?: never;
             path: {
-                port_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1757,7 +1757,7 @@ export interface operations {
             };
         };
     };
-    get_vessel_endpoint_api_v1_vessels__vessel_id__get: {
+    get_vessel_endpoint_api_v1_vessels__id__get: {
         parameters: {
             query?: {
                 /** @description a nyelv kódja */
@@ -1765,7 +1765,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                vessel_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1791,12 +1791,12 @@ export interface operations {
             };
         };
     };
-    get_vessel_aliases_api_v1_vessels__vessel_id__aliases_get: {
+    get_vessel_aliases_api_v1_vessels__id__aliases_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                vessel_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1822,12 +1822,12 @@ export interface operations {
             };
         };
     };
-    get_vessel_certificates_api_v1_vessels__vessel_id__certificates_get: {
+    get_vessel_certificates_api_v1_vessels__id__certificates_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                vessel_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1853,12 +1853,12 @@ export interface operations {
             };
         };
     };
-    get_vessel_data_origin_api_v1_vessels__vessel_id__data_origin_get: {
+    get_vessel_data_origin_api_v1_vessels__id__data_origin_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                vessel_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1884,12 +1884,12 @@ export interface operations {
             };
         };
     };
-    get_vessel_identifiers_api_v1_vessels__vessel_id__identifiers_get: {
+    get_vessel_identifiers_api_v1_vessels__id__identifiers_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                vessel_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -1915,7 +1915,7 @@ export interface operations {
             };
         };
     };
-    get_vessel_ownership_api_v1_vessels__vessel_id__ownership_get: {
+    get_vessel_ownership_api_v1_vessels__id__ownership_get: {
         parameters: {
             query?: {
                 /** @description a nyelv kódja */
@@ -1923,7 +1923,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                vessel_id: number;
+                id: number;
             };
             cookie?: never;
         };
