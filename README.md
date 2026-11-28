@@ -16,8 +16,14 @@
 > **📍 AZ ÁLLAPOT:** **a „hol tartunk és mi a következő lépés"** →
 > **[`docs/megvalosulas/ALLAPOT.md`](docs/megvalosulas/ALLAPOT.md)** —
 > **a kész R1-es végpontok, a minőségi kapuk és a következő lépések
-> a részletes listájával.** (2026-11-26: **9 R1-es API-végpont**,
-> **101 teszt**, a `just check` zöld.)
+> a részletes listájával.**
+>
+> **(2026-11-28):** **21 R1-es API-végpont** (a katalóguslista, a
+> hajóadatlap + 5 al-végpont, a globális kereső, a content-fallback, a
+> 11 referenciavégpont) · **178 teszt** (122 unit + 5 property + 51
+> integrációs, valódi PostgreSQL-lel) · **a `just check` zöld**
+> (a domain 100%, az ingest 92%, az alkalmazásréteg 89% coverage) ·
+> **a frontend működik** a valós mérési adatokkal (244 hajó).
 
 **Kapcsolódó dokumentumok:** [`docs/funkcio-leiras.md`](docs/funkcio-leiras.md) (funkcióleírás) · [`docs/release-terv.md`](docs/release-terv.md) (release terv) · [`docs/r1-adat-terv.md`](docs/r1-adat-terv.md) (R1 adat-terv) · [`docs/ais-vevo-terv.md`](docs/ais-vevo-terv.md) (saját AIS vevőhálózat) · [`docs/pi-eloallitas.md`](docs/pi-eloallitas.md) (Pi előállítás: AIS + ADS-B) · [`docs/ingest-terv.md`](docs/ingest-terv.md) (adatút: Pi-től az adatbázisig) · [`docs/sema-core.mmd`](docs/sema-core.mmd) · [`docs/sema-irodalom.mmd`](docs/sema-irodalom.mmd)
 
