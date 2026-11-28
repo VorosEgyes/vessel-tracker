@@ -40,6 +40,7 @@ Hasznalat:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import pathlib
 import re
 import sqlite3
@@ -243,7 +244,182 @@ def load_measurement(
             loaded += 1
 
     print(f"a betöltött hajók: {loaded}")
+    loaded_positions = load_positions(engine, db_path, limit)
+    print(f"a betöltött pozíciók: {loaded_positions}")
     return loaded
+
+
+def _parse_timestamp(value) -> dt.datetime:
+    """**A mérési SQLite időbélyegének parse-olása**.
+
+    **A vevő a `YYYY/MM/DD HH:MM:SS` formátumot írja** (nem ISO) →
+    **a `fromisoformat` nem működik rá** → **ez a parser kezeli** →
+    **a `YYYY-MM-DD HH:MM:SS` (ISO) alakot is**.
+    """
+    import datetime as dt
+
+    if isinstance(value, dt.datetime):
+        return value
+    text_value = str(value).strip()
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return dt.datetime.strptime(text_value, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"ismeretlen idoformatum: {text_value!r}")
+
+
+def load_positions(engine, db_path: pathlib.Path, limit: int | None = None) -> int:
+    """**A pozíciók betöltése** a `position` táblába (a `04` §8.2).
+
+    **A FORRÁS:** a mérési SQLite `ais_position` táblája (a vevő
+    már dekódolva adja a lat/lon/speed/course-t) **a
+    `ais_message`-hez csatlakoztatva** (a `received_at` az időbélyeg).
+
+    **A `ts` a GNSS-idő** -> **a `position` a `ts` szerint
+    particionált** -> **a havi particiokat ELOTTE kell hozni**
+    (a `duna.ingest.partitions.ensure_partitions`) -> **a `default`
+    particioba nem irunk** (a TTL azt uritenne).
+
+    **A MMSI a `vessel.mmsi`** -> **a `position.vessel_id` az
+    `vessel.id`** -> **a MMSI->id leképezés a betöltés elején**.
+
+    **A `COPY` A GYORS TOMELEGES BETOLTES** (a `psycopg`
+    `copy()` -> a PostgreSQL `COPY ... FROM STDIN`) -> **a 826 508
+    pozicio egyenkenti `INSERT`-tel ~7 perc, a `COPY`-val
+    masodpercek.**
+
+    **A `COPY` NEM megy direktbe a particionalt `position`
+    tablaba a dedup miatt** (a `PRIMARY KEY (vessel_id, ts)`) ->
+    **egy STAGING tabla** (a `COPY` ide megy) -> **azután egy
+    `INSERT ... SELECT ... ON CONFLICT DO NOTHING`** (a dedup, a
+    04 §6).
+
+    **A fizikailag lehetetlen ertekek** (a lat/lon 91-180 fok, a SOG
+    0-60 m/s felett, a COG/heading 360) -> **`None`** (a 04 §7) ->
+    **a DB `CHECK` constraintjei nem buktathatjak el a batch-et.**
+    """
+    sys.path.insert(0, str(REPO_ROOT / "apps" / "api" / "src"))
+    import sqlalchemy as sa
+
+    from duna.ingest.partitions import ensure_partitions, months_between
+
+    # --- a hajo id-k ---
+    with engine.connect() as conn:
+        vessel_ids = dict(
+            conn.execute(sa.text("SELECT mmsi, id FROM vessel WHERE mmsi IS NOT NULL")).all()
+        )
+    if not vessel_ids:
+        return 0
+
+    con = sqlite3.connect(f"file:{db_path}?immutable=1", uri=True)
+    con.row_factory = sqlite3.Row
+    sql = """
+        SELECT m.mmsi,
+               m.received_at,
+               m.type,
+               p.lat,
+               p.lon,
+               p.speed,
+               p.course,
+               p.heading
+          FROM ais_message m
+          JOIN ais_position p ON p.msg_id = m.id
+         WHERE m.type IN (1, 2, 3)
+    """
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    rows = con.execute(sql).fetchall()
+    con.close()
+    if not rows:
+        return 0
+
+    # --- a particiok (a hónapok a `ts`/`received_at` alapjan) ---
+    stamps = [_parse_timestamp(row["received_at"]) for row in rows]
+    months = months_between(min(stamps), max(stamps))
+
+    written = 0
+    with engine.begin() as conn:
+        created = ensure_partitions(conn, "position", months)
+        if created:
+            print(f"a létrehozott pozíció-partíciók: {len(created)} ({created[0]}…{created[-1]})")
+
+        conn.execute(
+            sa.text(
+                """
+                CREATE TEMP TABLE position_stage (
+                    vessel_id bigint NOT NULL,
+                    ts timestamptz NOT NULL,
+                    msg_type smallint,
+                    sog_mps numeric(5,2),
+                    cog_deg numeric(5,2),
+                    heading_deg numeric(5,2),
+                    lat_e7 integer,
+                    lon_e7 integer
+                ) ON COMMIT DROP
+                """
+            )
+        )
+
+        raw = conn.connection
+        copy_sql = (
+            "COPY position_stage "
+            "(vessel_id, ts, msg_type, sog_mps, cog_deg, heading_deg, lat_e7, lon_e7) "
+            "FROM STDIN"
+        )
+        with raw.cursor().copy(copy_sql) as copy:
+            for row in rows:
+                vessel_id = vessel_ids.get(int(row["mmsi"]))
+                if vessel_id is None:
+                    continue
+                lat = row["lat"]
+                lon = row["lon"]
+                if lat is None or lon is None:
+                    continue
+                if not (-90.0 <= float(lat) <= 90.0) or not (-180.0 <= float(lon) <= 180.0):
+                    continue
+                copy.write_row(
+                    (
+                        vessel_id,
+                        _parse_timestamp(row["received_at"]),
+                        int(row["type"]),
+                        _sanitize(row["speed"], 0.0, 60.0, inclusive_max=False),
+                        _sanitize(row["course"], 0.0, 360.0),
+                        _sanitize(row["heading"], 0.0, 360.0),
+                        round(float(lat) * 10_000_000),
+                        round(float(lon) * 10_000_000),
+                    )
+                )
+                written += 1
+
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO position (vessel_id, ts, msg_type, sog_mps, cog_deg,
+                                     heading_deg, lat_e7, lon_e7, source_kind)
+                SELECT vessel_id, ts, msg_type, sog_mps, cog_deg, heading_deg,
+                       lat_e7, lon_e7, 'ais'
+                  FROM position_stage
+                ON CONFLICT (vessel_id, ts) DO NOTHING
+                """
+            )
+        )
+
+    return written
+
+
+def _sanitize(value, low: float, high: float, inclusive_max: bool = True):
+    """**A fizikailag lehetetlen értékek -> `None`** (a `04` §7).
+
+    **A DB `CHECK` constraintjei** (a `position_sog_check` stb.)
+    **megérlnek** -> **a betöltés nem hagyhatja, hogy egy hibás sor
+    elbuktassa a WHOLE batch-et.**
+    """
+    if value is None:
+        return None
+    number = float(value)
+    ok = low <= number <= high if inclusive_max else low <= number < high
+    return number if ok else None
 
 
 def main() -> int:

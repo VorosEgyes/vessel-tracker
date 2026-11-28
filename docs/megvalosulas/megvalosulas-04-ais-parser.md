@@ -188,8 +188,9 @@ a 6-os/8-as `msg_type` + a `msg_subtype=10`** (a DAC 200), a Class B a
 > |---|---|
 > | **a `duna/ingest/frames.py`** | ✅ **VALÓS KÓD** — a checksum (XOR), a mezőszám, az `n`/`r` ellenőrzés, a `fill_bits` (0–5), a payload ≤ 82 karakter, **a számozott sorok összefűzése** |
 > | **a `duna/ingest/decoder.py`** | ✅ **VALÓS KÓD** — a 6 bites fizikai + standard forma, a pozíció, a statikus, a 21-es |
-> | **a `duna/ingest/models.py`** (a normalizált rekord, a §5) | ⏳ **NEM KÉSZ** |
-> | **a pipeline** (a mérési SQLite → a PostgreSQL, a §8.2) | ⏳ **NEM KÉSZ** |
+> | **a `duna/ingest/models.py`** (a normalizált rekord, a §5) | ✅ **VALÓS KÓD** — a `NormalizedAisMessage` + a `PositionUpsert` (a `02` oszlopait tükrözi) |
+> | **a `duna/ingest/partitions.py`** | ✅ **a havi partíciók létrehozása** — **a `02` §8.1 csak EGY konkrét partíciót definiál** → **a bootstrap hiányzott** → **ez a modul hozza létre a `position_pYYYYMMDD` partíciókat** (a `default`-ba nem írunk: a TTL azt üríti) |
+> | **a pipeline** (a mérési SQLite → a PostgreSQL, a §8.2) | ✅ **a `scripts/dev/load_measurement.py`** → **a hajóvéglegesítés** (a `vessel`/`vessel_i18n`/`vessel_identifier`) + **a pozíciók** (a `position`, **a `COPY`-val: 760 006 pozíció 93 másodperc alatt**) → **a `vessel_last_position` nézet működik** |
 >
 > **A `frames.py` 11 unit tesztje a `bud01` vevő VALÓS mérési
 > NMEA soraira** (a `ais-20261127-0905.db` → `ais_message.nmea`) →

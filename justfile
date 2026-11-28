@@ -212,7 +212,11 @@ test-domain:
 # az ingest réteg 90%-os küszöbe (a 08 §8.1) — az AIS parser
 # (a 04) a legbitebb kód -> a legmagasabb küszöb
 test-ingest:
-    {{UV}} python scripts/ci/pytest_or_skip.py {{TESTS}}/unit {{TESTS}}/property --cov=duna.ingest --cov-report=term-missing --cov-fail-under=90
+    # **A `run_integration.py`** (a `pgserver` + a migracio, ha nincs
+    # `DATABASE_URL`) -> **az ingest modulok DB-resze is merheto**
+    # (a `partitions.py` a `position` particiokat hozza) ->
+    # **a gate MINDIG ervenyes** (a 08 §8.1).
+    {{UV}} python scripts/ci/run_integration.py {{TESTS}}/unit {{TESTS}}/property {{TESTS}}/integration/test_partitions.py --cov=duna.ingest --cov-report=term-missing --cov-fail-under=90
 
 # a migráció-visszafordíthatóság (a 07 §8.1 8. lépése)
 # **A MODELLEK ELLENORZESE** (a 03 §5.1a) -> **a `db/models.py` a
