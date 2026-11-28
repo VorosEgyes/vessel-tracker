@@ -19,6 +19,7 @@
 | **…a funkció megvan, de nincs kódolva** | **6** | **a 2026-11-24-i javítás után mind a 6 kódolva van** → lásd a §3-at |
 | **A 20 NFR** | **20** | **mind a 20 szerepel a tervekben** |
 | **A későbbi release-ek (R2–R5)** | 47 | szándékosan nincs az R1-ben |
+| **A ténylegesen KÓDOLT végpontok** | **21** | a `03` §3.1–3.4 alapján → lásd a §0b-at (a 11 referenciavégponttal együtt) |
 
 **A verdict: a scope rendben van.** Az R1 minden funkciója megvan valahol —
 **a dokumentáció egyetlen hiánya: a tervek nem hivatkozzák az F-kódokra,**
@@ -26,12 +27,12 @@
 
 ---
 
-## 0b. A ténylegesen KÓDOLT F-kódok (2026-11-26)
+## 0b. A ténylegesen KÓDOLT F-kódok (2026-11-28)
 
 **A fenti táblázat a TERVEKBEN való említést számolja** → **nem a
 kódban lévő implementációt.** → **ez a blokk a valós kódállapot.**
 
-**A kész R1-es végpontok (9) → az általuk lefedett F-kódok:**
+**A kész R1-es végpontok (21) → az általuk lefedett F-kódok:**
 
 | A végpont | A lefedett F-kódok | A státusz |
 |---|---|---|
@@ -44,22 +45,41 @@ kódban lévő implementációt.** → **ez a blokk a valós kódállapot.**
 | `GET /api/v1/vessels/{id}/data-origin` | **F-DET-15** | ✅ |
 | `GET /api/v1/search` | **F-SRCH-01…F-SRCH-07** | ✅ |
 | `GET /api/v1/content/{key}` | **F-NF-01…F-NF-15** | ✅ |
+| `GET /api/v1/ports` | **F-CNT-02** (a kikötők listája) | ✅ |
+| `GET /api/v1/ports/{id}` | **F-CNT-02** (a kikötő adatlapja) | ✅ |
+| `GET /api/v1/locks` · `/locks/{id}` | **F-CNT-03** (a zsilipek) | ✅ |
+| `GET /api/v1/waterways` | **a vízutak** (a `03` §3.3) | ✅ |
+| `GET /api/v1/river-sections` | **a folyószakaszok** (a `03` §3.3) | ✅ |
+| `GET /api/v1/basins` | **a balatoni medencék** (a `03` §3.3) | ✅ |
+| `GET /api/v1/vessel-types` | **a hajótípusok** (a `03` §3.3) | ✅ |
+| `GET /api/v1/operators` | **F-CAT-11** (az üzemeltetők) | ✅ |
+| `GET /api/v1/routes` | **a útvonalak** (a `03` §3.3) | ✅ |
+| `GET /api/v1/cargo-types` | **a rakománytípusok** (a `03` §3.3) | ✅ |
 | a `duna/ingest/decoder.py` | **a 6 bites dekódolás** (a `04` §10) — **egy unit + property tesztekkel** | ✅ |
+| a `duna/ingest/frames.py` | **a frame-validáció** (a `04` §3) — **a valós `bud01` sorokkal** | ✅ |
+| a `duna/ingest/models.py` | **a normalizált rekord** (a `04` §5) | ✅ |
+| a `duna/ingest/partitions.py` | **a havi partíciók létrehozása** (a `02` §8.1) | ✅ |
+| a `scripts/dev/load_measurement.py` | **a mérési adat betöltése** (a `04` §8.2) — **a hajóvéglegesítés + a pozíciók** | ✅ |
 | a `duna/domain/verification.py` | **a bizonyossági szint számítása** (a `05` §8.2) | ✅ |
 
 **A domain-logika (a `duna/domain/`):** a `verification` (a badge),
 a `text` (a kereső normalizálás), a `slug` (a mély link).
 
+**Az alkalmazásréteg (a `duna/db/`, `api/`, `schemas/`, `repositories/`,
+`services/`):** **a router → service → repository lánc** (a `03` §5.1)
+→ **a `models-check`** (a modell–séma drift-ellenőrzés).
+
 **A NEM kódolt R1-es funkciók (a `03` §3.1–3.4 alapján):**
 
 | A funkció | A terület |
 |---|---|
-| a referenciatáblák végpontjai (a kikötők, a zsilipek, a folyószakaszok, a medencék, a hajótípusok, az üzemeltetők, az útvonalak, a rakománytípusok) | a `03` §3.3 |
 | a `GET /api/v1/search/suggest` (a F-SRCH-08) | **R3** |
-| a `moving` szűrő (a `03` §3.1) | a `vessel.last_position_ts` kell |
+| a `moving` szűrő (a `03` §3.1) | **a `position` most már betöltve** → a `vessel.last_position_ts` kell (a denormalizált mező) |
 | a `season` szűrő (a `03` §3.1) | a `vessel_service_period` kell |
 | a szerkesztői felület (a `06`) | az `/api/admin/v1/` |
-| a blog/tartalom végpontok (a `03` §3.4) | a `content_text` kész, a router még nem |
+| a blog/tartalom végpontok (a `03` §3.4) | a `content_text` kész, a router csak a kulcsot adja |
+| **a hajóadatlap frontend oldala** (a `05`) | a `apps/web/` a katalóguslista megvan → **a hajóadatlap még nem** |
+| a „hol van" szöveges hely (a F-DET-06) | a `river_section` illesztés kell (a `river_km` a mérésben üres) |
 
 **A státusz-hivatkozás:** az [`megvalosulas/ALLAPOT.md`](megvalosulas/ALLAPOT.md).
 

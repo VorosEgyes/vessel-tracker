@@ -1,11 +1,12 @@
 # Implementációs terv – 08: teszt-stratégia
 
-**Verzió:** 0.3 (2026-11-24 — **a mérhető rész élesedett**: az
-`apps/api/src/duna/domain/verification.py` + a 20 unit teszt → **a
-`just test-unit` zöld**, a `just test-domain` → **100% coverage** a
-`domain/`-en (a 90%-os küszöbön), a `just test` → 98% (a 85%-os
-küszöbön); **a `just ddl-validate` → a 22 füstteszt-pont zöld**; **a
-`just check` (a teljes minőségi kapu) → EXIT 0**. A §2.1a a jelenlegi
+**Verzió:** 0.4 (2026-11-28 — **a teljes mérhető rész élesedett**:
+**122 unit + 5 property + 51 integrációs** teszt → **a `just check`
+EXIT 0** → **a domain 100%**, az **ingest 92%**, az alkalmazásréteg
+**89%** coverage → **a `duna/ingest/` réteg** (a frame-validáció, a
+normalizált rekord, a havi partíciók) → **a `scripts/dev/`** (a
+mérési betöltés + az előnézet) → **a `run_integration.py`** (a
+`pgserver` a DB nélküli fejlesztői kapuhoz). A §2.1a a jelenlegi
 állapotot mutatja. A korábbi v0.1 (terv-draft, swarm review előtt) a
 törzse.)
 **Dátum:** 2026-11-23
@@ -97,7 +98,7 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
 | **unit** | ~400 | **50** | a `duna/domain/verification.py` (a bizonyossági szint, 20 teszt) + a `duna/ingest/decoder.py` (a 6 bites kódolás, a pozíció, a statikus és a 21-es üzenet, 30 teszt) → **a `domain/` és az `ingest/` réteg is 100%-os coverage** |
 | property | ~40 | **5** | a `hypothesis` a dev-függőségek között van → **a 6 bites round-trip teszt** (a GPSD armorra) + **a `pyais` referencia-összevetés** (a `04` §11 Q6) |
 | komponens | ~80 | **0** | a service-ek még nincsenek |
-| integrációs | ~60 | **32** | **a `GET /api/v1/vessels` valódi PostgreSQL-lel** (a `03` §3.1) → **a `just test-integration`** → **a `DATABASE_URL` hiányában kihagyja magát** |
+| integrációs | ~60 | **51** | **a `GET /api/v1/vessels` valódi PostgreSQL-lel** (a `03` §3.1) → **a `just test-integration`** → **a `DATABASE_URL` hiányában kihagyja magát** |
 | e2e | ~25 | **0** | a frontend még nincs |
 | teljesítmény | ~6 | **0** | a `locust` a dev-függőségek között van |
 | regresszió | 1 | **0** | a mérési adat megvan, a replay még nincs |
@@ -111,7 +112,7 @@ findingje)** — **a `07` §3.1 `justfile`-ja a kanonikus**:
   (a `just test-app`, a `just check-release`) → **a `08` §2.1a
   „a `just test` → 98%" sora a mérhető részre vonatkozik**;
 - a `just test-integration` → **32 teszt** valódi PostgreSQL-lel →
-  **az alkalmazásréteg 91%-os coverage-ja** (a 70%-os küszöbön —
+  **az alkalmazásréteg 89%-os coverage-ja** (a 70%-os küszöbön —
   a rétegenkénti gate, a §8.1);
 - a `just ddl-validate` → **a 22 füstteszt-pont zöld** (a `02` §12);
 - a **`just check` → EXIT 0** (a teljes minőségi kapu).

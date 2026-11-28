@@ -1,10 +1,12 @@
 # Implementációs terv – 03: API-specifikáció (OpenAPI v1)
 
-**Verzió:** 0.7 (a **service réteg bevezetve**: a router → service →
-repository lánc a §5.1 szerint, a 4 `duna/services/` modul; **a
-`GET /api/v1/content/{key}` a fallback-lánccal** (§6.3); **a
-`duna/domain/slug.py`** a slug-generálással; **9 R1-es végpont** a
-valós kód, a `just check` zöld, a 32 integrációs teszt valódi
+**Verzió:** 0.8 (a **21 R1-es végpont valós kód**: a katalóguslista, a
+hajóadatlap + 5 al-végpont, a globális kereső, a content-fallback, **a
+11 referenciavégpont**; **a service réteg** a §5.1 szerint; **a
+`duna/domain/slug.py`**; **a `duna/ingest/` réteg** (a frame-validáció,
+a normalizált rekord, a havi partíciók); **a `scripts/dev/`** (a
+mérési betöltés + az előnézet); **a `just check` zöld**, a domain
+100%, az ingest 92%, az alkalmazásréteg 89%, **a 51 integrációs teszt valódi
 PostgreSQL-lel)
 **Dátum:** 2026-11-22
 **A pinnelt séma:** `megvalosulas-02-adatbazis-ddl.md` **v1.3** (71 tábla,
@@ -333,12 +335,17 @@ jön).
 > | A rész | Az állapot |
 > |---|---|
 > | a `GET /api/v1/vessels` | ✅ **VALÓS KÓD** (`duna/api/v1/vessel.py`) |
-> | a `duna/db/models.py` | ✅ **11 ORM modell** (a `vessel`, a `vessel_i18n`, a `vessel_type`(+`_i18n`), az `operator`(+`_i18n`), a `country`, a `port`, a `vessel_identifier`, a `language`) |
+> | a `duna/db/models.py` | ✅ **20 ORM modell** (a `vessel`, a `vessel_i18n`, a `vessel_type`(+`_i18n`), az `operator`(+`_i18n`), a `country`, a `port`, a `vessel_identifier`, a `language`) |
 > | a `duna/repositories/vessel_repo.py` | ✅ **a JOIN-ek + a szűrők + a lapozás** |
 > | a `duna/schemas/common.py` | ✅ **a `Page[T]`/`Data[T]`** (a §5.5 — két burkoló) |
 > | a `duna/main.py` | ✅ **a FastAPI app + a CORS + a `/health` + a lifespan** |
-> | az integrációs teszt | ✅ **13 teszt**, valódi PostgreSQL-lel |
-> | az alkalmazásréteg-coverage | ✅ **91%** (a CI-ben, a `DATABASE_URL`-lel) |
+> | az integrációs teszt | ✅ **51 teszt**, valódi PostgreSQL-lel |
+> | az alkalmazásréteg-coverage | ✅ **89%** (a CI-ben, a `DATABASE_URL`-lel) |
+> | **a `duna/ingest/frames.py`** | ✅ **a frame-validáció** (a `04` §3) |
+> | **a `duna/ingest/models.py`** | ✅ **a normalizált rekord** (a `04` §5) |
+> | **a `duna/ingest/partitions.py`** | ✅ **a havi partíciók létrehozása** (a `02` §8.1) |
+> | **a `scripts/dev/load_measurement.py`** | ✅ **a mérési adat betöltése** (a `04` §8.2) — a hajóvéglegesítés + **a pozíciók** (a `COPY`-val) |
+> | **a `scripts/dev/preview.py`** | ✅ **a fejlesztői előnézet** (a DB + a betöltés + az API + a frontend) |
 > | **a `models-check`** (a `just models-check`) | ✅ **a modell–séma drift-ellenőrzés** (a §5.1a) — **a kézzel írt modellek elcsúszását a CI kapja el** |
 > | a `GET /api/v1/vessels/{id}` (a hajóadatlap) | ✅ **VALÓS KÓD** (`duna/repositories/vessel_detail_repo.py`) |
 > | a `GET /api/v1/vessels/{id}/aliases` | ✅ **VALÓS KÓD** (a `vessel_alias` — **a LEZÁRTak**, a 03 §3.1) |

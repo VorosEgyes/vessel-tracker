@@ -118,12 +118,30 @@ apps/api/src/duna/
 ├── domain/                ← a tiszta üzleti logika (verification, text, slug)
 └── ingest/
     ├── decoder.py         ← a 6 bites dekódolás (a fizikai + a standard forma)
-    └── frames.py          ← az NMEA frame-validáció (a 04 §3) — a 2026-11-27
+    ├── frames.py          ← az NMEA frame-validáció (a 04 §3)
+    ├── models.py          ← a normalizált rekord (a 04 §5)
+    └── partitions.py      ← a havi partíciók létrehozása (a 02 §8.1)
 ```
 
 **A rétegsorrend (a `03` §5.1):** `router → service → repository → DB`.
 Az Astro alkalmazás az `apps/web/`, a generált kliens a
 `packages/api-client/`, a generált séma a `docs/api/v1/openapi.json` alatt van.
+
+**A `scripts/` (a repó gyökerében):**
+
+```
+scripts/
+├── ci/                   ← a CI-eszközök
+│   ├── pytest_or_skip.py ← a "nem gyűjtött teszt" eset elnyelése
+│   ├── check_models.py   ← a modell–séma drift-ellenőrzés
+│   ├── check_reversible.py ← a migráció-visszafordítás
+│   ├── run_integration.py ← a pgserver a DB nélküli fejlesztői kapuhoz
+│   └── build_frontend.py ← a pgserver + az API a statikus buildhez
+├── dev/                  ← a helyi fejlesztői eszközök
+│   ├── load_measurement.py ← a mérési SQLite → a PostgreSQL
+│   └── preview.py        ← az egész előnézet egy parancsban
+└── ais-receiver/         ← a Pi oldali scriptek
+```
 
 ### 2b.2 A megvalósított API-végpontok
 
@@ -178,9 +196,9 @@ tartozik; a kért nyelv után angol, majd magyar szöveg következik.
 | Ellenőrzés | A legutóbbi helyi eredmény (2026-11-27) |
 |---|---|
 | **a `just check`** | ✅ **EXIT 0** — **a teljes minőségi kapu egy parancsban** |
-| **a Python `pytest`** | ✅ **109 unit + 5 property** (a `frames.py` 11 új tesztje) |
-| **az integrációs tesztek** | ✅ **48 sikeres** valódi PostgreSQL-lel (a `pgserver`) |
-| **a coverage-kapuk** | ✅ a domain **100%** · az ingest **90,05%** · az alkalmazásréteg **88,92%** |
+| **a Python `pytest`** | ✅ **122 unit + 5 property** (a `frames.py`, a `partitions.py` és a `models.py` tesztjei) |
+| **az integrációs tesztek** | ✅ **51 sikeres** valódi PostgreSQL-lel (a `pgserver`) |
+| **a coverage-kapuk** | ✅ a domain **100%** · az ingest **92,00%** · az alkalmazásréteg **88,92%** |
 | **a `models-check`** | ✅ a modellek megfelelnek a sémának (20 tábla, 152 oszlop) |
 | **a `ddl-validate` / a `ddl-diff`** | ✅ a séma lefut, a generált fájl egyezik a `02` tervvel |
 | **a `test-reversible`** | ✅ a migráció visszafordítható (72 tábla → 1 → 72) |
